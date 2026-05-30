@@ -1,0 +1,30 @@
+# OS metadata
+.DS_Store
+
+# IDE metadata
+.idea/
+.vscode/
+
+# Java / Spring
+target/
+build/
+.gradle/
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log

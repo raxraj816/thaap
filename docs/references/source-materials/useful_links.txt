@@ -1,0 +1,6 @@
+https://stripe.com/in/radar
+https://blog.bytebytego.com/p/how-stripe-detects-fraudulent-transactions
+https://corepay.net/articles/what-is-brighterion-transaction-risk-management-by-mastercard/
+https://stripe.com/in/radar
+https://www.mastercard.com/content/dam/mccom/shared/business/b2b/reports/advanced-ai-technology-datasheet.pdf
+https://stripe.dev/blog/how-we-built-it-stripe-radar

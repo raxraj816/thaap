@@ -1,0 +1,32 @@
+flowchart LR
+  merchant["Merchant Backend / Client"]
+  dashboard["Analyst Dashboard UI"]
+  api["payments-api\nSpring Boot modular monolith"]
+  postgres[("PostgreSQL\nsource of truth")]
+  redis[("Redis\nvelocity, idempotency cache, rate limits")]
+  simulator["Processor Simulator\nbehind ProcessorAdapter"]
+  webhook["Merchant Webhook Endpoint"]
+
+  merchant -->|"REST APIs\nIdempotency-Key"| api
+  dashboard -->|"admin/internal APIs"| api
+  api -->|"transactional state\naudit, outbox, ledger"| postgres
+  api -->|"velocity counters\ncache and rate limits"| redis
+  api -->|"auth, capture, refund simulation"| simulator
+  api -->|"signed webhook deliveries"| webhook
+
+  subgraph later["Later phases"]
+    kafka["Kafka"]
+    analytics["analytics-worker"]
+    clickhouse[("ClickHouse")]
+    model["model-serving-service"]
+    neo4j[("Neo4j")]
+    agents["fraud-intelligence-agent-service"]
+  end
+
+  api -. "outbox events" .-> kafka
+  kafka -.-> analytics
+  analytics -.-> clickhouse
+  api -. "bounded score call" .-> model
+  kafka -. "graph ingestion" .-> neo4j
+  clickhouse -. "offline tools" .-> agents
+  neo4j -. "offline tools" .-> agents
