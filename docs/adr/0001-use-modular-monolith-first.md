@@ -9,7 +9,7 @@ The platform needs clear payment, fraud, ledger, webhook, review, and audit boun
 
 ## Decision
 
-Start with `payments-api` as a Java 21 and Spring Boot 3 modular monolith. Keep module boundaries explicit in code so payment, processor, fraud, rules, review, ledger, webhook, and audit responsibilities can split later if latency, scale, ownership, or operational risk justifies it.
+Start with `payments-api` as a Java 25 and Spring Boot 4.0.6 modular monolith. Keep module boundaries explicit in code so payment, processor, fraud, rules, review, ledger, webhook, and audit responsibilities can split later if latency, scale, ownership, or operational risk justifies it.
 
 ## Consequences
 

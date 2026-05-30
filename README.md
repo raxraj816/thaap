@@ -8,21 +8,23 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Day 1 is complete at repository-foundation level:
+Day 2 is complete at local-infrastructure foundation level:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
 - ADR folder and initial architecture decisions are in place.
 - Architecture diagram is in place.
 - Glossary is in place.
-
-No runnable application has been scaffolded yet. The first runnable backend starts in the upcoming Spring Boot foundation work.
+- Docker Compose starts PostgreSQL and Redis.
+- `apps/payments-api` is scaffolded as a Java 25 / Spring Boot 4.0.6 service.
+- Actuator health, liveness, and readiness endpoints are available.
+- The local Spring profile connects to PostgreSQL and Redis.
 
 ## Repository Layout
 
 ```text
 apps/
-  payments-api/                 Java 21 + Spring Boot backend, primary V1 deployable
+  payments-api/                 Java 25 + Spring Boot backend, primary V1 deployable
   analyst-dashboard-ui/         React analyst console, added after backend core flows
 services/
   model-serving-service/        Python FastAPI model scoring service, later phase
@@ -69,11 +71,18 @@ See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the full glossary.
 
 ## Local Development
 
-Local infrastructure and runnable services start on Day 2 and Day 3:
+Local infrastructure and the first runnable service are now available:
 
-1. Add Docker Compose for PostgreSQL and Redis.
-2. Scaffold `apps/payments-api`.
-3. Connect Spring Boot to PostgreSQL.
-4. Add health checks, Flyway, validation, and request IDs.
+```bash
+scripts/local-infra-up.sh
+mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository test
+mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository spring-boot:run
+```
 
-Until then, validation is documentation and structure verification.
+Then verify:
+
+```bash
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/actuator/health/liveness
+curl http://localhost:8080/actuator/health/readiness
+```

@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: payments-api
+  profiles:
+    default: local
+  datasource:
+    url: jdbc:postgresql://${THAAP_POSTGRES_HOST:localhost}:${THAAP_POSTGRES_PORT:5432}/${THAAP_POSTGRES_DB:thaap_payments}
+    username: ${THAAP_POSTGRES_USER:thaap}
+    password: ${THAAP_POSTGRES_PASSWORD:thaap}
+    hikari:
+      pool-name: thaap-payments-api
+      maximum-pool-size: ${THAAP_DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${THAAP_DB_POOL_MIN_IDLE:2}
+      connection-timeout: 3000
+      validation-timeout: 1000
+  data:
+    redis:
+      host: ${THAAP_REDIS_HOST:localhost}
+      port: ${THAAP_REDIS_PORT:6379}
+      timeout: 1s
+      connect-timeout: 1s
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  sql:
+    init:
+      mode: never
+
+server:
+  port: ${THAAP_PAYMENTS_API_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: payments-api
+    description: THAAP primary payment and fraud simulation API
+    version: 0.0.1-SNAPSHOT

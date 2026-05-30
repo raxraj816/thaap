@@ -6,6 +6,7 @@
 .vscode/
 
 # Java / Spring
+.m2/
 target/
 build/
 .gradle/

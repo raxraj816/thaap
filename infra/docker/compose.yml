@@ -1,0 +1,45 @@
+name: thaap-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: thaap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${THAAP_POSTGRES_DB:-thaap_payments}
+      POSTGRES_USER: ${THAAP_POSTGRES_USER:-thaap}
+      POSTGRES_PASSWORD: ${THAAP_POSTGRES_PASSWORD:-thaap}
+    ports:
+      - "${THAAP_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - thaap-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: thaap-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${THAAP_REDIS_PORT:-6379}:6379"
+    volumes:
+      - thaap-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  thaap-postgres-data:
+  thaap-redis-data:

@@ -1,11 +1,29 @@
 # Scripts
 
-Repeatable developer commands and data-generation utilities live here.
+Developer utilities for repeatable local workflows.
 
-Examples planned later:
+## Local Infrastructure
 
-- local service bootstrap
-- synthetic data generation
-- replay jobs
-- migration checks
-- demo scripts
+Start PostgreSQL and Redis:
+
+```bash
+scripts/local-infra-up.sh
+```
+
+Check container status:
+
+```bash
+scripts/local-infra-ps.sh
+```
+
+Stop local infrastructure:
+
+```bash
+scripts/local-infra-down.sh
+```
+
+Reset the local PostgreSQL password to the documented default:
+
+```bash
+scripts/local-postgres-reset-password.sh
+```

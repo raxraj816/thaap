@@ -116,7 +116,7 @@ Start with a modular monolith and split later only when latency, scale, ownershi
 Initial deployables:
 
 - `payments-api`
-  - Java 21, Spring Boot 3.
+  - Java 25, Spring Boot 4.0.6.
   - Owns payment lifecycle, fraud orchestration, rules, review, chargebacks, ledger, idempotency, webhooks, and audit logs in early phases.
 
 - `analyst-dashboard-ui`
@@ -1401,7 +1401,7 @@ Deliver:
 
 Learn:
 
-- Spring Boot 3 conventions.
+- Spring Boot 4 conventions.
 - API error handling.
 
 ### Day 4: Database Migrations

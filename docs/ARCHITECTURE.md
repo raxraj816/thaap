@@ -112,8 +112,8 @@ Responsibilities:
 
 Technology:
 
-- Java 21
-- Spring Boot 3
+- Java 25
+- Spring Boot 4.0.6
 - Spring Web
 - Spring Validation
 - Spring Data JPA

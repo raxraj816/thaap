@@ -2,14 +2,13 @@
 
 Primary V1 backend deployable.
 
-Planned stack:
+Implemented Day 2 stack:
 
-- Java 21
-- Spring Boot 3
+- Java 25
+- Spring Boot 4.0.6
 - Spring Web
 - Spring Validation
 - Spring Data JPA
-- Flyway
 - Spring Actuator
 - PostgreSQL
 - Redis
@@ -29,4 +28,24 @@ Responsibilities:
 - audit logs
 - outbox events
 
-This directory is intentionally a placeholder on Day 1. The Spring Boot scaffold begins in the foundation implementation work.
+## Local Run
+
+From the repository root:
+
+```bash
+scripts/local-infra-up.sh
+mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository test
+mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository spring-boot:run
+```
+
+Health endpoints:
+
+```bash
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/actuator/health/liveness
+curl http://localhost:8080/actuator/health/readiness
+```
+
+The default `local` profile connects to PostgreSQL and Redis from
+`infra/docker/compose.yml`. The `test` profile uses an in-memory H2 database
+and disables Redis health so unit-level checks do not require Docker.
