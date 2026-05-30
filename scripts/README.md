@@ -27,3 +27,11 @@ Reset the local PostgreSQL password to the documented default:
 ```bash
 scripts/local-postgres-reset-password.sh
 ```
+
+## payments-api
+
+Run the Spring Boot API from the repository root:
+
+```bash
+scripts/payments-api-run.sh
+```

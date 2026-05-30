@@ -35,7 +35,7 @@ From the repository root:
 ```bash
 scripts/local-infra-up.sh
 mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository test
-mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository spring-boot:run
+scripts/payments-api-run.sh
 ```
 
 Health endpoints:
