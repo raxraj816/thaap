@@ -62,6 +62,41 @@ Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
 
+## Request IDs And Error Contract
+
+Every API response includes `X-Request-Id`. Clients can provide one for
+correlation, or the API generates one:
+
+```bash
+curl -i -X POST http://localhost:8080/customers \
+  -H 'X-Api-Key: thaap_test_...' \
+  -H 'X-Request-Id: req_demo_001' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"not-an-email"}'
+```
+
+Representative error response:
+
+```json
+{
+  "requestId": "req_demo_001",
+  "timestamp": "2026-06-01T10:15:30Z",
+  "status": 400,
+  "error": "validation_failed",
+  "message": "Request validation failed",
+  "path": "/customers",
+  "fieldErrors": [
+    {
+      "field": "email",
+      "message": "must be a well-formed email address"
+    }
+  ]
+}
+```
+
+The same shape is used for 400, 401, 404, 409, and 500-class failures. Request
+IDs are also placed in logging MDC under `requestId`.
+
 ## Local Run
 
 From the repository root:

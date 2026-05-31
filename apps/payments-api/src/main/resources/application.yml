@@ -33,6 +33,10 @@ server:
   port: ${THAAP_PAYMENTS_API_PORT:8080}
   shutdown: graceful
 
+logging:
+  pattern:
+    level: "%5p [requestId:%X{requestId:-}]"
+
 management:
   endpoints:
     web:
