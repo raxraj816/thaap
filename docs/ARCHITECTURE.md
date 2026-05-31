@@ -16,6 +16,7 @@ For deeper architecture detail, use the architecture pack:
 
 The architecture must support:
 
+- merchant-based multi-tenancy
 - realistic card payment processing simulation
 - deterministic real-time fraud decisions
 - auditable state transitions
@@ -64,6 +65,7 @@ This gives us a fast local learning loop while preserving service boundaries in 
 ```text
 Merchant / Client
   -> payments-api
+      -> merchant tenant resolution from X-Api-Key
       -> PostgreSQL
       -> Redis
       -> processor simulator
@@ -97,7 +99,9 @@ Primary backend for V1.
 
 Responsibilities:
 
-- merchant/customer/payment method APIs
+- merchant admin setup APIs
+- tenant context resolution
+- customer/payment method APIs scoped by merchant
 - PaymentIntent and PaymentAttempt lifecycle
 - idempotency
 - processor simulator orchestration
@@ -110,6 +114,14 @@ Responsibilities:
 - webhook endpoint and delivery records
 - audit logging
 
+Tenant model:
+
+- `Merchant` is the V1 tenant root.
+- Merchant-facing runtime APIs resolve `MerchantContext` from `X-Api-Key`.
+- Shared PostgreSQL schema uses `merchant_id` as the tenant discriminator.
+- Idempotency is scoped by `(merchant_id, key)`.
+- Events, feature snapshots, model predictions, analytics rows, and graph records must carry or derive `merchant_id`.
+
 Technology:
 
 - Java 25
@@ -117,7 +129,7 @@ Technology:
 - Spring Web
 - Spring Validation
 - Spring Data JPA
-- Flyway
+- Flyway, planned before durable schema evolution
 - Spring Actuator
 - PostgreSQL
 - Redis

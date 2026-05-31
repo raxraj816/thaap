@@ -4,8 +4,14 @@ This glossary defines canonical THAAP platform terms. If a term conflicts with a
 
 ## Payment Terms
 
+`Merchant`
+: V1 tenant root. Merchant-owned payment, fraud, webhook, ledger, review, analytics, graph, and ML data must carry or derive this tenant context.
+
+`MerchantContext`
+: Runtime tenant context resolved from merchant API credentials such as `X-Api-Key`. Merchant-facing APIs use it for authorization and query scoping instead of trusting request-body `merchantId`.
+
 `PaymentIntent`
-: Merchant-facing payment container. Tracks the desired payment amount, currency, customer, capture method, and lifecycle status.
+: Merchant-facing payment container. Tracks the desired payment amount, currency, customer, capture method, and lifecycle status. See [PaymentIntent From First Principles](learning/concepts/PAYMENT_INTENT.md).
 
 `PaymentAttempt`
 : Concrete attempt to confirm and score a PaymentIntent with a specific payment method. This is the fraud scoring, authorization, and audit unit.
@@ -29,10 +35,10 @@ This glossary defines canonical THAAP platform terms. If a term conflicts with a
 : Interface between payment orchestration and processor behavior. V1 uses a deterministic simulator behind this interface.
 
 `Webhook`
-: Merchant integration callback that reports payment, fraud, refund, chargeback, review, and delivery events.
+: Merchant integration callback that reports payment, fraud, refund, chargeback, review, and delivery events. See [Webhooks From First Principles](learning/concepts/WEBHOOKS.md).
 
 `Idempotency Key`
-: Client-provided key that lets mutating API retries return the original response without duplicating side effects.
+: Client-provided key that lets mutating API retries return the original response without duplicating side effects. In THAAP, idempotency keys are scoped by merchant. See [Idempotency From First Principles](learning/concepts/IDEMPOTENCY.md).
 
 `LedgerEntry`
 : Debit or credit line in the double-entry ledger.
@@ -83,6 +89,9 @@ This glossary defines canonical THAAP platform terms. If a term conflicts with a
 
 ## Security Terms
 
+`Tenant Isolation`
+: Guarantee that one merchant cannot read, mutate, replay, deliver webhooks for, train merchant-scoped features from, or operate on another merchant's data. See [Merchant Tenant Isolation From First Principles](learning/concepts/MERCHANT_TENANT_ISOLATION.md).
+
 `PAN`
 : Primary account number. In V1, raw PAN may appear only as transient test input and must never be persisted.
 
@@ -90,7 +99,7 @@ This glossary defines canonical THAAP platform terms. If a term conflicts with a
 : Card verification value. CVV must never be persisted.
 
 `Token`
-: Safe simulated payment method reference generated from transient test card input.
+: Safe simulated payment method reference generated from transient test card input. See [Payment Method Tokenization From First Principles](learning/concepts/PAYMENT_METHOD_TOKENIZATION.md).
 
 `Fingerprint`
 : Stable simulated card identifier used for duplicate detection and velocity features. It must not reveal raw PAN.

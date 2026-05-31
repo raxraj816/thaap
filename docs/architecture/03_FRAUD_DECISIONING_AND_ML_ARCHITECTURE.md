@@ -84,6 +84,12 @@ Persistence:
 - `RuleExecutionResult`
 - `ModelPrediction`, later
 
+Tenant requirement:
+
+- every fraud decision, feature snapshot, model prediction, rule result, replay row, and investigation artifact must carry or derive `merchant_id`
+- merchant-specific features must not be used across tenants unless explicitly transformed into global/anonymized aggregate signals
+- model evaluation must report merchant and segment impact before promotion
+
 ## 4. Decision Ordering
 
 Rule behavior order:
@@ -572,6 +578,7 @@ ReplayEngine inputs:
 
 ReplayEngine rules:
 
+- preserve merchant tenant scope
 - do not read current Redis counters
 - do not recompute features from current state
 - use only persisted decision-time snapshots
@@ -613,6 +620,7 @@ Required reports:
 - threshold sweep
 - review capacity simulation
 - merchant segment impact
+- per-merchant regression report for material merchants or synthetic tenant segments
 
 Threshold policy:
 

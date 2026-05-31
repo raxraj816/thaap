@@ -10,6 +10,7 @@ For implementation decisions, follow `docs/IMPLEMENTATION_MASTER_PLAN.md`.
 
 The data architecture must support:
 
+- merchant-tenant isolation
 - durable payment state
 - auditable fraud decisions
 - idempotent request replay
@@ -25,7 +26,17 @@ Core principle:
 
 ```text
 PostgreSQL is the transactional source of truth.
+Merchant-owned data is scoped by merchant_id in a shared schema.
 ```
+
+V1 uses a shared database and shared schema. `merchant_id` is the tenant discriminator for merchant-owned rows.
+
+Every table that stores merchant-owned state must either:
+
+- include `merchant_id` directly, or
+- be reachable only through a parent row that includes `merchant_id`.
+
+Runtime queries must use tenant-scoped lookup paths. Database row-level security is deferred for V1, but the schema should not block adding it later.
 
 ## 2. Storage Responsibilities
 
@@ -93,6 +104,8 @@ Owns:
 - model prediction logs
 - backtesting tables
 
+All merchant-derived analytics rows must include `merchant_id` unless the dataset is explicitly global/anonymized.
+
 ### 2.5 Neo4j
 
 Added for graph intelligence.
@@ -104,6 +117,8 @@ Owns:
 - fraud ring exploration
 - graph features
 
+Graph nodes and relationships derived from merchant data must carry `merchant_id` or an explicit global/anonymized scope marker so graph features cannot leak tenant data accidentally.
+
 ### 2.6 Object Storage
 
 Added for ML/data artifacts.
@@ -114,6 +129,8 @@ Owns:
 - training datasets
 - model artifacts
 - backtesting outputs
+
+Training and backtesting datasets must include `merchant_id` for segmentation, leakage checks, and tenant-scoped evaluation.
 
 ### 2.7 MLflow
 
@@ -134,6 +151,7 @@ Owns:
 
 The durable transaction should include:
 
+- merchant-scoped idempotency lookup/reservation
 - PaymentAttempt creation
 - FraudDecision persistence
 - FeatureSnapshot persistence
@@ -212,6 +230,30 @@ Rules:
 - same key + different hash returns error
 - completed idempotency records are replayable until expiry
 - in-progress records require timeout handling
+- concurrent duplicate requests require locking or unique-constraint conflict handling
+
+## 4.1 Tenant-Scoped Data Rule
+
+Merchant-owned transactional tables must include `merchant_id` directly for hot-path access and indexing whenever practical.
+
+Minimum direct `merchant_id` tables:
+
+- customers
+- payment methods
+- payment intents
+- idempotency records
+- webhook endpoints
+- webhook deliveries
+- fraud decisions
+- fraud rules
+- manual review cases
+- ledger entries or ledger transaction groups
+- outbox events
+- audit logs
+- feature snapshots
+- model prediction logs
+
+Do not add merchant-facing repository methods that load by object ID alone. Use `(id, merchant_id)` or a parent join that proves tenant ownership.
 
 ## 5. Ledger Architecture
 

@@ -109,7 +109,7 @@ Implementation can start with a smaller enum as long as PaymentIntent states rem
 
 ```text
 POST /customers
-  -> validate merchant context
+  -> resolve MerchantContext from X-Api-Key
   -> normalize email/phone
   -> hash email/phone where stored as identity signals
   -> create Customer
@@ -126,7 +126,8 @@ Security:
 
 ```text
 POST /payment_methods
-  -> validate customer
+  -> resolve MerchantContext from X-Api-Key
+  -> validate customer belongs to merchant
   -> accept test card details
   -> derive token
   -> derive fingerprint
@@ -149,9 +150,10 @@ Important:
 
 ```text
 POST /payment_intents
+  -> resolve MerchantContext from X-Api-Key
   -> require idempotency key
-  -> validate merchant
-  -> validate customer
+  -> validate merchant is active
+  -> validate customer belongs to merchant
   -> validate amount and currency
   -> validate capture method
   -> create PaymentIntent
@@ -178,9 +180,10 @@ Validation:
 
 ```text
 POST /payment_intents/{id}/confirm
+  -> resolve MerchantContext from X-Api-Key
   -> require idempotency key
-  -> load idempotency record or reserve key
-  -> load PaymentIntent with lock
+  -> load or reserve merchant-scoped idempotency record
+  -> load PaymentIntent by id + merchant with lock
   -> validate status is confirmable
   -> create PaymentAttempt
   -> set intent to REQUIRES_FRAUD_CHECK
@@ -426,6 +429,7 @@ All mutating payment APIs require an idempotency key.
 
 ```text
 request arrives
+  -> resolve MerchantContext from X-Api-Key
   -> compute request hash from method + path + normalized body
   -> look up merchant + key
   -> if no key exists, reserve key as IN_PROGRESS
@@ -443,10 +447,12 @@ Failure cases:
 
 ## 15. Webhook Flow
 
+For the learning-first explanation of why webhooks exist, see [Webhooks From First Principles](../learning/concepts/WEBHOOKS.md).
+
 ```text
 domain event created
   -> outbox row written
-  -> matching webhook endpoints selected
+  -> matching webhook endpoints selected for merchant
   -> WebhookDelivery rows created
   -> worker attempts delivery
   -> payload signed
@@ -602,4 +608,3 @@ Payment flows are architecturally complete when:
 - captures and refunds create balanced ledger entries
 - webhook delivery rows are created for domain events
 - invalid state transitions are tested
-

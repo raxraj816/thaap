@@ -20,6 +20,7 @@ Security goals:
 - require idempotency for mutating payment APIs
 - audit high-risk actions
 - separate real-time payment decisions from offline GenAI
+- enforce merchant-tenant isolation
 - design for future RBAC
 - keep secrets out of source code
 
@@ -51,6 +52,7 @@ Must not be persisted:
 - raw PAN
 - CVV
 - raw authentication secrets
+- raw API key secrets after initial one-time reveal
 
 Must not be logged:
 
@@ -127,11 +129,11 @@ Rules:
 V1 local security:
 
 - request validation
+- merchant tenant resolution from `X-Api-Key`
 - idempotency keys for mutating payment APIs
 - request IDs
 - structured errors
 - safe logging
-- basic auth placeholder or local auth when dashboard begins
 
 Later:
 
@@ -141,6 +143,23 @@ Later:
 - service-to-service authentication
 - secret management
 - rate limiting
+
+### 4.1 Merchant Tenant Isolation
+
+`Merchant` is the V1 tenant root.
+
+Runtime merchant-facing APIs must:
+
+- require a valid `X-Api-Key`
+- resolve `MerchantContext` from the API key
+- ignore any client-supplied `merchantId` for authorization
+- use tenant-scoped repository queries such as `(id, merchant_id)`
+- return `404` for objects outside the current merchant scope
+- bind idempotency records to `(merchant_id, key)`
+
+Admin setup APIs may create merchants and issue test keys in local development. Before any non-local deployment, API key storage must move to hashed secrets with a non-secret prefix lookup and one-time secret reveal.
+
+Cross-merchant isolation tests are required for each merchant-facing endpoint family.
 
 High-risk APIs:
 
@@ -155,14 +174,14 @@ High-risk APIs:
 
 High-risk APIs must be audited.
 
-### 4.1 Rate Limiting Strategy
+### 4.2 Rate Limiting Strategy
 
 V1 rate limiting uses Redis-backed counters.
 
 Limit dimensions:
 
 - merchant ID
-- API key when introduced
+- API key
 - IP address
 - endpoint family
 - card fingerprint for payment-method/confirm abuse patterns
@@ -211,6 +230,7 @@ Controls:
 - reject same key with different request hash
 - return stored response for same key and same request
 - expire old keys after configured period
+- handle concurrent duplicate requests through locking or unique-constraint conflict handling
 
 ## 6. Webhook Security
 

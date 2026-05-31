@@ -12,6 +12,7 @@ The platform exists to teach and demonstrate payment processing and fraud detect
 
 It must support:
 
+- merchant-based multi-tenancy
 - card payment simulation
 - PaymentIntent and PaymentAttempt lifecycle
 - real-time fraud decisioning
@@ -37,7 +38,7 @@ V1 is a simulator. It does not move real money and does not integrate with a rea
 ```text
 Merchant Backend / Client
   |
-  | REST APIs + idempotency keys
+  | REST APIs + X-Api-Key + idempotency keys
   v
 payments-api
   |
@@ -143,14 +144,16 @@ Technology:
 - Spring Web
 - Spring Validation
 - Spring Data JPA
-- Flyway
+- Flyway, planned before durable schema evolution
 - Spring Actuator
 - PostgreSQL
 - Redis
 
 Responsibilities:
 
-- merchant and customer APIs
+- merchant admin setup APIs
+- merchant tenant resolution
+- customer APIs scoped by merchant
 - payment method simulation
 - PaymentIntent lifecycle
 - PaymentAttempt lifecycle
@@ -303,14 +306,21 @@ Owns:
 
 - merchant records
 - merchant status
+- API key credential records
 - merchant risk tier
 - merchant risk policy, later
 
 Key questions it answers:
 
 - Is this merchant active?
+- Which merchant context does this API key resolve to?
 - What risk policy applies?
 - Which webhook endpoints belong to the merchant?
+
+Key invariant:
+
+- `Merchant` is the V1 tenant root.
+- Merchant-facing runtime APIs must derive tenant scope from credentials, not trusted request-body `merchantId`.
 
 ### 5.2 Customer Module
 
@@ -324,6 +334,7 @@ Owns:
 Key invariant:
 
 - customers are merchant-scoped.
+- customer lookups from merchant-facing APIs must include `merchant_id`.
 
 ### 5.3 Payment Method Module
 

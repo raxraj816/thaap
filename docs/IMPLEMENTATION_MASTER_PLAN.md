@@ -19,6 +19,25 @@ THAAP is not a toy checkout demo. It is a production-shaped simulator designed t
 
 ## 2. Final Scope Decisions
 
+### 2.0 Multi-Tenant Boundary
+
+THAAP is a multi-tenant platform with `Merchant` as the V1 tenant root.
+
+Tenant model:
+
+- Use a shared PostgreSQL database and shared schema.
+- Use `merchant_id` as the tenant discriminator for merchant-owned data.
+- Resolve merchant tenant context from API credentials, not from trusted request-body `merchantId`.
+- V1 merchant-facing APIs use `X-Api-Key` to resolve `MerchantContext`.
+- Admin-only setup APIs may create merchants and issue API keys.
+- Runtime payment, webhook, fraud, rule, review, ledger, analytics, event, feature, graph, and ML paths must carry or derive `merchant_id`.
+
+Isolation rule:
+
+- A merchant must never read, mutate, replay, deliver webhook data for, train merchant-scoped features from, or operate on another merchant's objects.
+- Application-level tenant enforcement and cross-merchant tests are mandatory from the first domain endpoints.
+- PostgreSQL row-level security is deferred for V1 but remains a later defense-in-depth option.
+
 ### 2.1 V1 Scope
 
 V1 is a full card-payment simulator with integrated fraud detection.
@@ -195,7 +214,7 @@ Model prediction logs
 
 ### 4.1 Payment APIs
 
-- `POST /merchants`
+- `POST /admin/merchants`
 - `POST /customers`
 - `POST /payment_methods`
 - `POST /payment_intents`
@@ -233,6 +252,7 @@ These can start internal/admin-only, then become dashboard-backed:
 - `POST /rules/{id}/disable`
 
 All mutating payment APIs must require an idempotency key.
+Merchant-facing APIs derive tenant scope from `X-Api-Key`; do not trust client-supplied `merchantId`.
 
 ## 5. Core Domain Model
 
@@ -244,7 +264,11 @@ All mutating payment APIs must require an idempotency key.
 - `name`
 - `status`
 - `riskTier`
+- `apiKeyHash`
+- `apiKeyPrefix`
 - `createdAt`
+
+Current local scaffolding may expose a generated test API key once at merchant creation. Production-shaped implementation must store only a hashed API key secret and a non-secret prefix.
 
 `Customer`
 
@@ -257,6 +281,7 @@ All mutating payment APIs must require an idempotency key.
 `PaymentMethod`
 
 - `id`
+- `merchantId`
 - `customerId`
 - `type`
 - `token`
@@ -651,16 +676,20 @@ Allow-rule simulations must call out unknown outcomes for payments that were his
 - Never store CVV.
 - Mask sensitive data in logs and responses.
 - Hash email, phone, and IP where feasible.
+- Resolve merchant tenant context from `X-Api-Key` for V1 runtime APIs.
+- Store API keys as hashed secrets with non-secret lookup prefixes before any non-local deployment.
 - Require idempotency keys for mutating payment APIs.
+- Bind idempotency keys to merchant, operation, and request hash.
 - Add request IDs and trace IDs.
 - Audit payment, fraud, review, rule, refund, chargeback, and webhook actions.
+- Add cross-merchant isolation tests for every merchant-facing endpoint family.
 - Keep LLMs out of the real-time authorization path.
 - Do not allow GenAI agents to mutate production payment, rule, or model state.
 
 Rate limiting strategy:
 
 - Use Redis-backed counters in V1.
-- Limit by merchant ID, API key when introduced, IP address, and endpoint family.
+- Limit by merchant ID, API key, IP address, and endpoint family.
 - Apply stricter limits to payment method creation, payment confirmation, refund, chargeback, login/auth, and rule-management endpoints.
 - Use fail-closed behavior for high-risk mutation endpoints if rate-limit state is unavailable and abuse risk is high.
 - Emit metrics for allowed, throttled, and blocked requests.
@@ -1389,45 +1418,66 @@ Learn:
 - Local infra setup.
 - Spring profiles.
 
-### Day 3: Spring Boot Foundation
+### Day 3: API Foundation And Error Contract
 
 Deliver:
 
-- `payments-api`.
-- Error response format.
-- Validation.
-- Request ID filter.
-- Actuator.
+- Global exception handler.
+- Standard JSON error response body.
+- Validation error formatting for request-body and parameter errors.
+- Request ID filter using `X-Request-Id`, generating one when missing.
+- Request ID propagation in response headers.
+- Request ID propagation into logging MDC.
+- Consistent 400, 401, 404, 409, and 500-style API errors.
+- Tenant authentication errors mapped into the standard error format.
+- Tests for request ID propagation and representative error responses.
+- README examples for request IDs and error response shape.
+
+Already in place before Day 3:
+
+- `payments-api` scaffold.
+- Actuator health, liveness, and readiness.
+- Local/test Spring profiles.
+- Initial validation annotations on tenant-scoped endpoints.
+- Merchant tenant context from `X-Api-Key`.
 
 Learn:
 
 - Spring Boot 4 conventions.
 - API error handling.
+- Servlet filters and request correlation.
+- Production-shaped validation contracts.
 
 ### Day 4: Database Migrations
 
 Deliver:
 
 - Flyway setup.
-- Merchant, customer, payment method, payment intent tables.
+- Tenant-scoped merchant, customer, payment method, payment intent, idempotency, webhook, fraud decision, rule, and review tables.
+- Unique constraints and indexes for `(merchant_id, key)` idempotency and hot merchant-scoped lookups.
+- Remove reliance on Hibernate `ddl-auto: update` for local durable schema evolution.
 
 Learn:
 
 - Migration discipline.
 - Relational modeling.
+- Tenant-safe indexing and constraints.
 
 ### Day 5: Merchant And Customer APIs
 
 Deliver:
 
-- Seed merchant.
-- Create customer endpoint.
-- Create payment method endpoint.
+- Harden local merchant admin setup.
+- Replace plaintext API key storage with hashed API key secret and non-secret prefix lookup.
+- One-time API key secret reveal on merchant creation.
+- Create customer endpoint refinement if needed after error contract and migrations.
+- Create payment method endpoint refinement if needed after error contract and migrations.
 
 Learn:
 
 - Entity boundaries.
 - Sensitive data simulation.
+- API credential lifecycle.
 
 ### Day 6: PaymentIntent Create
 
@@ -1577,6 +1627,10 @@ Learn:
 - Raw PAN and CVV are never persisted.
 - Sensitive values are masked.
 - Mutating APIs require idempotency keys.
+- Missing or invalid `X-Api-Key` is rejected on merchant-facing APIs.
+- Merchant A cannot read, create child records for, mutate, refund, replay, or inspect webhook deliveries for Merchant B's objects.
+- Same idempotency key is reusable by different merchants but conflicts within the same merchant when the request hash differs.
+- Fraud, rule, review, ledger, analytics, feature, event, graph, and ML query surfaces return only current-tenant data unless explicitly admin-scoped.
 - Audit logs exist for sensitive operations.
 
 ## 20. Non-Negotiable Engineering Rules
@@ -1593,7 +1647,10 @@ Learn:
 10. No dashboard metric without source definition.
 11. No rule activation without validation, simulation, and approval.
 12. No breaking API, event, rule, or database schema change without expand/contract migration plan.
-13. No deployment without rollback criteria once CI/CD begins.
+13. No merchant-facing data access without tenant context and tenant-scoped lookup.
+14. No event, feature, training row, graph node, model score, or analytics row without `merchant_id` or an explicit documented global/anonymized scope.
+15. No non-trivial platform concept, feature, or dependency without a first-principles learning note under `docs/learning/concepts/`.
+16. No deployment without rollback criteria once CI/CD begins.
 
 ## 21. Coverage And Traceability
 
