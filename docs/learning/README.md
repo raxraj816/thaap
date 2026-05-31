@@ -75,6 +75,7 @@ Concept notes should explain:
 Current concept notes:
 
 - [Concept Note Template](concepts/CONCEPT_NOTE_TEMPLATE.md)
+- [API Error Contracts And Request IDs](concepts/API_ERROR_CONTRACTS_AND_REQUEST_IDS.md)
 - [API Validation From First Principles](concepts/API_VALIDATION.md)
 - [Docker Compose Local Infrastructure From First Principles](concepts/DOCKER_COMPOSE_LOCAL_INFRASTRUCTURE.md)
 - [Health Checks And Actuator From First Principles](concepts/HEALTH_CHECKS_AND_ACTUATOR.md)
