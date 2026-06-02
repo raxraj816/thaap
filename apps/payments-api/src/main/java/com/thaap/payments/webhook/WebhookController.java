@@ -30,8 +30,13 @@ public class WebhookController {
     @ResponseStatus(HttpStatus.CREATED)
     public WebhookEndpointResponse createEndpoint(MerchantContext merchantContext,
             @Valid @RequestBody CreateWebhookEndpointRequest request) {
+        var signingSecret = newSigningSecret();
         return WebhookEndpointResponse.from(webhookEndpointRepository.save(new WebhookEndpoint(
-                merchantContext.merchantId(), request.url())));
+                merchantContext.merchantId(), request.url(), signingSecret)), signingSecret);
+    }
+
+    private String newSigningSecret() {
+        return "whsec_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     @GetMapping("/webhook_deliveries")
@@ -44,19 +49,22 @@ public class WebhookController {
     public record CreateWebhookEndpointRequest(@NotBlank @URL String url) {
     }
 
-    public record WebhookEndpointResponse(UUID id, UUID merchantId, String url, boolean active) {
-        static WebhookEndpointResponse from(WebhookEndpoint endpoint) {
+    public record WebhookEndpointResponse(UUID id, UUID merchantId, String url, boolean active,
+            String signingSecretPrefix, String signingSecret) {
+        static WebhookEndpointResponse from(WebhookEndpoint endpoint, String rawSigningSecret) {
             return new WebhookEndpointResponse(endpoint.getId(), endpoint.getMerchantId(), endpoint.getUrl(),
-                    endpoint.isActive());
+                    endpoint.isActive(), endpoint.getSigningSecretPrefix(), rawSigningSecret);
         }
     }
 
     public record WebhookDeliveryResponse(UUID id, UUID merchantId, UUID webhookEndpointId, String eventType,
-            UUID resourceId, WebhookDeliveryStatus status) {
+            UUID resourceId, WebhookDeliveryStatus status, int attemptCount, java.time.Instant nextAttemptAt,
+            java.time.Instant lastAttemptAt, java.time.Instant deliveredAt, String lastError) {
         static WebhookDeliveryResponse from(WebhookDelivery delivery) {
             return new WebhookDeliveryResponse(delivery.getId(), delivery.getMerchantId(),
                     delivery.getWebhookEndpointId(), delivery.getEventType(), delivery.getResourceId(),
-                    delivery.getStatus());
+                    delivery.getStatus(), delivery.getAttemptCount(), delivery.getNextAttemptAt(),
+                    delivery.getLastAttemptAt(), delivery.getDeliveredAt(), delivery.getLastError());
         }
     }
 }

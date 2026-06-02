@@ -40,3 +40,6 @@
 
 - `None` unless this learning note uncovered a decision that should update `docs/IMPLEMENTATION_MASTER_PLAN.md`.
 
+## 11. Deep Dive Link
+
+- Add `daily/YYYY-MM-DD-deep-dive.md` for non-trivial implementation days.

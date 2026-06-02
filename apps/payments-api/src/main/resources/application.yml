@@ -23,7 +23,7 @@ spring:
       connect-timeout: 1s
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
   sql:
     init:

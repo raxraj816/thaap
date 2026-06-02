@@ -8,19 +8,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.fraud.FraudDecisionRepository;
-import com.thaap.payments.idempotency.IdempotencyRepository;
-import com.thaap.payments.merchant.MerchantRepository;
-import com.thaap.payments.payment.PaymentIntentRepository;
-import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.review.ReviewCase;
 import com.thaap.payments.review.ReviewCaseRepository;
 import com.thaap.payments.rules.FraudRule;
 import com.thaap.payments.rules.FraudRuleRepository;
-import com.thaap.payments.webhook.WebhookDeliveryRepository;
-import com.thaap.payments.webhook.WebhookEndpointRepository;
+import com.thaap.payments.support.DatabaseCleaner;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,27 +41,6 @@ class MerchantTenantIsolationTests {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private MerchantRepository merchantRepository;
-
-    @Autowired
-    private CustomerRepository customerRepository;
-
-    @Autowired
-    private PaymentIntentRepository paymentIntentRepository;
-
-    @Autowired
-    private PaymentMethodRepository paymentMethodRepository;
-
-    @Autowired
-    private IdempotencyRepository idempotencyRepository;
-
-    @Autowired
-    private WebhookEndpointRepository webhookEndpointRepository;
-
-    @Autowired
-    private WebhookDeliveryRepository webhookDeliveryRepository;
-
-    @Autowired
     private FraudDecisionRepository fraudDecisionRepository;
 
     @Autowired
@@ -76,19 +49,13 @@ class MerchantTenantIsolationTests {
     @Autowired
     private ReviewCaseRepository reviewCaseRepository;
 
+    @Autowired
+    private DatabaseCleaner databaseCleaner;
+
     @BeforeEach
     void cleanDatabase() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
-        webhookDeliveryRepository.deleteAll();
-        webhookEndpointRepository.deleteAll();
-        idempotencyRepository.deleteAll();
-        paymentMethodRepository.deleteAll();
-        paymentIntentRepository.deleteAll();
-        customerRepository.deleteAll();
-        fraudDecisionRepository.deleteAll();
-        fraudRuleRepository.deleteAll();
-        reviewCaseRepository.deleteAll();
-        merchantRepository.deleteAll();
+        databaseCleaner.clean();
     }
 
     @Test
@@ -129,6 +96,34 @@ class MerchantTenantIsolationTests {
                                 }
                                 """.formatted(customer)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void paymentMethodCreationReturnsSafeCardMetadata() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customer = createCustomer(merchant, "buyer-a@example.com");
+
+        var response = mockMvc.perform(post("/payment_methods")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "card-metadata")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "cardNumber": "4242424242424242"
+                                }
+                                """.formatted(customer)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        var json = objectMapper.readTree(response);
+
+        assertThat(json.get("cardBin").asText()).isEqualTo("424242");
+        assertThat(json.get("cardLast4").asText()).isEqualTo("4242");
+        assertThat(json.get("cardFunding").asText()).isEqualTo("CREDIT");
+        assertThat(json.get("cardCountry").asText()).isEqualTo("US");
+        assertThat(response).doesNotContain("4242424242424242");
     }
 
     @Test
@@ -241,6 +236,16 @@ class MerchantTenantIsolationTests {
     }
 
     @Test
+    void paymentIntentDefaultsToAutomaticCaptureMethod() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customer = createCustomer(merchant, "buyer-a@example.com");
+
+        var paymentIntent = createPaymentIntentResponse(merchant, customer, "capture-default", 1200);
+
+        assertThat(paymentIntent.get("captureMethod").asText()).isEqualTo("AUTOMATIC");
+    }
+
+    @Test
     void webhookDeliveriesAreVisibleOnlyToOwningMerchant() throws Exception {
         var merchantA = createMerchant("merchant-a");
         var merchantB = createMerchant("merchant-b");
@@ -255,6 +260,11 @@ class MerchantTenantIsolationTests {
 
         assertThat(merchantADeliveries).hasSize(1);
         assertThat(merchantADeliveries.get(0).get("merchantId").asText()).isEqualTo(merchantA.id().toString());
+        assertThat(merchantADeliveries.get(0).get("attemptCount").asInt()).isZero();
+        assertThat(merchantADeliveries.get(0).get("nextAttemptAt").isNull()).isTrue();
+        assertThat(merchantADeliveries.get(0).get("lastAttemptAt").isNull()).isTrue();
+        assertThat(merchantADeliveries.get(0).get("deliveredAt").isNull()).isTrue();
+        assertThat(merchantADeliveries.get(0).get("lastError").isNull()).isTrue();
         assertThat(merchantBDeliveries).isEmpty();
     }
 
@@ -294,6 +304,8 @@ class MerchantTenantIsolationTests {
                 .getResponse()
                 .getContentAsString();
         var json = objectMapper.readTree(response);
+        assertThat(json.get("apiKeyPrefix").asText()).isNotBlank();
+        assertThat(json.get("apiKey").asText()).startsWith(json.get("apiKeyPrefix").asText());
         return new MerchantAccess(UUID.fromString(json.get("id").asText()), json.get("apiKey").asText());
     }
 
@@ -339,7 +351,7 @@ class MerchantTenantIsolationTests {
     }
 
     private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
-        mockMvc.perform(post("/webhook_endpoints")
+        var response = mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
                         .contentType(APPLICATION_JSON)
                         .content("""
@@ -347,7 +359,13 @@ class MerchantTenantIsolationTests {
                                   "url": "%s"
                                 }
                                 """.formatted(url)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        var json = objectMapper.readTree(response);
+        assertThat(json.get("signingSecret").asText()).startsWith("whsec_");
+        assertThat(json.get("signingSecret").asText()).startsWith(json.get("signingSecretPrefix").asText());
     }
 
     private JsonNode getArray(String path, MerchantAccess merchant) throws Exception {

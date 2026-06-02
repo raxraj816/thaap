@@ -18,11 +18,20 @@ Architecture decisions and structure belong in:
 ```text
 docs/learning/
   README.md
+  DAILY_APPRENTICESHIP_CHECKLIST.md
   DAILY_NOTE_TEMPLATE.md
+  DEEP_DIVE_TEMPLATE.md
+  EXPLAIN_BACK_TEMPLATE.md
+  SENIOR_STAFF_ML_ARCHITECT_RUBRIC.md
+  SPACED_REPETITION_TRACKER.md
+  WEEKLY_ARCHITECTURE_REVIEW_TEMPLATE.md
   concepts/
     CONCEPT_NAME.md
   daily/
     YYYY-MM-DD.md
+    YYYY-MM-DD-deep-dive.md
+  weekly/
+    YYYY-WNN.md
 ```
 
 ## Daily Note Naming
@@ -39,7 +48,28 @@ Example:
 docs/learning/daily/2026-05-29.md
 ```
 
+For non-trivial implementation days, also create:
+
+```text
+docs/learning/daily/YYYY-MM-DD-deep-dive.md
+```
+
+Use `docs/learning/DEEP_DIVE_TEMPLATE.md` for this artifact.
+
 ## What To Capture
+
+Use [DAILY_APPRENTICESHIP_CHECKLIST.md](DAILY_APPRENTICESHIP_CHECKLIST.md)
+at the start and end of each implementation day. The quick local check is:
+
+```bash
+scripts/learning-day-check.sh
+```
+
+For non-trivial implementation days:
+
+```bash
+scripts/learning-day-check.sh --deep-dive-required
+```
 
 Each daily note should include:
 
@@ -53,7 +83,57 @@ Each daily note should include:
 - open questions
 - next steps
 
+Each deep dive should make Staff-level code understandable end to end. It should
+include:
+
+- a plain-English design brief
+- file-by-file code map
+- request/data flow
+- database invariants
+- security/privacy invariants
+- fraud/ML relevance
+- tests as proof
+- Staff engineer review notes
+- explain-back questions
+- code-reading drills
+- a tiny extension task
+- an interview narrative
+
 If a learning note discovers a decision that changes implementation, update `docs/IMPLEMENTATION_MASTER_PLAN.md` rather than leaving the decision only in learning notes.
+
+## Apprenticeship Loop
+
+Use this loop for non-trivial work:
+
+```text
+Build -> Explain -> Trace -> Explain Back -> Modify -> Review -> Record -> Revisit
+```
+
+- **Explain back:** use `EXPLAIN_BACK_TEMPLATE.md` after reading a deep dive.
+- **Modify:** complete one tiny ownership task from the deep dive or daily
+  checklist.
+- **Review:** update the weekly architecture review.
+- **Revisit:** add dense concepts to `SPACED_REPETITION_TRACKER.md`.
+
+## Weekly Review
+
+Once per week, create:
+
+```text
+docs/learning/weekly/YYYY-WNN.md
+```
+
+Use `WEEKLY_ARCHITECTURE_REVIEW_TEMPLATE.md`.
+
+Run:
+
+```bash
+scripts/learning-week-check.sh YYYY-WNN
+```
+
+Update `SENIOR_STAFF_ML_ARCHITECT_RUBRIC.md` during the weekly review. This is
+how we measure whether the project is increasing independent Staff-level
+judgment, not only producing code and notes.
 
 ## Concept Notes
 
@@ -77,6 +157,7 @@ Current concept notes:
 - [Concept Note Template](concepts/CONCEPT_NOTE_TEMPLATE.md)
 - [API Error Contracts And Request IDs](concepts/API_ERROR_CONTRACTS_AND_REQUEST_IDS.md)
 - [API Validation From First Principles](concepts/API_VALIDATION.md)
+- [Database Migrations And Flyway](concepts/DATABASE_MIGRATIONS_AND_FLYWAY.md)
 - [Docker Compose Local Infrastructure From First Principles](concepts/DOCKER_COMPOSE_LOCAL_INFRASTRUCTURE.md)
 - [Health Checks And Actuator From First Principles](concepts/HEALTH_CHECKS_AND_ACTUATOR.md)
 - [Idempotency From First Principles](concepts/IDEMPOTENCY.md)

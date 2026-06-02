@@ -1,6 +1,7 @@
 package com.thaap.payments.tenant;
 
 import com.thaap.payments.merchant.MerchantRepository;
+import com.thaap.payments.security.SecretHasher;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
@@ -35,7 +36,7 @@ public class MerchantContextArgumentResolver implements HandlerMethodArgumentRes
         if (apiKey == null || apiKey.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing X-Api-Key header");
         }
-        return merchantRepository.findByApiKey(apiKey)
+        return merchantRepository.findByApiKeyHash(SecretHasher.sha256(apiKey))
                 .filter(merchant -> merchant.isActive())
                 .map(merchant -> new MerchantContext(merchant.getId(), merchant.getName()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));

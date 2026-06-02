@@ -1,5 +1,6 @@
 package com.thaap.payments.merchant;
 
+import com.thaap.payments.security.SecretHasher;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -23,8 +24,11 @@ public class Merchant {
     @Column(nullable = false)
     private MerchantStatus status;
 
+    @Column(nullable = false)
+    private String apiKeyPrefix;
+
     @Column(nullable = false, unique = true)
-    private String apiKey;
+    private String apiKeyHash;
 
     @Column(nullable = false)
     private Instant createdAt;
@@ -32,11 +36,12 @@ public class Merchant {
     protected Merchant() {
     }
 
-    public Merchant(String name, String apiKey) {
+    public Merchant(String name, String rawApiKey) {
         this.id = UUID.randomUUID();
         this.name = name;
         this.status = MerchantStatus.ACTIVE;
-        this.apiKey = apiKey;
+        this.apiKeyPrefix = SecretHasher.prefix(rawApiKey);
+        this.apiKeyHash = SecretHasher.sha256(rawApiKey);
         this.createdAt = Instant.now();
     }
 
@@ -52,8 +57,12 @@ public class Merchant {
         return status;
     }
 
-    public String getApiKey() {
-        return apiKey;
+    public String getApiKeyPrefix() {
+        return apiKeyPrefix;
+    }
+
+    public String getApiKeyHash() {
+        return apiKeyHash;
     }
 
     public Instant getCreatedAt() {

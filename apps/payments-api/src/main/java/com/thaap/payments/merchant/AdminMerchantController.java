@@ -23,8 +23,9 @@ public class AdminMerchantController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public MerchantResponse createMerchant(@Valid @RequestBody CreateMerchantRequest request) {
-        var merchant = merchantRepository.save(new Merchant(request.name(), newApiKey()));
-        return MerchantResponse.from(merchant);
+        var apiKey = newApiKey();
+        var merchant = merchantRepository.save(new Merchant(request.name(), apiKey));
+        return MerchantResponse.from(merchant, apiKey);
     }
 
     private String newApiKey() {
@@ -34,9 +35,10 @@ public class AdminMerchantController {
     public record CreateMerchantRequest(@NotBlank String name) {
     }
 
-    public record MerchantResponse(UUID id, String name, MerchantStatus status, String apiKey) {
-        static MerchantResponse from(Merchant merchant) {
-            return new MerchantResponse(merchant.getId(), merchant.getName(), merchant.getStatus(), merchant.getApiKey());
+    public record MerchantResponse(UUID id, String name, MerchantStatus status, String apiKeyPrefix, String apiKey) {
+        static MerchantResponse from(Merchant merchant, String rawApiKey) {
+            return new MerchantResponse(merchant.getId(), merchant.getName(), merchant.getStatus(),
+                    merchant.getApiKeyPrefix(), rawApiKey);
         }
     }
 }

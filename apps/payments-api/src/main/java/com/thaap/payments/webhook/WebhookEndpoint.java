@@ -1,5 +1,6 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.security.SecretHasher;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -25,17 +26,33 @@ public class WebhookEndpoint {
     private boolean active;
 
     @Column(nullable = false)
+    private String signingSecretPrefix;
+
+    @Column(nullable = false)
+    private String signingSecretHash;
+
+    @Column(nullable = false)
     private Instant createdAt;
 
     protected WebhookEndpoint() {
     }
 
     public WebhookEndpoint(UUID merchantId, String url) {
+        this(merchantId, url, newSigningSecret());
+    }
+
+    public WebhookEndpoint(UUID merchantId, String url, String rawSigningSecret) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.url = url;
         this.active = true;
+        this.signingSecretPrefix = SecretHasher.prefix(rawSigningSecret);
+        this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
         this.createdAt = Instant.now();
+    }
+
+    private static String newSigningSecret() {
+        return "whsec_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     public UUID getId() {
@@ -52,5 +69,13 @@ public class WebhookEndpoint {
 
     public boolean isActive() {
         return active;
+    }
+
+    public String getSigningSecretPrefix() {
+        return signingSecretPrefix;
+    }
+
+    public String getSigningSecretHash() {
+        return signingSecretHash;
     }
 }

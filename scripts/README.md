@@ -35,3 +35,31 @@ Run the Spring Boot API from the repository root:
 ```bash
 scripts/payments-api-run.sh
 ```
+
+## Learning Workflow
+
+Check that today's Staff apprenticeship learning artifacts exist:
+
+```bash
+scripts/learning-day-check.sh
+```
+
+For non-trivial implementation days:
+
+```bash
+scripts/learning-day-check.sh --deep-dive-required
+```
+
+Check that the weekly architecture review and growth-tracking artifacts exist:
+
+```bash
+scripts/learning-week-check.sh
+```
+
+## Commit Readiness
+
+Run the commit-readiness gate before saying a change is ready to commit:
+
+```bash
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests
+```

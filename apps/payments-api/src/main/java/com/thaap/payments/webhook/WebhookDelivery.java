@@ -37,6 +37,21 @@ public class WebhookDelivery {
     private WebhookDeliveryStatus status;
 
     @Column(nullable = false)
+    private int attemptCount;
+
+    @Column
+    private Instant nextAttemptAt;
+
+    @Column
+    private Instant lastAttemptAt;
+
+    @Column
+    private Instant deliveredAt;
+
+    @Column(columnDefinition = "text")
+    private String lastError;
+
+    @Column(nullable = false)
     private Instant createdAt;
 
     protected WebhookDelivery() {
@@ -49,6 +64,7 @@ public class WebhookDelivery {
         this.eventType = eventType;
         this.resourceId = resourceId;
         this.status = WebhookDeliveryStatus.PENDING;
+        this.attemptCount = 0;
         this.createdAt = Instant.now();
     }
 
@@ -74,5 +90,25 @@ public class WebhookDelivery {
 
     public WebhookDeliveryStatus getStatus() {
         return status;
+    }
+
+    public int getAttemptCount() {
+        return attemptCount;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public Instant getLastAttemptAt() {
+        return lastAttemptAt;
+    }
+
+    public Instant getDeliveredAt() {
+        return deliveredAt;
+    }
+
+    public String getLastError() {
+        return lastError;
     }
 }

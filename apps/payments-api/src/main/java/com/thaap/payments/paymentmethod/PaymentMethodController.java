@@ -57,8 +57,20 @@ public class PaymentMethodController {
         }
         var paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
                 request.customerId(), "pm_tok_" + UUID.randomUUID().toString().replace("-", ""),
-                sha256(normalizedCard), normalizedCard.substring(normalizedCard.length() - 4)));
+                sha256(normalizedCard), normalizedCard.substring(0, 6),
+                normalizedCard.substring(normalizedCard.length() - 4), cardFunding(normalizedCard), cardCountry()));
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentMethodResponse.from(paymentMethod));
+    }
+
+    private static CardFunding cardFunding(String normalizedCard) {
+        if (normalizedCard.startsWith("4") || normalizedCard.startsWith("5")) {
+            return CardFunding.CREDIT;
+        }
+        return CardFunding.UNKNOWN;
+    }
+
+    private static String cardCountry() {
+        return "US";
     }
 
     private static String sha256(String value) {
@@ -76,11 +88,12 @@ public class PaymentMethodController {
     }
 
     public record PaymentMethodResponse(UUID id, UUID merchantId, UUID customerId, String type, String token,
-            String cardFingerprint, String cardLast4) {
+            String cardFingerprint, String cardBin, String cardLast4, CardFunding cardFunding, String cardCountry) {
         static PaymentMethodResponse from(PaymentMethod paymentMethod) {
             return new PaymentMethodResponse(paymentMethod.getId(), paymentMethod.getMerchantId(),
                     paymentMethod.getCustomerId(), paymentMethod.getType(), paymentMethod.getToken(),
-                    paymentMethod.getCardFingerprint(), paymentMethod.getCardLast4());
+                    paymentMethod.getCardFingerprint(), paymentMethod.getCardBin(), paymentMethod.getCardLast4(),
+                    paymentMethod.getCardFunding(), paymentMethod.getCardCountry());
         }
     }
 }
