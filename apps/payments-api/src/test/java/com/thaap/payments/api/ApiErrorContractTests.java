@@ -9,16 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.thaap.payments.customer.CustomerRepository;
-import com.thaap.payments.fraud.FraudDecisionRepository;
-import com.thaap.payments.idempotency.IdempotencyRepository;
-import com.thaap.payments.merchant.MerchantRepository;
-import com.thaap.payments.payment.PaymentIntentRepository;
-import com.thaap.payments.paymentmethod.PaymentMethodRepository;
-import com.thaap.payments.review.ReviewCaseRepository;
-import com.thaap.payments.rules.FraudRuleRepository;
-import com.thaap.payments.webhook.WebhookDeliveryRepository;
-import com.thaap.payments.webhook.WebhookEndpointRepository;
+import com.thaap.payments.support.DatabaseCleaner;
 import jakarta.validation.constraints.Min;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,50 +49,14 @@ class ApiErrorContractTests {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private MerchantRepository merchantRepository;
-
-    @Autowired
-    private CustomerRepository customerRepository;
-
-    @Autowired
-    private PaymentIntentRepository paymentIntentRepository;
-
-    @Autowired
-    private PaymentMethodRepository paymentMethodRepository;
-
-    @Autowired
-    private IdempotencyRepository idempotencyRepository;
-
-    @Autowired
-    private WebhookEndpointRepository webhookEndpointRepository;
-
-    @Autowired
-    private WebhookDeliveryRepository webhookDeliveryRepository;
-
-    @Autowired
-    private FraudDecisionRepository fraudDecisionRepository;
-
-    @Autowired
-    private FraudRuleRepository fraudRuleRepository;
-
-    @Autowired
-    private ReviewCaseRepository reviewCaseRepository;
+    private DatabaseCleaner databaseCleaner;
 
     @BeforeEach
     void cleanDatabase() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(requestIdFilter)
                 .build();
-        webhookDeliveryRepository.deleteAll();
-        webhookEndpointRepository.deleteAll();
-        idempotencyRepository.deleteAll();
-        paymentMethodRepository.deleteAll();
-        paymentIntentRepository.deleteAll();
-        customerRepository.deleteAll();
-        fraudDecisionRepository.deleteAll();
-        fraudRuleRepository.deleteAll();
-        reviewCaseRepository.deleteAll();
-        merchantRepository.deleteAll();
+        databaseCleaner.clean();
     }
 
     @Test

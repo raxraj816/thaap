@@ -1388,7 +1388,138 @@ Done when:
 - p95/p99 latency is measured.
 - Blue and green versions can coexist.
 
-## 18. First 14-Day Execution Plan
+## 18. Staff-Level Implementation Review Workflow
+
+Every implementation day must run through this workflow before code changes,
+after implementation, and when external reviews arrive. The goal is to catch
+payment, fraud, security, ML-lineage, and operations issues before they become
+schema or API churn.
+
+### 18.1 Day Readiness Review
+
+Before coding a day, write a short readiness review in the daily note or working
+thread:
+
+- What the master plan says for the day.
+- What already exists in code and schema.
+- What production-shaped payments, fraud, security, ML, and operations systems
+  would need from this slice.
+- What to implement now.
+- What to explicitly defer, with the target day or phase.
+- What tests will prove the slice.
+
+The day should not start from the deliverable list alone. The deliverable list
+is necessary but not sufficient; it must be filtered through the review lenses
+below.
+
+### 18.2 Mandatory Review Lenses
+
+Apply these lenses before and after implementation:
+
+- **Payments lifecycle lens:** Does this create or change a stable payment
+  primitive such as authorization, capture method, attempt, refund, void,
+  dispute, ledger entry, or webhook delivery?
+- **Security lens:** Are any secrets, API keys, webhook signing secrets, raw PAN,
+  CVV, tokens, PII, or sensitive operational values stored raw, returned
+  unnecessarily, logged, or indexed unsafely?
+- **PCI/data-minimization lens:** Is persisted card data limited to safe
+  simulator metadata such as token, fingerprint, BIN, last4, expiry metadata,
+  country, funding type, and verification outcomes?
+- **Tenant isolation lens:** Does every merchant-owned row carry `merchant_id`,
+  and are cross-object relationships protected by tenant-scoped lookups or
+  composite foreign keys?
+- **Fraud/ML lineage lens:** Does a fraud, feature, label, model, graph, or rule
+  field have a real lineage source such as `PaymentAttempt`, `FeatureSnapshot`,
+  review outcome, chargeback, or model version? If not, defer it.
+- **Operations/SRE lens:** Can persisted operational records support retries,
+  debugging, audit, status inspection, and future metrics without immediate
+  churn?
+- **Migration lens:** Is the schema change tested through Flyway and Hibernate
+  validation, and is there a PostgreSQL-backed test path for PostgreSQL-specific
+  behavior?
+- **API contract lens:** Does the response expose only what clients need, and do
+  errors preserve the standard error/request-id contract?
+
+### 18.3 Review Disposition Rules
+
+Every review item must be classified before implementation:
+
+- **Accept now:** The item fixes a current security, tenant, data-minimization,
+  operational, or stable payment-domain gap.
+- **Accept later:** The item is correct but depends on a later domain object,
+  behavior, or test harness. Assign the target day or phase.
+- **Reject:** The item conflicts with the master plan, creates speculative
+  schema, weakens tenant/security guarantees, or violates the simulator scope.
+- **Needs design:** The item is plausible but needs an ADR, architecture update,
+  or first-principles concept note before code.
+
+Do not implement review feedback merely because it sounds production-grade.
+Production-shaped architecture also means sequencing fields when their lineage,
+constraints, and behavior can be tested.
+
+### 18.4 Staff Checklist
+
+Before marking a day complete, answer these questions:
+
+- Are any secrets stored raw?
+- Is any payment-sensitive or cardholder data persisted beyond the V1
+  tokenized-simulator boundary?
+- Are merchant tenant boundaries enforced in the database, not only controller
+  code?
+- Are operational records useful enough for retry, debugging, audit, and future
+  metrics?
+- Are payment lifecycle primitives complete enough for the next two to three
+  implementation days?
+- Are fraud/ML fields backed by real lineage, constraints, and behavior tests?
+- Are H2-only assumptions covered by a PostgreSQL-backed path when the SQL is
+  PostgreSQL-relevant?
+- Did the implementation update docs, learning notes, and tests together?
+
+### 18.5 Post-Implementation Self-Review
+
+After coding and before finalizing:
+
+- Re-run the mandatory review lenses against the actual diff.
+- Compare accepted and deferred review items against the implementation.
+- Confirm tests cover the riskiest invariants, not only happy paths.
+- Record surprises and explicit deferrals in the daily note.
+
+### 18.6 Staff Engineer Apprenticeship Output
+
+THAAP is also an apprenticeship project. The current learning goal is to grow
+from hands-on implementation comfort toward Senior Staff Engineer / ML
+Architect judgment for payments security and fraud detection within six months.
+The implementation should remain Staff-level, but it must be paired with
+learning artifacts that make the design, code, and tradeoffs fully explainable.
+
+Every non-trivial implementation day must include:
+
+- **Plain-English design brief:** What we are building, why a payments/fraud
+  platform needs it, what can fail in production, and what is intentionally
+  deferred.
+- **Implementation walkthrough:** File-by-file map, request/data flow, database
+  invariants, security invariants, tests, and the Staff-level review points.
+- **Learning drill:** Explain-back questions, code-reading exercises, and one
+  small extension or reasoning task.
+- **Staff narrative:** Interview-ready language for the tradeoff, invariant,
+  risk reduction, deferral, and proof.
+
+The standard artifact is:
+
+```text
+docs/learning/daily/YYYY-MM-DD-deep-dive.md
+```
+
+No major implementation day is complete until the learner can answer:
+
+- What problem did we solve?
+- Why did we solve it this way?
+- What production risk did this reduce?
+- What did we defer and why?
+- What tests prove the important invariants?
+- How would this be explained in a Stripe/Mastercard-style design review?
+
+## 19. First 14-Day Execution Plan
 
 ### Day 1: Product Scope And Repo
 
@@ -1454,22 +1585,28 @@ Deliver:
 
 - Flyway setup.
 - Tenant-scoped merchant, customer, payment method, payment intent, idempotency, webhook, fraud decision, rule, and review tables.
+- Hashed merchant API key storage with one-time raw secret reveal.
+- Safe card metadata columns for tokenized simulator storage.
+- PaymentIntent capture method storage.
+- Webhook endpoint signing-secret hash storage and delivery retry/attempt metadata.
 - Unique constraints and indexes for `(merchant_id, key)` idempotency and hot merchant-scoped lookups.
 - Remove reliance on Hibernate `ddl-auto: update` for local durable schema evolution.
+- PostgreSQL-backed migration test path when Docker/Testcontainers is available.
 
 Learn:
 
 - Migration discipline.
 - Relational modeling.
 - Tenant-safe indexing and constraints.
+- Security and operations review before schema finalization.
 
 ### Day 5: Merchant And Customer APIs
 
 Deliver:
 
-- Harden local merchant admin setup.
-- Replace plaintext API key storage with hashed API key secret and non-secret prefix lookup.
-- One-time API key secret reveal on merchant creation.
+- Harden the remaining local merchant admin setup.
+- Add any missing merchant creation validation and response contract tests.
+- Confirm API key hash/prefix behavior remains covered after endpoint refinements.
 - Create customer endpoint refinement if needed after error contract and migrations.
 - Create payment method endpoint refinement if needed after error contract and migrations.
 
@@ -1585,28 +1722,28 @@ Learn:
 
 - Engineering communication.
 
-## 19. Test Plan
+## 20. Test Plan
 
-### 19.1 Payment Lifecycle Tests
+### 20.1 Payment Lifecycle Tests
 
 - Create, confirm, authorize, capture, cancel, refund, chargeback.
 - Invalid state transitions fail.
 - Manual capture and automatic capture behave correctly.
 - 3DS-required payment pauses in `REQUIRES_ACTION`.
 
-### 19.2 Idempotency Tests
+### 20.2 Idempotency Tests
 
 - Same key and same body returns original response.
 - Same key and different body is rejected.
 - Capture/refund retries do not duplicate money movement.
 
-### 19.3 Processor Tests
+### 20.3 Processor Tests
 
 - Each deterministic test card triggers expected outcome.
 - CVC, AVS, and 3DS outcomes persist.
 - Processor events are recorded.
 
-### 19.4 Ledger Tests
+### 20.4 Ledger Tests
 
 - Capture entries balance.
 - Refund entries balance.
@@ -1614,7 +1751,7 @@ Learn:
 - Chargeback entries balance.
 - Double capture and over-refund are rejected.
 
-### 19.5 Fraud Tests
+### 20.5 Fraud Tests
 
 - `BLOCK` prevents authorization.
 - `REVIEW` creates review case.
@@ -1622,18 +1759,20 @@ Learn:
 - Rule results and feature snapshots persist.
 - Velocity counters exclude the current payment.
 
-### 19.6 Security Tests
+### 20.6 Security Tests
 
 - Raw PAN and CVV are never persisted.
 - Sensitive values are masked.
 - Mutating APIs require idempotency keys.
 - Missing or invalid `X-Api-Key` is rejected on merchant-facing APIs.
+- Raw API keys and webhook signing secrets are never persisted; only prefixes
+  and hashes are stored.
 - Merchant A cannot read, create child records for, mutate, refund, replay, or inspect webhook deliveries for Merchant B's objects.
 - Same idempotency key is reusable by different merchants but conflicts within the same merchant when the request hash differs.
 - Fraud, rule, review, ledger, analytics, feature, event, graph, and ML query surfaces return only current-tenant data unless explicitly admin-scoped.
 - Audit logs exist for sensitive operations.
 
-## 20. Non-Negotiable Engineering Rules
+## 21. Non-Negotiable Engineering Rules
 
 1. No LLM calls in real-time authorization.
 2. No payment decision without persisted audit trail.
@@ -1651,8 +1790,12 @@ Learn:
 14. No event, feature, training row, graph node, model score, or analytics row without `merchant_id` or an explicit documented global/anonymized scope.
 15. No non-trivial platform concept, feature, or dependency without a first-principles learning note under `docs/learning/concepts/`.
 16. No deployment without rollback criteria once CI/CD begins.
+17. No implementation day is complete without the staff-level readiness and
+    post-implementation review workflow in Section 18.
+18. No non-trivial implementation day is complete without a deep-dive learning
+    artifact that makes the Staff-level code understandable end to end.
 
-## 21. Coverage And Traceability
+## 22. Coverage And Traceability
 
 This master plan is shorter than the research plan because it removes:
 
@@ -1682,11 +1825,12 @@ Nothing implementation-critical should live only in the research documents. Cove
 - Events and webhooks: section 15.
 - Synthetic data: section 16.
 - Roadmap: section 17.
-- First sprint: section 18.
-- Tests: section 19.
-- Engineering rules: section 20.
+- Staff-level implementation review workflow: section 18.
+- First sprint: section 19.
+- Tests: section 20.
+- Engineering rules: section 21.
 
-## 22. Reference Documents
+## 23. Reference Documents
 
 Use these for background and deeper reasoning:
 

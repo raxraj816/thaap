@@ -2,6 +2,8 @@ package com.thaap.payments.paymentmethod;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
@@ -33,8 +35,18 @@ public class PaymentMethod {
     @Column(nullable = false)
     private String cardFingerprint;
 
+    @Column(nullable = false, length = 6)
+    private String cardBin;
+
     @Column(nullable = false, length = 4)
     private String cardLast4;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private CardFunding cardFunding;
+
+    @Column(nullable = false, length = 2)
+    private String cardCountry;
 
     @Column(nullable = false)
     private Instant createdAt;
@@ -42,14 +54,18 @@ public class PaymentMethod {
     protected PaymentMethod() {
     }
 
-    public PaymentMethod(UUID merchantId, UUID customerId, String token, String cardFingerprint, String cardLast4) {
+    public PaymentMethod(UUID merchantId, UUID customerId, String token, String cardFingerprint, String cardBin,
+            String cardLast4, CardFunding cardFunding, String cardCountry) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.customerId = customerId;
         this.type = "CARD";
         this.token = token;
         this.cardFingerprint = cardFingerprint;
+        this.cardBin = cardBin;
         this.cardLast4 = cardLast4;
+        this.cardFunding = cardFunding;
+        this.cardCountry = cardCountry;
         this.createdAt = Instant.now();
     }
 
@@ -77,7 +93,19 @@ public class PaymentMethod {
         return cardFingerprint;
     }
 
+    public String getCardBin() {
+        return cardBin;
+    }
+
     public String getCardLast4() {
         return cardLast4;
+    }
+
+    public CardFunding getCardFunding() {
+        return cardFunding;
+    }
+
+    public String getCardCountry() {
+        return cardCountry;
     }
 }

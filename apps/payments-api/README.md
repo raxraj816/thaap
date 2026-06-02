@@ -9,6 +9,7 @@ Implemented Day 2 stack:
 - Spring Web
 - Spring Validation
 - Spring Data JPA
+- Flyway
 - Spring Actuator
 - PostgreSQL
 - Redis
@@ -30,8 +31,8 @@ Responsibilities:
 
 ## Merchant Tenant Boundary
 
-`Merchant` is the tenant root. Admin setup creates merchants and issues an
-API key:
+`Merchant` is the tenant root. Admin setup creates merchants and reveals an
+API key once:
 
 ```bash
 curl -X POST http://localhost:8080/admin/merchants \
@@ -39,9 +40,10 @@ curl -X POST http://localhost:8080/admin/merchants \
   -d '{"name":"Demo Merchant"}'
 ```
 
-Merchant-facing APIs derive tenant scope from `X-Api-Key`; clients must not be
-trusted to choose `merchantId` in request bodies. Mutating payment APIs require
-`Idempotency-Key`, and idempotency records are unique per `(merchant_id, key)`.
+Merchant-facing APIs derive tenant scope from `X-Api-Key`; only the API key
+prefix and hash are stored. Clients must not be trusted to choose `merchantId`
+in request bodies. Mutating payment APIs require `Idempotency-Key`, and
+idempotency records are unique per `(merchant_id, key)`.
 
 Implemented tenant-scoped endpoints:
 
@@ -61,6 +63,27 @@ Implemented tenant-scoped endpoints:
 Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
+
+## Database Migrations
+
+The API schema is managed by Flyway from `src/main/resources/db/migration`.
+Hibernate validates entity mappings against the migrated schema; it does not
+create or update durable local tables.
+
+The initial migration creates tenant-scoped tables for merchants, customers,
+payment methods, payment intents, idempotency records, webhook endpoints and
+deliveries, fraud decisions, fraud rules, and review cases. It also installs
+foreign keys, composite tenant ownership constraints, hashed secret columns,
+webhook retry metadata, safe card metadata, capture method storage, and hot
+lookup indexes such as `(merchant_id, idempotency_key)`.
+
+Day 1-3 local databases were created with temporary Hibernate scaffolding. If
+that local PostgreSQL volume still exists, reset it before first Flyway startup:
+
+```bash
+docker compose -f infra/docker/compose.yml down --volumes
+scripts/local-infra-up.sh
+```
 
 ## Request IDs And Error Contract
 

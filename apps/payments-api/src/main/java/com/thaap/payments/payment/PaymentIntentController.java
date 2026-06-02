@@ -54,7 +54,7 @@ public class PaymentIntentController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
         }
         var paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
-                request.customerId(), request.amount(), request.currency()));
+                request.customerId(), request.amount(), request.currency(), request.normalizedCaptureMethod()));
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.created",
                 paymentIntent.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentIntentResponse.from(paymentIntent));
@@ -100,15 +100,20 @@ public class PaymentIntentController {
     public record CreatePaymentIntentRequest(
             @NotNull UUID customerId,
             @Min(1) long amount,
-            @NotBlank @Pattern(regexp = "[A-Za-z]{3}") String currency) {
+            @NotBlank @Pattern(regexp = "[A-Za-z]{3}") String currency,
+            CaptureMethod captureMethod) {
+
+        CaptureMethod normalizedCaptureMethod() {
+            return captureMethod == null ? CaptureMethod.AUTOMATIC : captureMethod;
+        }
     }
 
     public record PaymentIntentResponse(UUID id, UUID merchantId, UUID customerId, long amount, String currency,
-            PaymentIntentStatus status) {
+            CaptureMethod captureMethod, PaymentIntentStatus status) {
         static PaymentIntentResponse from(PaymentIntent paymentIntent) {
             return new PaymentIntentResponse(paymentIntent.getId(), paymentIntent.getMerchantId(),
                     paymentIntent.getCustomerId(), paymentIntent.getAmount(), paymentIntent.getCurrency(),
-                    paymentIntent.getStatus());
+                    paymentIntent.getCaptureMethod(), paymentIntent.getStatus());
         }
     }
 

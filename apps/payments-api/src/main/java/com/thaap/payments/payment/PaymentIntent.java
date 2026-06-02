@@ -34,6 +34,10 @@ public class PaymentIntent {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    private CaptureMethod captureMethod;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private PaymentIntentStatus status;
 
     @Column(nullable = false)
@@ -46,11 +50,16 @@ public class PaymentIntent {
     }
 
     public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency) {
+        this(merchantId, customerId, amount, currency, CaptureMethod.AUTOMATIC);
+    }
+
+    public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency, CaptureMethod captureMethod) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.customerId = customerId;
         this.amount = amount;
         this.currency = currency.toUpperCase();
+        this.captureMethod = captureMethod;
         this.status = PaymentIntentStatus.REQUIRES_CONFIRMATION;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
@@ -74,6 +83,10 @@ public class PaymentIntent {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public CaptureMethod getCaptureMethod() {
+        return captureMethod;
     }
 
     public PaymentIntentStatus getStatus() {
