@@ -8,7 +8,7 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Day 2 is complete at local-infrastructure foundation level:
+Day 4 is complete at database-migration and payment-security foundation level:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -19,6 +19,20 @@ Day 2 is complete at local-infrastructure foundation level:
 - `apps/payments-api` is scaffolded as a Java 25 / Spring Boot 4.0.6 service.
 - Actuator health, liveness, and readiness endpoints are available.
 - The local Spring profile connects to PostgreSQL and Redis.
+- Merchant tenant context is resolved from `X-Api-Key`.
+- Merchant-facing APIs are tenant-scoped.
+- Request IDs and standard API error responses are implemented.
+- Flyway owns the `payments-api` schema.
+- Hibernate validates entity mappings instead of mutating durable schemas.
+- The initial migration creates tenant-scoped merchant, customer, payment
+  method, payment intent, idempotency, webhook, fraud decision, rule, and review
+  tables.
+- Merchant API keys and webhook signing secrets are stored as prefixes and
+  hashes, not raw secrets.
+- Simulated card input is reduced to safe metadata such as token, fingerprint,
+  BIN, last4, funding type, and country.
+- Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
+  repetition trackers are in place under `docs/learning/`.
 
 ## Repository Layout
 
@@ -71,7 +85,7 @@ See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the full glossary.
 
 ## Local Development
 
-Local infrastructure and the first runnable service are now available:
+Local infrastructure and the first runnable service are available:
 
 ```bash
 scripts/local-infra-up.sh
@@ -85,4 +99,19 @@ Then verify:
 curl http://localhost:8080/actuator/health
 curl http://localhost:8080/actuator/health/liveness
 curl http://localhost:8080/actuator/health/readiness
+```
+
+If an older local PostgreSQL volume was created before Flyway became the schema
+owner, reset it before first Day 4 startup:
+
+```bash
+docker compose -f infra/docker/compose.yml down --volumes
+scripts/local-infra-up.sh
+scripts/payments-api-run.sh
+```
+
+Day 4 learning verification:
+
+```bash
+scripts/learning-day-check.sh 2026-06-02 --deep-dive-required
 ```
