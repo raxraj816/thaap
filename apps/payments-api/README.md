@@ -2,7 +2,7 @@
 
 Primary V1 backend deployable.
 
-Implemented Day 2 stack:
+Implemented backend foundation:
 
 - Java 25
 - Spring Boot 4.0.6
@@ -32,10 +32,13 @@ Responsibilities:
 ## Merchant Tenant Boundary
 
 `Merchant` is the tenant root. Admin setup creates merchants and reveals an
-API key once:
+API key once. This bootstrap endpoint is disabled unless
+`THAAP_ADMIN_BOOTSTRAP_TOKEN` is configured, and requests must send the matching
+`X-Admin-Bootstrap-Token` header:
 
 ```bash
 curl -X POST http://localhost:8080/admin/merchants \
+  -H 'X-Admin-Bootstrap-Token: change-me-local-admin-bootstrap-token' \
   -H 'Content-Type: application/json' \
   -d '{"name":"Demo Merchant"}'
 ```
@@ -44,6 +47,10 @@ Merchant-facing APIs derive tenant scope from `X-Api-Key`; only the API key
 prefix and hash are stored. Clients must not be trusted to choose `merchantId`
 in request bodies. Mutating payment APIs require `Idempotency-Key`, and
 idempotency records are unique per `(merchant_id, key)`.
+
+`THAAP_HASH_PEPPER` must also be configured so customer PII hashes, internal
+card fingerprints, and idempotency request hashes use keyed, domain-separated
+HMACs instead of plain deterministic SHA-256.
 
 Implemented tenant-scoped endpoints:
 
@@ -63,6 +70,16 @@ Implemented tenant-scoped endpoints:
 Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
+
+Day 5 contract tests also cover merchant admin setup, including bootstrap-token
+gating, one-time API key reveal, persisted prefix/hash behavior, validation
+errors, and immediate use of the returned key against merchant-facing APIs.
+
+Customer and payment method contract tests prove that raw email, phone, and test
+card numbers are not returned or persisted. Customer PII is stored as keyed
+normalized hashes but hidden from public responses. Payment methods store an
+internal keyed fingerprint, while public responses expose only simulator-safe
+metadata: token, BIN, last4, funding type, and country.
 
 ## Database Migrations
 

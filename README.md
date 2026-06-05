@@ -8,7 +8,7 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Day 4 is complete at database-migration and payment-security foundation level:
+Day 5 is complete at merchant, customer, and payment-method API hardening level:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -29,8 +29,13 @@ Day 4 is complete at database-migration and payment-security foundation level:
   tables.
 - Merchant API keys and webhook signing secrets are stored as prefixes and
   hashes, not raw secrets.
-- Simulated card input is reduced to safe metadata such as token, fingerprint,
-  BIN, last4, funding type, and country.
+- Merchant creation requires an admin bootstrap token and contract tests prove
+  one-time API key reveal, stored prefix/hash behavior, validation errors, and
+  follow-on API-key authentication.
+- Customer and payment method contract tests prove raw PII and raw card input
+  are not returned or persisted beyond the simulator boundary.
+- Simulated card input is reduced to internal fingerprinting plus public safe
+  metadata such as token, BIN, last4, funding type, and country.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 
@@ -88,6 +93,8 @@ See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the full glossary.
 Local infrastructure and the first runnable service are available:
 
 ```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+export THAAP_HASH_PEPPER=change-me-local-sensitive-value-pepper
 scripts/local-infra-up.sh
 mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository test
 scripts/payments-api-run.sh
@@ -102,7 +109,7 @@ curl http://localhost:8080/actuator/health/readiness
 ```
 
 If an older local PostgreSQL volume was created before Flyway became the schema
-owner, reset it before first Day 4 startup:
+owner, reset it before normal local startup:
 
 ```bash
 docker compose -f infra/docker/compose.yml down --volumes
@@ -110,8 +117,8 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Day 4 learning verification:
+Day 5 learning verification:
 
 ```bash
-scripts/learning-day-check.sh 2026-06-02 --deep-dive-required
+scripts/learning-day-check.sh 2026-06-05 --deep-dive-required
 ```

@@ -2,11 +2,8 @@ package com.thaap.payments.idempotency;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,10 +16,13 @@ public class IdempotencyService {
 
     private final IdempotencyRepository idempotencyRepository;
     private final ObjectMapper objectMapper;
+    private final SensitiveValueHasher sensitiveValueHasher;
 
-    public IdempotencyService(IdempotencyRepository idempotencyRepository, ObjectMapper objectMapper) {
+    public IdempotencyService(IdempotencyRepository idempotencyRepository, ObjectMapper objectMapper,
+            SensitiveValueHasher sensitiveValueHasher) {
         this.idempotencyRepository = idempotencyRepository;
         this.objectMapper = objectMapper;
+        this.sensitiveValueHasher = sensitiveValueHasher;
     }
 
     @Transactional
@@ -62,7 +62,7 @@ public class IdempotencyService {
     }
 
     private String requestHash(String operation, Object request) {
-        return sha256(operation + ":" + write(request));
+        return sensitiveValueHasher.hmacSha256("idempotency.request", operation + ":" + write(request));
     }
 
     private String write(Object value) {
@@ -73,12 +73,4 @@ public class IdempotencyService {
         }
     }
 
-    private static String sha256(String value) {
-        try {
-            var digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is not available", exception);
-        }
-    }
 }
