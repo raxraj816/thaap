@@ -59,7 +59,21 @@ Use `docs/learning/DEEP_DIVE_TEMPLATE.md` for this artifact.
 ## What To Capture
 
 Use [DAILY_APPRENTICESHIP_CHECKLIST.md](DAILY_APPRENTICESHIP_CHECKLIST.md)
-at the start and end of each implementation day. The quick local check is:
+at the start and end of each implementation day.
+
+Start a light learning day:
+
+```bash
+scripts/learning-day-start.sh
+```
+
+Start a non-trivial implementation day:
+
+```bash
+scripts/learning-day-start.sh --deep-dive
+```
+
+The quick local check is:
 
 ```bash
 scripts/learning-day-check.sh

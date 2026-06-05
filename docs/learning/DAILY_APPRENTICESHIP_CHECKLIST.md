@@ -5,6 +5,8 @@ engineering understandable, repeatable, and explainable.
 
 ## Start Of Day
 
+- Run `scripts/learning-day-start.sh --deep-dive` for non-trivial work, or
+  `scripts/learning-day-start.sh` for a light documentation/review day.
 - Read the relevant section of `docs/IMPLEMENTATION_MASTER_PLAN.md`.
 - Create or update `docs/learning/daily/YYYY-MM-DD.md`.
 - Write a readiness review before coding:
@@ -64,6 +66,18 @@ Add important concepts to `docs/learning/SPACED_REPETITION_TRACKER.md`.
 Review weak concepts after 1 day, 1 week, and 1 month.
 
 ## Daily Command
+
+Start the day:
+
+```bash
+scripts/learning-day-start.sh
+```
+
+For non-trivial implementation days, start with:
+
+```bash
+scripts/learning-day-start.sh --deep-dive
+```
 
 Run:
 
