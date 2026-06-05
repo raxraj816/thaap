@@ -2,15 +2,12 @@ package com.thaap.payments.paymentmethod;
 
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
+import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,12 +26,14 @@ public class PaymentMethodController {
     private final PaymentMethodRepository paymentMethodRepository;
     private final CustomerRepository customerRepository;
     private final IdempotencyService idempotencyService;
+    private final SensitiveValueHasher sensitiveValueHasher;
 
     public PaymentMethodController(PaymentMethodRepository paymentMethodRepository, CustomerRepository customerRepository,
-            IdempotencyService idempotencyService) {
+            IdempotencyService idempotencyService, SensitiveValueHasher sensitiveValueHasher) {
         this.paymentMethodRepository = paymentMethodRepository;
         this.customerRepository = customerRepository;
         this.idempotencyService = idempotencyService;
+        this.sensitiveValueHasher = sensitiveValueHasher;
     }
 
     @PostMapping
@@ -57,7 +56,8 @@ public class PaymentMethodController {
         }
         var paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
                 request.customerId(), "pm_tok_" + UUID.randomUUID().toString().replace("-", ""),
-                sha256(normalizedCard), normalizedCard.substring(0, 6),
+                sensitiveValueHasher.hmacSha256("payment_method.card_fingerprint", normalizedCard),
+                normalizedCard.substring(0, 6),
                 normalizedCard.substring(normalizedCard.length() - 4), cardFunding(normalizedCard), cardCountry()));
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentMethodResponse.from(paymentMethod));
     }
@@ -73,26 +73,17 @@ public class PaymentMethodController {
         return "US";
     }
 
-    private static String sha256(String value) {
-        try {
-            var digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is not available", exception);
-        }
-    }
-
     public record CreatePaymentMethodRequest(
             @NotNull UUID customerId,
             @NotBlank @Pattern(regexp = "[0-9 ]{12,19}") String cardNumber) {
     }
 
     public record PaymentMethodResponse(UUID id, UUID merchantId, UUID customerId, String type, String token,
-            String cardFingerprint, String cardBin, String cardLast4, CardFunding cardFunding, String cardCountry) {
+            String cardBin, String cardLast4, CardFunding cardFunding, String cardCountry) {
         static PaymentMethodResponse from(PaymentMethod paymentMethod) {
             return new PaymentMethodResponse(paymentMethod.getId(), paymentMethod.getMerchantId(),
                     paymentMethod.getCustomerId(), paymentMethod.getType(), paymentMethod.getToken(),
-                    paymentMethod.getCardFingerprint(), paymentMethod.getCardBin(), paymentMethod.getCardLast4(),
+                    paymentMethod.getCardBin(), paymentMethod.getCardLast4(),
                     paymentMethod.getCardFunding(), paymentMethod.getCardCountry());
         }
     }

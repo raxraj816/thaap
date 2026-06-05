@@ -17,8 +17,14 @@ The fraud system must:
 - support rules and ML scoring
 - support manual review
 - learn from chargebacks and review outcomes
+- capture safe identity, device, session, and checkout risk context
+- support fraud taxonomy beyond binary labels
+- detect card-testing and enumeration patterns as operational incidents
+- support merchant risk policy and merchant risk monitoring
+- support dispute evidence and friendly-fraud workflows
 - support rule simulation before activation
 - support graph investigation
+- support privacy-safe cross-merchant aggregate features
 - use GenAI only offline
 
 Core rule:
@@ -59,6 +65,7 @@ Input:
 - amount
 - currency
 - capture method
+- risk context
 - feature snapshot
 - velocity features
 - active ruleset
@@ -81,6 +88,7 @@ Persistence:
 
 - `FraudDecision`
 - `FeatureSnapshot`
+- `RiskContext`
 - `RuleExecutionResult`
 - `ModelPrediction`, later
 
@@ -156,7 +164,7 @@ Payment features:
 - AVS result
 - 3DS status/result
 
-Customer features:
+Customer and identity features:
 
 - account age
 - prior successful payments
@@ -164,6 +172,10 @@ Customer features:
 - prior reviews
 - prior refunds
 - prior chargebacks
+- email domain risk bucket, simulated
+- phone country mismatch
+- address reuse count
+- login age
 
 Velocity features:
 
@@ -190,6 +202,29 @@ Behavioral features:
 - distinct customers per card fingerprint
 - country mismatch flags
 - related transaction count
+
+Risk context features:
+
+- IP country
+- device age
+- session age
+- checkout channel
+- user agent family
+- shipping/billing/card country mismatch
+- CAPTCHA outcome
+- bot score
+- 3DS liability-shift expectation
+
+Merchant risk features:
+
+- merchant risk tier
+- merchant category
+- merchant authorization rate
+- merchant decline rate
+- merchant chargeback rate
+- merchant fraud/dispute ratio
+- merchant enumeration ratio
+- merchant review backlog
 
 Graph features, later:
 
@@ -363,8 +398,49 @@ Seed:
 - `REQUEST_3DS` configured 3DS test card
 - `BLOCK` excessive card velocity
 - `REVIEW` billing/card country mismatch
+- `BLOCK` card-testing pattern with many low-amount attempts
+- `REVIEW` new customer, high amount, mismatched shipping/card geography
+- `REQUEST_3DS` elevated risk above merchant policy threshold
 
-## 8. Lists Architecture
+## 8. Card-Testing And Enumeration Incidents
+
+Card-testing is a distinct operational threat, not merely a high velocity
+transaction. The system should group related attempts into
+`CardTestingIncident` records.
+
+Signals:
+
+- spikes in failed authorizations
+- spikes in blocked low-amount payments
+- many distinct card fingerprints from one IP/device/session group
+- many card setup attempts without successful purchases
+- abnormal issuer decline rate
+- repeated CVC/AVS failures
+- enumeration ratio using approved and declined attempts
+
+Incident outputs:
+
+- status
+- severity
+- time window
+- attempt count
+- distinct card/BIN/IP/device counts
+- likely attack surface
+- recommended mitigation
+- analyst notes
+
+Allowed mitigations:
+
+- tighten rate limits
+- require CAPTCHA or bot-friction mode
+- temporarily restrict payment-method creation
+- recommend API-key rotation
+- notify merchant/operator
+
+Mitigations must create audit records or explicit incident updates. They must
+not silently disable legitimate merchant traffic.
+
+## 9. Lists Architecture
 
 Lists are first-class rule inputs.
 
@@ -395,7 +471,7 @@ Default:
 - allowlist entries should be time-bounded where possible
 - blocklist entries need review and source metadata
 
-## 9. Manual Review Feedback Loop
+## 10. Manual Review Feedback Loop
 
 Review is created by `REVIEW` fraud action.
 
@@ -421,6 +497,21 @@ Review outcome labels:
 - fraud
 - unknown
 
+Fraud labels can additionally include a fraud type:
+
+- stolen card
+- card testing
+- account takeover
+- synthetic identity
+- friendly fraud
+- refund abuse
+- promo abuse
+- reseller abuse
+- triangulation
+- merchant fraud
+- scam or social engineering
+- unknown fraud
+
 These labels feed:
 
 - rule evaluation
@@ -428,7 +519,7 @@ These labels feed:
 - model monitoring
 - analyst reporting
 
-## 10. Chargeback Feedback Loop
+## 11. Chargeback And Dispute Evidence Feedback Loop
 
 Chargebacks are delayed labels.
 
@@ -439,6 +530,7 @@ chargeback created
   -> link to payment intent / attempt / capture
   -> write dispute ledger entries
   -> if fraud reason, create FraudLabel
+  -> create or link DisputeEvidencePacket
   -> emit chargeback.created
   -> update analytics
   -> feed training dataset
@@ -450,10 +542,26 @@ Important:
 - fraud chargebacks are high-value labels
 - chargeback label time is later than event time
 - model training must respect label delay
+- friendly fraud requires separate type/source/confidence handling
+- evidence packets are product artifacts, not ML features unless they were
+  known at decision time
 
-## 11. ML Training Architecture
+Dispute evidence MVP:
 
-### 11.1 Dataset Unit
+- reason code
+- evidence due date
+- 3DS/liability-shift state
+- AVS/CVC outcomes
+- delivery or fulfillment signal, simulated
+- customer communication notes, simulated
+- prior undisputed transactions
+- device/IP continuity
+- refund history
+- outcome
+
+## 12. ML Training Architecture
+
+### 12.1 Dataset Unit
 
 One row per PaymentAttempt.
 
@@ -466,7 +574,10 @@ Required columns:
 - event time
 - label time
 - label
+- fraud type, when known
+- label source
 - feature version
+- merchant risk tier
 - feature values
 
 Labels:
@@ -482,7 +593,7 @@ Unknown outcomes include:
 - payments still within chargeback window
 - unresolved reviews
 
-### 11.2 Splitting
+### 12.2 Splitting
 
 Use time-based splits:
 
@@ -494,13 +605,14 @@ test: newest held-out period
 
 Never use random split as the primary fraud evaluation split.
 
-### 11.3 Leakage Prevention
+### 12.3 Leakage Prevention
 
 Do not include:
 
 - future chargeback fields
 - final review outcome as input feature
 - post-decision state changes
+- dispute evidence fields created after the decision
 - future aggregate features
 
 Do include:
@@ -509,7 +621,7 @@ Do include:
 - historical customer features known at decision time
 - historical velocity features known at decision time
 
-### 11.4 Data-First Model Strategy
+### 12.4 Data-First Model Strategy
 
 Do not prescribe advanced model architecture before data exists.
 
@@ -531,7 +643,37 @@ Conditional later work:
 
 Advanced ML is optional and evidence-driven, not a predetermined milestone.
 
-## 12. ML Evaluation
+### 12.5 Model Governance
+
+Every model promoted beyond experimentation must have:
+
+- dataset version
+- feature version
+- training window
+- label definition
+- unknown-outcome policy
+- model card
+- dataset card
+- segment regression report
+- replay report
+- shadow-mode results
+- approval record
+- rollback target
+- owner
+
+Promotion flow:
+
+```text
+candidate model
+  -> offline evaluation
+  -> replay
+  -> shadow mode
+  -> limited canary
+  -> approval
+  -> active
+```
+
+## 13. ML Evaluation
 
 Primary metrics:
 
@@ -548,6 +690,11 @@ Secondary metrics:
 - feature drift
 - score distribution drift
 - segment metrics
+- fraud-type coverage
+- merchant-risk-tier performance
+- 3DS friction rate
+- review queue pressure
+- dispute ratio and false-positive cost
 
 Segments:
 
@@ -557,6 +704,8 @@ Segments:
 - card funding type
 - amount band
 - new vs returning customer
+- merchant risk tier
+- fraud type, when labels are available
 
 Promotion rule:
 
@@ -564,7 +713,7 @@ Promotion rule:
 - segment regressions must be reviewed
 - model version and training data version must be recorded
 
-### 12.1 Offline Evaluation And ReplayEngine
+### 13.1 Offline Evaluation And ReplayEngine
 
 Add ReplayEngine before relying on rule/model changes.
 
@@ -596,10 +745,14 @@ Replay outputs:
 - model/rule lift
 - segment regressions
 - example matched transactions
+- fraud-type impact
+- merchant risk policy impact
+- review-capacity breach count
+- dispute and chargeback impact estimate
 
 No major rule/model threshold change should be activated without replay evidence.
 
-### 12.2 Calibration And Threshold Tuning
+### 13.2 Calibration And Threshold Tuning
 
 Fraud thresholds are multi-objective business controls.
 
@@ -612,6 +765,9 @@ Optimize across:
 - 3DS friction
 - merchant risk tolerance
 - customer lifetime value, later
+- review capacity
+- 3DS friction budget
+- dispute and chargeback cost
 
 Required reports:
 
@@ -621,6 +777,7 @@ Required reports:
 - review capacity simulation
 - merchant segment impact
 - per-merchant regression report for material merchants or synthetic tenant segments
+- risk policy simulation report
 
 Threshold policy:
 
@@ -629,7 +786,7 @@ Threshold policy:
 - later support merchant-specific thresholds
 - replay every threshold change before activation
 
-## 13. Model Serving Architecture
+## 14. Model Serving Architecture
 
 Service:
 
@@ -677,9 +834,9 @@ Timeout behavior:
 - record `MODEL_TIMEOUT`
 - do not fail payment confirmation solely because model service timed out, unless configured fail-closed
 
-## 14. Graph Fraud Architecture
+## 15. Graph Fraud Architecture
 
-### 14.1 Graph Nodes
+### 15.1 Graph Nodes
 
 - Customer
 - Device
@@ -692,8 +849,13 @@ Timeout behavior:
 - PaymentAttempt
 - Chargeback
 - FraudCase
+- MerchantRiskProfile
+- Session
+- AddressHash
+- EmailDomain
+- CardTestingIncident
 
-### 14.2 Graph Relationships
+### 15.2 Graph Relationships
 
 - Customer `USED` Device
 - Customer `USED` CardFingerprint
@@ -704,8 +866,13 @@ Timeout behavior:
 - PaymentAttempt `FROM` IP
 - Chargeback `AGAINST` PaymentAttempt
 - FraudCase `LABELS` Customer or PaymentAttempt
+- Session `USED` Device
+- Customer `USED` AddressHash
+- Customer `HAS` EmailDomain
+- CardTestingIncident `INVOLVES` PaymentAttempt
+- Merchant `HAS_RISK_PROFILE` MerchantRiskProfile
 
-### 14.3 First Graph Queries
+### 15.3 First Graph Queries
 
 Implement:
 
@@ -714,6 +881,8 @@ Implement:
 - IPs with high distinct customer count and high decline rate
 - two-hop fraud proximity from customer to known fraud cluster
 - merchant-level cluster with high chargeback density
+- card-testing incident neighborhoods
+- friendly-fraud repeat device/address patterns
 
 Graph output:
 
@@ -725,7 +894,15 @@ Graph output:
 
 Graph should support investigation first and real-time features later.
 
-## 15. Agentic Fraud Intelligence Architecture
+Privacy-safe network rule:
+
+- Cross-merchant graph and aggregate features must be transformed,
+  anonymized, or thresholded before use.
+- A merchant-facing analyst must never see another merchant's raw customer,
+  payment, device, IP, or graph object.
+- Any global feature must carry an explicit global/anonymized scope marker.
+
+## 16. Agentic Fraud Intelligence Architecture
 
 Agents are offline.
 
@@ -765,6 +942,9 @@ Tool contracts:
 - `get_false_positive_examples(filters)`
 - `get_false_negative_examples(filters)`
 - `get_graph_neighbors(entityId, depth)`
+- `get_card_testing_incident(incidentId)`
+- `get_dispute_evidence_packet(chargebackId)`
+- `simulate_risk_policy(candidatePolicy, timeWindow)`
 - `create_rule_recommendation(candidateRule, simulationId)`
 
 Tool audit fields:
@@ -776,7 +956,7 @@ Tool audit fields:
 - duration
 - data sensitivity class
 
-## 16. Fraud Observability
+## 17. Fraud Observability
 
 Metrics:
 
@@ -791,6 +971,12 @@ Metrics:
 - false positive estimate
 - chargeback rate
 - fraud capture rate
+- card-testing incident count
+- enumeration ratio
+- fraud/dispute ratio
+- merchant risk tier distribution
+- review SLA breach count
+- dispute evidence win/loss rate
 
 Logs:
 
@@ -805,6 +991,7 @@ Traces:
 
 ```text
 payment confirmation
+  -> risk context capture
   -> feature extraction
   -> velocity lookup
   -> rule evaluation
@@ -813,19 +1000,26 @@ payment confirmation
   -> decision persistence
 ```
 
-## 17. Fraud Acceptance Criteria
+## 18. Fraud Acceptance Criteria
 
 Fraud architecture is complete when:
 
 - every PaymentAttempt has FraudDecision after fraud MVP
 - rules can `ALLOW`, `BLOCK`, `REQUEST_3DS`, and `REVIEW`
 - feature snapshots are persisted
+- risk context is persisted safely
 - velocity counters exclude current payment
 - review outcomes create labels
 - fraud chargebacks create labels
+- fraud labels support fraud type and source
+- card-testing incidents group abusive patterns
+- dispute evidence packets link chargebacks to evidence and outcomes
 - ML dataset uses time-based split
+- promoted models have dataset/model cards and rollback targets
 - model prediction stores model version
 - model timeout falls back safely
 - rule simulation reports business impact
+- merchant risk policy changes are simulated before activation once replay exists
 - graph can identify synthetic rings
+- cross-merchant intelligence is privacy-safe
 - agents cannot mutate live state directly

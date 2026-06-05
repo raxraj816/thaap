@@ -21,6 +21,10 @@ Security goals:
 - audit high-risk actions
 - separate real-time payment decisions from offline GenAI
 - enforce merchant-tenant isolation
+- treat card-testing, enumeration, bot abuse, and credential leakage as
+  security events
+- classify and minimize device, session, IP, email, phone, address, and bot
+  signals
 - design for future RBAC
 - keep secrets out of source code
 
@@ -71,6 +75,9 @@ Persist only if needed and preferably hashed/masked:
 - address
 - user agent
 - device ID
+- session ID
+- risk context values
+- bot/friction scores
 
 ### 2.3 Payment Metadata
 
@@ -170,6 +177,9 @@ High-risk APIs:
 - chargeback
 - review resolution
 - rule activation
+- merchant risk policy update
+- card-testing mitigation update
+- dispute evidence submission
 - model promotion
 
 High-risk APIs must be audited.
@@ -212,6 +222,40 @@ Metrics:
 - throttled requests
 - blocked requests
 - rate-limit Redis errors
+
+### 4.3 Card-Testing And Enumeration Security
+
+Card-testing and enumeration attacks are security incidents because they can
+damage merchant reputation, increase network risk, create dispute exposure, and
+strain infrastructure.
+
+Controls:
+
+- detect spikes in failed authorizations and low-amount attempts
+- detect many distinct card fingerprints from shared IP/device/session groups
+- detect card setup attempts without successful purchases
+- track enumeration ratio using approved and declined attempts
+- create `CardTestingIncident` records for grouped attacks
+- recommend mitigations such as rate-limit changes, CAPTCHA-required mode,
+  temporary payment-method creation restrictions, and API-key rotation
+
+Operational rule:
+
+- Mitigations must create an audit log, incident update, metric, or explicit
+  merchant/operator notification. Silent traffic suppression is not acceptable.
+
+### 4.4 Payment-Page And Checkout-Script Security
+
+THAAP V1 is API-first and does not host real payment pages. Future hosted-field
+or checkout UI work must still model PCI-shaped browser risk:
+
+- inventory checkout scripts
+- restrict payment-page scripts to approved sources
+- monitor payment-page integrity when a payment page exists
+- avoid placing raw PAN/CVV handling in merchant-controlled JavaScript
+- document how hosted fields/tokenization reduce card-data scope
+
+This is a learning requirement, not a PCI-compliance claim.
 
 ## 5. Idempotency Security
 
@@ -279,6 +323,15 @@ Controls:
 - canary state later
 - rollback to prior version
 
+Merchant risk policy controls:
+
+- policy changes require actor, reason, and audit trail
+- policy changes require replay/simulation once ReplayEngine exists
+- emergency policy changes require explicit emergency reason and follow-up
+  review
+- broad policy changes must report authorization, 3DS friction, review load,
+  dispute, and false-positive impact
+
 ## 8. GenAI Agent Security
 
 Agents are offline.
@@ -338,6 +391,9 @@ Audit required for:
 - review action
 - rule creation/activation/disable
 - list changes
+- merchant risk profile and risk policy changes
+- card-testing incident mitigation
+- dispute evidence packet creation/submission/outcome
 - model promotion
 - agent tool call
 
@@ -355,6 +411,11 @@ Observability should answer:
 - Are model predictions timing out?
 - Are chargebacks increasing?
 - Are reviews backing up?
+- Are card-testing incidents active?
+- Are enumeration ratios rising?
+- Are merchant fraud/dispute ratios approaching thresholds?
+- Are dispute evidence deadlines at risk?
+- Are risk policy changes harming authorization rate or review capacity?
 
 ## 11. Logging
 
@@ -382,6 +443,8 @@ Never log:
 - signing secrets
 - auth tokens
 - full sensitive request bodies
+- raw risk context values such as full IP, full address, raw email, raw phone,
+  raw device ID, or raw session ID
 
 ## 12. Metrics
 
@@ -426,6 +489,12 @@ Never log:
 - false positive estimate
 - fraud capture rate
 - chargeback rate by merchant
+- fraud/dispute ratio by merchant
+- enumeration ratio
+- card-testing incident count
+- merchant risk tier distribution
+- review SLA breach count
+- dispute evidence win/loss rate
 
 ### 12.4 ML Metrics
 
@@ -439,6 +508,10 @@ Added later:
 - feature drift
 - model version traffic
 - segment metrics
+- fraud-type coverage
+- merchant-risk-tier performance
+- shadow-mode disagreement rate
+- canary rollback count
 
 ## 13. Tracing
 
@@ -449,6 +522,7 @@ HTTP request
   -> idempotency lookup
   -> payment intent load
   -> payment attempt creation
+  -> risk context capture
   -> feature extraction
   -> velocity lookup
   -> rule evaluation
@@ -523,6 +597,26 @@ Behavior:
 - delivery failure is recorded
 - retry is scheduled
 - merchant can inspect deliveries
+
+### 14.6 Card-Testing Incident
+
+Behavior:
+
+- continue serving legitimate traffic when possible
+- create or update a `CardTestingIncident`
+- tighten configured rate limits only through explicit policy
+- recommend CAPTCHA/bot-friction mode when appropriate
+- alert operator or merchant for severe incidents
+- preserve samples for investigation without storing raw sensitive values
+
+### 14.7 Risk Policy Regression
+
+Behavior:
+
+- detect sudden authorization-rate drop, review-rate spike, 3DS-friction spike,
+  or false-positive estimate spike after a policy/rule/model change
+- rollback to previous policy/ruleset/model when configured guardrails trip
+- preserve replay and activation metadata for investigation
 
 ## 15. Deployment Architecture
 
@@ -599,13 +693,17 @@ Create runbooks later for:
 - payment confirmation latency spike
 - processor decline spike
 - fraud block-rate spike
+- card-testing or enumeration spike
 - webhook delivery failures
 - Redis outage
 - database migration failure
 - model timeout spike
 - rule rollback
+- merchant risk policy rollback
 - chargeback spike
+- dispute evidence deadline spike
 - manual review backlog
+- credential or API-key leakage
 
 Each runbook should include:
 
@@ -628,6 +726,8 @@ Ready when:
 - idempotency tests pass
 - ledger tests pass
 - fraud decision tests pass
+- risk context data-minimization tests pass
+- card-testing incident tests pass
 - raw PAN/CVV persistence tests pass
 
 ### 17.2 Dashboard Readiness
@@ -639,6 +739,9 @@ Ready when:
 - review queue works
 - review actions work
 - rule list displays active rules
+- card-testing incident detail works
+- merchant risk profile detail works
+- dispute evidence packet detail works
 
 ### 17.3 ML Readiness
 
@@ -650,6 +753,8 @@ Ready when:
 - model metrics are recorded
 - scoring service returns versioned predictions
 - timeout fallback works
+- dataset/model cards exist for promoted models
+- shadow-mode reports exist before active model rollout
 
 ### 17.4 Production-Shape Readiness
 
@@ -671,6 +776,10 @@ Complete when:
 - mutating payment APIs require idempotency
 - high-risk actions are audited
 - webhook payloads are signed
+- risk context values are minimized and masked
+- card-testing and enumeration incidents create auditable records
+- merchant risk policy changes are audited and simulated once replay exists
+- dispute evidence workflows preserve reason code, source, and outcome
 - payment/fraud/ledger metrics are emitted
 - confirm flow is traceable end to end
 - failure modes have controlled behavior

@@ -17,6 +17,101 @@ Build THAAP, Threat Hunting & Adaptive Analytics for Payments, as an end-to-end 
 
 THAAP is not a toy checkout demo. It is a production-shaped simulator designed to teach and demonstrate how payment systems and fraud systems work together.
 
+### 1.1 Challenger Product Bar
+
+THAAP's long-term ambition is to become a credible challenger to products in
+the Stripe Radar and Mastercard Brighterion class. That means the platform must
+not stop at a checkout simulator, a rules demo, or a notebook model. It must
+grow into a full payment-risk operating system.
+
+The challenger standard:
+
+- **Payment-native fraud:** Fraud decisions are embedded in real payment
+  authorization, capture, refund, dispute, webhook, idempotency, and ledger
+  flows.
+- **Real-time decision quality:** The authorization path is deterministic,
+  bounded by explicit latency budgets, observable, resilient to model timeouts,
+  and safe under retries.
+- **Network-intelligence path:** V1 starts with merchant-scoped signals and
+  synthetic multi-merchant scenarios. Later phases must add privacy-safe global
+  and cross-merchant aggregate features, segment-level evaluation, and graph
+  intelligence so THAAP is not limited to single-merchant rules.
+- **Explainable controls:** Every decision exposes risk score, risk level,
+  rules fired, reason codes, feature snapshot, model version, related
+  transactions, and safe audit timeline.
+- **Analyst operations:** Manual review, case management, search, timelines,
+  rule governance, chargeback workflows, and business insights are core product
+  surfaces, not admin afterthoughts.
+- **Post-authorization protection:** Fraud work continues after authorization
+  through early-warning simulation, Smart Refund-style recommendations,
+  friendly-fraud/dispute workflows, and feedback into rules and models.
+- **Rule simulation and governance:** Rule changes require validation,
+  historical simulation, impact reports, approval, canary/rollback strategy,
+  and audit logs.
+- **ML feedback loop:** Models require point-in-time datasets, delayed-label
+  handling, unknown-outcome tracking, calibration, drift monitoring, model
+  registry metadata, segment impact checks, and timeout-safe serving.
+- **Graph and pattern intelligence:** Graph is used for investigation,
+  explainable risk contributions, fraud-ring discovery, and later features,
+  not as an opaque score.
+- **Adaptive intelligence with human authority:** GenAI agents investigate,
+  explain, simulate, and recommend. Humans approve operational changes.
+- **Security and trust:** Tenant isolation, PCI-style data minimization,
+  secret hygiene, auditability, RBAC, rate limiting, and rollback playbooks are
+  product requirements, not compliance theater.
+- **Merchant risk is part of fraud:** The platform must model risky merchants,
+  not only risky buyers. Underwriting, merchant risk tiers, velocity limits,
+  dispute thresholds, reserve/hold simulation, and merchant monitoring are part
+  of the product path.
+- **Card-testing and enumeration defense:** Card setup abuse, low-value payment
+  testing, credential/key leakage, retry storms, bot friction, and network
+  enumeration metrics are first-class threats with incident workflows.
+- **Dispute evidence and friendly fraud:** Chargebacks are not just delayed ML
+  labels. The product must support evidence packets, reason-code workflows,
+  pre-dispute signals, friendly-fraud classification, and dispute performance
+  reporting.
+- **Identity and session intelligence:** Real payment risk depends on checkout
+  context: device, session, IP, user agent, email, phone, address, shipping,
+  account age, login signals, and bot/friction signals. These must have safe
+  data handling and clear lineage.
+- **Developer product quality:** A credible payments product needs OpenAPI,
+  API versioning, webhook signing docs, test-card catalogs, idempotency examples,
+  SDK/demo scripts, and an error catalog.
+
+Strategic honesty:
+
+- Stripe and Mastercard have massive production network data advantages. THAAP
+  cannot honestly claim parity with their data network early.
+- THAAP's challenger path is to build better transparency, stronger learning
+  discipline, richer simulator/control surfaces, and eventually privacy-safe
+  network intelligence.
+- No feature should be called challenger-grade until it has durable state,
+  tests, explainability, operational metrics, and a demo path through the
+  payment lifecycle.
+
+### 1.2 Real-World Product Gaps To Close
+
+The deep-research review identified the following gaps as product-critical.
+They are promoted into this master plan so they are not treated as optional
+polish:
+
+- Merchant risk and underwriting.
+- Card-testing and enumeration incident management.
+- Risk context, device/session intelligence, and bot/friction signals.
+- Fraud taxonomy beyond binary fraud labels.
+- Dispute representment, evidence, and friendly-fraud workflows.
+- Merchant risk policy and threshold configuration.
+- Privacy-safe network intelligence and cross-merchant aggregate features.
+- Model governance, including dataset cards, model cards, shadow mode,
+  champion/challenger rollout, and rollback.
+- Analyst workflow depth: queues, assignment, SLA, saved searches, bulk actions,
+  and investigation timelines.
+- Developer-facing quality: API contracts, versioning, examples, and sandbox
+  documentation.
+
+These gaps do not change the V1 simulator boundary. They change what
+"production-shaped" means as the platform matures.
+
 ## 2. Final Scope Decisions
 
 ### 2.0 Multi-Tenant Boundary
@@ -45,6 +140,7 @@ V1 is a full card-payment simulator with integrated fraud detection.
 In scope:
 
 - Merchant onboarding.
+- Merchant risk profile and local risk-tier configuration.
 - Customer creation.
 - Simulated card payment methods.
 - PaymentIntent lifecycle.
@@ -59,8 +155,12 @@ In scope:
 - Webhooks.
 - Audit logs.
 - Real-time fraud decisioning.
+- Decision-time risk context capture.
 - Deterministic rules.
 - Manual review.
+- Fraud taxonomy and fraud-label source tracking.
+- Card-testing and enumeration simulation.
+- Dispute evidence MVP.
 - Basic analyst dashboard.
 
 Out of scope for V1:
@@ -75,6 +175,35 @@ Out of scope for V1:
 - GNN models.
 
 Later phases can add these once the core lifecycle is stable.
+
+### 2.1.1 Fraud Taxonomy
+
+Binary `fraud` / `legitimate` / `unknown` labels are necessary but not enough
+for real-world learning. Labels and simulated scenarios should also support a
+fraud type when known.
+
+Initial fraud types:
+
+- `STOLEN_CARD`
+- `CARD_TESTING`
+- `ACCOUNT_TAKEOVER`
+- `SYNTHETIC_IDENTITY`
+- `FRIENDLY_FRAUD`
+- `REFUND_ABUSE`
+- `PROMO_ABUSE`
+- `RESELLER_ABUSE`
+- `TRIANGULATION`
+- `MERCHANT_FRAUD`
+- `SCAM_OR_SOCIAL_ENGINEERING`
+- `UNKNOWN_FRAUD`
+
+Rules:
+
+- Fraud type is optional because many labels start ambiguous.
+- Fraud type must record its source: review, chargeback, post-authorization
+  signal, analyst update, synthetic generator, or agent recommendation.
+- ML evaluation must report both binary fraud metrics and fraud-type coverage
+  once enough labeled examples exist.
 
 ### 2.2 PCI DSS Scope Position
 
@@ -270,6 +399,29 @@ Merchant-facing APIs derive tenant scope from `X-Api-Key`; do not trust client-s
 
 Current local scaffolding may expose a generated test API key once at merchant creation. Production-shaped implementation must store only a hashed API key secret and a non-secret prefix.
 
+`MerchantRiskProfile`
+
+- `id`
+- `merchantId`
+- `riskTier`
+- `merchantCategory`
+- `country`
+- `businessModel`
+- `websiteUrlHash`
+- `monthlyVolumeLimit`
+- `singleTransactionLimit`
+- `dailyAuthLimit`
+- `dailyCardTestingLimit`
+- `reserveStrategy`
+- `reviewCapacityPerDay`
+- `status`
+- `createdAt`
+- `updatedAt`
+
+Merchant risk is not a V1 underwriting engine. It is a product-shaped control
+surface for tenant-specific limits, simulator scenarios, risk policies, and
+future merchant monitoring.
+
 `Customer`
 
 - `id`
@@ -445,6 +597,45 @@ No capture, refund, fee, or chargeback write is valid unless the ledger transact
 - `responseJson`
 - `createdAt`
 
+`OutboxEvent`
+
+- `id`
+- `merchantId`
+- `aggregateType`
+- `aggregateId`
+- `eventType`
+- `eventVersion`
+- `payloadJson`
+- `status`
+- `retryCount`
+- `lastError`
+- `createdAt`
+- `publishedAt`
+
+Outbox events are written in the same transaction as the domain state change.
+Before Kafka exists, they may feed local webhook delivery records and analytics
+projections. After Kafka exists, they become the durable publish/retry boundary.
+
+`AuditLog`
+
+- `id`
+- `merchantId`
+- `actorType`
+- `actorId`
+- `action`
+- `aggregateType`
+- `aggregateId`
+- `requestId`
+- `traceId`
+- `reason`
+- `beforeJson`
+- `afterJson`
+- `createdAt`
+
+Audit logs are required for high-risk payment, fraud, rule, review, webhook,
+model, and future agent-tool actions. Sensitive values must be masked or omitted
+from audit payloads.
+
 `WebhookEndpoint`
 
 - `id`
@@ -481,6 +672,33 @@ No capture, refund, fee, or chargeback write is valid unless the ledger transact
 - `latencyMs`
 - `reasonCodes`
 - `createdAt`
+
+`RiskContext`
+
+- `id`
+- `merchantId`
+- `paymentAttemptId`
+- `ipHash`
+- `ipCountry`
+- `userAgentHash`
+- `deviceIdHash`
+- `sessionIdHash`
+- `emailHash`
+- `phoneHash`
+- `billingAddressHash`
+- `shippingAddressHash`
+- `shippingCountry`
+- `checkoutChannel`
+- `customerAccountAgeDays`
+- `loginAgeMinutes`
+- `botScore`
+- `captchaOutcome`
+- `createdAt`
+
+RiskContext stores decision-time identity, device, session, and checkout
+signals. It must contain hashed or classified-safe values only. Raw IP, raw
+user agent, full address, raw email, and raw phone should not be logged or
+returned in public responses.
 
 `FeatureSnapshot`
 
@@ -534,8 +752,92 @@ No capture, refund, fee, or chargeback write is valid unless the ledger transact
 - `paymentAttemptId`
 - `source`
 - `label`
+- `fraudType`
 - `confidence`
 - `labelTime`
+
+`CardTestingIncident`
+
+- `id`
+- `merchantId`
+- `status`
+- `startedAt`
+- `endedAt`
+- `detectedBy`
+- `severity`
+- `attemptCount`
+- `declineCount`
+- `distinctCardFingerprintCount`
+- `distinctBinCount`
+- `distinctIpCount`
+- `lowAmountAttemptCount`
+- `mitigationSummary`
+- `createdAt`
+- `updatedAt`
+
+Card-testing incidents group many small authorization/setup attempts into one
+operational object. They support analyst triage, rate-limit tuning, bot-friction
+recommendations, and network-style enumeration metrics.
+
+`DisputeEvidencePacket`
+
+- `id`
+- `merchantId`
+- `chargebackId`
+- `paymentAttemptId`
+- `reasonCode`
+- `status`
+- `evidenceJson`
+- `submittedAt`
+- `dueAt`
+- `outcome`
+- `createdAt`
+- `updatedAt`
+
+Dispute evidence is the bridge between fraud decisions and merchant outcomes.
+The MVP can simulate evidence fields such as AVS/CVC result, 3DS/liability
+shift, delivery confirmation, customer communications, prior undisputed
+payments, refund history, and device/IP continuity.
+
+`MerchantRiskPolicy`
+
+- `id`
+- `merchantId`
+- `riskTier`
+- `blockThreshold`
+- `reviewThreshold`
+- `requestThreeDsThreshold`
+- `maxReviewQueuePerDay`
+- `maxThreeDsFrictionRate`
+- `cardTestingSensitivity`
+- `allowRulesetVersion`
+- `blockRulesetVersion`
+- `status`
+- `createdAt`
+- `updatedAt`
+
+Merchant risk policy turns fraud thresholds into product controls. Policy
+changes must be replayed or simulated before activation once ReplayEngine
+exists.
+
+`PostAuthorizationRiskSignal`
+
+- `id`
+- `merchantId`
+- `paymentAttemptId`
+- `source`
+- `riskLevel`
+- `confidence`
+- `recommendedAction`
+- `status`
+- `reasonCodes`
+- `createdAt`
+
+Post-authorization risk signals represent early fraud warnings, Smart
+Refund-style recommendations, friendly-fraud/dispute indicators, and other
+signals that arrive after the initial authorization decision. They must never
+retroactively rewrite the original FraudDecision; they create new auditable
+recommendations and labels.
 
 ## 6. Processor Simulator
 
@@ -614,6 +916,9 @@ Seed these rules for learning and testing:
 - `REQUEST_3DS` configured 3DS test card.
 - `BLOCK` excessive card velocity.
 - `REVIEW` billing/card country mismatch.
+- `BLOCK` card-testing pattern with many low-amount attempts.
+- `REVIEW` new customer, high amount, mismatched shipping/card geography.
+- `REQUEST_3DS` elevated risk above merchant policy threshold.
 
 ### 7.5 Risk Levels
 
@@ -667,6 +972,11 @@ Rule simulation must report:
 - Estimated manual review load.
 - Top merchants affected.
 - Example matched transactions.
+- 3DS friction impact.
+- Authorization-rate impact.
+- Merchant risk policy impact.
+- Card-testing/enumeration reduction estimate.
+- Dispute/VAMP-style fraud-and-dispute ratio impact, once dispute data exists.
 
 Allow-rule simulations must call out unknown outcomes for payments that were historically blocked.
 
@@ -685,6 +995,10 @@ Allow-rule simulations must call out unknown outcomes for payments that were his
 - Add cross-merchant isolation tests for every merchant-facing endpoint family.
 - Keep LLMs out of the real-time authorization path.
 - Do not allow GenAI agents to mutate production payment, rule, or model state.
+- Treat payment-page script integrity, bot abuse, credential leakage, and
+  checkout automation as security concerns even in the simulator.
+- Keep device, session, IP, email, phone, and address signals hashed, masked, or
+  minimized according to their use.
 
 Rate limiting strategy:
 
@@ -693,6 +1007,17 @@ Rate limiting strategy:
 - Apply stricter limits to payment method creation, payment confirmation, refund, chargeback, login/auth, and rule-management endpoints.
 - Use fail-closed behavior for high-risk mutation endpoints if rate-limit state is unavailable and abuse risk is high.
 - Emit metrics for allowed, throttled, and blocked requests.
+
+Card-testing controls:
+
+- Detect spikes in failed authorizations, blocked payments, low-amount attempts,
+  card setup attempts, and distinct-card attempts from shared IP/device/session
+  groups.
+- Create `CardTestingIncident` rows when thresholds are exceeded.
+- Support mitigations such as rate-limit tightening, CAPTCHA-required mode,
+  temporary payment-method creation restrictions, API-key rotation
+  recommendation, and merchant notification.
+- Track enumeration-style metrics using both approved and declined attempts.
 
 ## 9. Feature Engineering
 
@@ -736,6 +1061,33 @@ Behavioral features:
 - number of distinct customers per card fingerprint
 - country mismatch flags
 - related transaction count
+
+Risk context features:
+
+- IP country
+- device age
+- session age
+- login age
+- user agent family
+- checkout channel
+- shipping/billing/card country mismatch
+- email domain age bucket, simulated
+- phone country mismatch
+- address reuse count
+- CAPTCHA outcome
+- bot score
+- 3DS liability-shift expectation
+
+Merchant risk features:
+
+- merchant risk tier
+- merchant category
+- merchant authorization rate
+- merchant decline rate
+- merchant chargeback rate
+- merchant fraud/dispute ratio
+- merchant enumeration ratio
+- merchant review backlog
 
 Graph features, added later:
 
@@ -784,8 +1136,11 @@ Required fields:
 - event time
 - label time
 - fraud/legitimate/unknown label
+- fraud type, when known
+- label source
 - feature version
 - merchant ID
+- merchant risk tier
 - model-eligible feature values
 
 Avoid leakage:
@@ -818,6 +1173,38 @@ Conditional later work:
 
 Advanced ML is optional and evidence-driven, not a predetermined milestone.
 
+### 10.2.1 Model Governance
+
+Every production-shaped model version must have:
+
+- dataset version
+- feature version
+- training time window
+- label definition
+- label delay policy
+- unknown-outcome handling
+- model card
+- dataset card
+- approval record
+- rollback target
+- owner
+
+Promotion flow:
+
+```text
+candidate model
+  -> offline evaluation
+  -> segment regression report
+  -> replay
+  -> shadow mode
+  -> limited canary
+  -> approval
+  -> active
+```
+
+No model should move from notebook or experiment tracking into real-time serving
+without explicit champion/challenger comparison and a rollback path.
+
 ### 10.3 Metrics
 
 Primary metrics:
@@ -835,6 +1222,11 @@ Secondary metrics:
 - Feature drift.
 - Score distribution drift.
 - Segment metrics by merchant, country, BIN, funding type, and amount band.
+- Fraud-type coverage.
+- Merchant-risk-tier performance.
+- 3DS friction rate.
+- Review queue pressure.
+- Dispute ratio and false-positive cost.
 
 Model promotion requires segment-level checks. A model that improves global metrics but harms a merchant segment must not be promoted without explicit approval.
 
@@ -866,6 +1258,10 @@ Replay outputs:
 - 3DS request rate
 - merchant/segment impact
 - example matched transactions
+- fraud-type impact
+- merchant risk policy impact
+- review-capacity breach count
+- dispute and chargeback impact estimate
 
 ### 10.5 Threshold Tuning And Calibration
 
@@ -950,6 +1346,11 @@ Nodes:
 - PaymentAttempt
 - Chargeback
 - FraudCase
+- MerchantRiskProfile
+- Session
+- AddressHash
+- EmailDomain
+- CardTestingIncident
 
 Relationships:
 
@@ -962,6 +1363,11 @@ Relationships:
 - PaymentAttempt `FROM` IP
 - Chargeback `AGAINST` PaymentAttempt
 - FraudCase `LABELS` Customer or PaymentAttempt
+- Session `USED` Device
+- Customer `USED` AddressHash
+- Customer `HAS` EmailDomain
+- CardTestingIncident `INVOLVES` PaymentAttempt
+- Merchant `HAS_RISK_PROFILE` MerchantRiskProfile
 
 ### 11.2 First Graph Queries
 
@@ -982,13 +1388,21 @@ Dashboard pages:
 - Overview dashboard.
 - Transaction search.
 - Transaction detail.
+- Risk policy management.
+- Merchant risk profile.
+- Card-testing incidents.
 - Manual review queue.
 - Review case detail.
 - Rules management.
 - Rule simulation.
 - Chargeback analytics.
+- Dispute evidence packets.
+- Dispute and post-authorization risk signals.
+- Business insights and KPI reporting.
 - Model performance.
+- Model governance.
 - Graph investigation.
+- Developer/API console.
 - Agent intelligence reports.
 
 Transaction detail must show:
@@ -1002,8 +1416,19 @@ Transaction detail must show:
 - Related transactions.
 - Event timeline.
 - Audit trail.
+- Post-authorization risk signals and recommended actions.
 
 The UI should feel like an operational fraud console: dense tables, filters, timelines, and analyst actions. Do not design it like a marketing landing page.
+
+Manual review and case-management surfaces must support assignment, queue
+filters, SLA age, timeline, reviewer actions, refund recommendations, and safe
+escalation paths. Business insight surfaces must connect fraud prevention to
+authorization rate, review load, refund rate, chargeback rate, false-positive
+cost, and dollar-weighted fraud capture.
+
+Developer/API surfaces must include API version visibility, request IDs,
+idempotency examples, webhook signing verification, event delivery inspection,
+test-card catalog, simulator scenario catalog, and safe copy-paste examples.
 
 ## 13. GenAI Fraud Intelligence
 
@@ -1095,6 +1520,12 @@ Track:
 - Model score distribution.
 - Fraud capture rate.
 - False positive rate.
+- Card-testing incident count.
+- Enumeration ratio.
+- Fraud/dispute ratio.
+- Merchant risk tier distribution.
+- Review SLA breach count.
+- Dispute evidence win/loss rate.
 
 ### 14.3 Trace Requirement
 
@@ -1128,8 +1559,13 @@ Publish these events through an outbox first, then Kafka:
 - `capture.created`
 - `refund.created`
 - `chargeback.created`
+- `dispute_evidence_packet.created`
+- `dispute_evidence_packet.submitted`
 - `review.opened`
 - `review.closed`
+- `card_testing_incident.created`
+- `card_testing_incident.resolved`
+- `merchant_risk_policy.updated`
 - `webhook.delivery_succeeded`
 - `webhook.delivery_failed`
 
@@ -1160,7 +1596,9 @@ Purpose:
 V1 generator must create:
 
 - merchants with different risk tiers
+- merchant risk profiles and risk policies
 - customers with varied account ages
+- risk contexts with device, session, IP, email, phone, and address signals
 - simulated cards with deterministic processor outcomes
 - payment intents and attempts
 - successful authorizations
@@ -1169,9 +1607,12 @@ V1 generator must create:
 - 3DS-required flows
 - refunds
 - chargebacks
+- dispute evidence packets
 - manual review outcomes
 - basic card-testing velocity patterns
+- card-testing incidents
 - country mismatch patterns
+- fraud labels with fraud types where known
 
 Later generator versions add:
 
@@ -1179,6 +1620,8 @@ Later generator versions add:
 - merchant-specific fraud rates
 - delayed chargeback labels
 - friendly fraud patterns
+- refund abuse, promo abuse, reseller abuse, synthetic identity, account
+  takeover, triangulation, merchant fraud, and scam/social-engineering patterns
 - false positive examples
 - seasonality and drift
 
@@ -1241,6 +1684,8 @@ Build:
 - Refund endpoint.
 - Ledger entries and invariant enforcement.
 - Webhook endpoint and delivery records.
+- AuditLog MVP for capture, cancel/void, refund, ledger, and webhook endpoint
+  actions.
 
 Done when:
 
@@ -1250,6 +1695,8 @@ Done when:
 - Double capture and over-refund are rejected.
 - Ledger transaction groups balance.
 - Webhook delivery records are created.
+- High-risk money movement and webhook configuration actions create audit logs
+  with safe payloads.
 
 ### Phase 3: Fraud Decision MVP
 
@@ -1278,26 +1725,69 @@ Done when:
 Build:
 
 - Real-time feature extractor.
+- RiskContext capture for device, session, IP, checkout, and bot/friction
+  signals.
 - Redis velocity counters.
 - Fraud lists for card fingerprint, BIN, country, IP, customer, email, email domain, generic string.
+- MerchantRiskProfile and MerchantRiskPolicy MVP.
 - Manual review lifecycle.
 - Chargeback ingestion.
+- DisputeEvidencePacket MVP.
 - Fraud labels from review and chargeback outcomes.
+- Post-authorization risk signal ingestion for simulated early fraud warnings,
+  refund recommendations, friendly-fraud indicators, and dispute-prevention
+  signals.
+- CardTestingIncident detection and resolution workflow.
 - Rate limiting policy using Redis token bucket or fixed-window counters for merchant/API-key/IP dimensions.
 
 Done when:
 
+- RiskContext is persisted and included in FeatureSnapshot without leaking raw
+  sensitive values.
 - Velocity counters affect rules.
 - Velocity excludes the current payment being evaluated.
+- Merchant risk policy can tune block, review, and 3DS thresholds.
 - Review approve/cancel/refund/refund-and-report-fraud works.
 - Chargeback creates FraudLabel.
+- Dispute evidence packets can be created and linked to chargebacks.
+- Post-authorization risk signals create auditable recommendations without
+  rewriting the original FraudDecision.
+- Card-testing incidents group abusive attempts and recommend mitigations.
 - Rate limits can throttle abusive confirm/payment-method creation traffic.
+
+### Phase 4.5: Product-Grade Risk Operations
+
+Build:
+
+- Fraud taxonomy in labels, synthetic scenarios, analytics, and dashboard
+  filters.
+- Merchant risk monitoring for authorization rate, decline rate, chargeback
+  rate, fraud/dispute ratio, enumeration ratio, review backlog, and sudden
+  volume spikes.
+- Risk policy simulation before policy activation.
+- Saved analyst searches and queue filters.
+- Dispute evidence workflow with simulated reason-code deadlines and outcomes.
+- Developer/API console with test-card catalog, idempotency examples, webhook
+  signing examples, and scenario runner.
+
+Done when:
+
+- A demo can show not only a risky transaction, but also a risky merchant, a
+  card-testing attack, a dispute evidence packet, and a merchant-specific risk
+  policy change.
+- Analysts can filter by fraud type, merchant risk tier, risk context signal,
+  review SLA, and dispute outcome.
+- Developer documentation is good enough for a new merchant integration to run
+  the simulator without reading source code.
 
 ### Phase 5: Events And Analytics
 
 Build:
 
-- Outbox pattern.
+- OutboxEvent table and writer integrated into state-changing payment, fraud,
+  review, refund, chargeback, rule, and webhook actions.
+- AuditLog table and audit writer for high-risk state transitions and
+  operational actions.
 - Kafka publisher.
 - Consumer skeleton.
 - PostgreSQL analytics projections.
@@ -1306,8 +1796,11 @@ Build:
 
 Done when:
 
-- Events publish after DB commit.
+- Domain state and outbox events commit atomically.
+- Events publish after DB commit through retryable outbox publishing.
 - Consumers can restart safely.
+- Audit logs exist for high-risk actions and include actor, aggregate, request
+  ID, trace ID, action, timestamp, and safe before/after context where useful.
 - Replay rebuilds projections.
 - Candidate rule/model changes can be evaluated without re-fetching real-time data.
 
@@ -1321,12 +1814,16 @@ Build:
 - Review queue.
 - Rule list/editor.
 - Chargeback list.
+- Card-testing incident list.
+- Merchant risk profile detail.
+- Developer/API console basics.
 
 Done when:
 
 - Analyst can inspect a payment lifecycle.
 - Analyst can see fraud reasons, rules fired, and feature snapshot.
 - Analyst can resolve a review.
+- Analyst can inspect card-testing incidents and merchant risk indicators.
 
 ### Phase 7: ML Baseline
 
@@ -1344,12 +1841,16 @@ Build:
 - MLflow tracking.
 - FastAPI model serving.
 - Model timeout fallback.
+- Dataset card and model card for every promoted model.
+- Shadow-mode scoring before active serving.
 
 Done when:
 
 - Model score is stored with version and reasons.
 - Rules-only fallback works on model timeout.
 - Evaluation avoids future leakage.
+- Candidate model has model card, dataset card, segment report, replay report,
+  and rollback target.
 
 ### Phase 8: Analytics, Simulation, Graph
 
@@ -1357,14 +1858,18 @@ Build:
 
 - ClickHouse analytics.
 - Rule simulation and approval workflow.
+- Risk policy simulation and approval workflow.
 - Neo4j entity graph.
 - Graph-derived investigation features.
+- Privacy-safe cross-merchant aggregate features.
 
 Done when:
 
 - Rule simulation reports fraud captured, false positives, and business impact.
 - Rule activation requires approval.
 - Synthetic fraud rings are visible in graph investigation.
+- Cross-merchant features are aggregate/anonymized and cannot expose another
+  merchant's raw objects or identifiers.
 
 ### Phase 9: Agents, Hardening, Scale
 
@@ -1380,6 +1885,9 @@ Build:
 - Load testing.
 - CI/CD.
 - Blue-green deployment and rollback playbooks.
+- API versioning and compatibility checks.
+- Security runbooks for credential leakage, card-testing spikes, dispute spikes,
+  model regression, and merchant risk spikes.
 
 Done when:
 
@@ -1387,6 +1895,8 @@ Done when:
 - Tool calls are audited.
 - p95/p99 latency is measured.
 - Blue and green versions can coexist.
+- API, event, model, rule, and database changes have compatibility and rollback
+  checks.
 
 ## 18. Staff-Level Implementation Review Workflow
 
@@ -1521,6 +2031,36 @@ No major implementation day is complete until the learner can answer:
 
 ## 19. First 14-Day Execution Plan
 
+As of Day 5, the next execution set is Days 6-14. The goal is to move from
+secure object creation into a complete authorization simulator path:
+
+```text
+merchant
+  -> customer
+  -> payment method
+  -> payment intent
+  -> confirm
+  -> payment attempt
+  -> fraud decision
+  -> processor authorization
+  -> webhook delivery record
+```
+
+Product-readiness gates for Days 6-14:
+
+- Every merchant-facing mutation requires tenant context and idempotency.
+- Every cross-object lookup is tenant-scoped.
+- No raw PAN, CVV, API key, signing secret, or raw low-entropy PII is persisted
+  or returned.
+- Every confirm path creates a durable PaymentAttempt before fraud or processor
+  side effects.
+- Every confirm path creates a FraudDecision and FeatureSnapshot, even while the
+  decision engine is still a deterministic stub.
+- Every processor result is persisted so later capture, refund, dispute, fraud
+  labels, and analyst views have lineage.
+- Every day records explicit deferrals so payment, fraud, ML, and operations
+  gaps are visible instead of accidental.
+
 ### Day 1: Product Scope And Repo
 
 Deliver:
@@ -1620,107 +2160,350 @@ Learn:
 
 Deliver:
 
-- `POST /payment_intents`.
-- Validation.
-- Integration tests.
+- Bring existing `POST /payment_intents` scaffolding to production-shaped
+  contract quality.
+- Require `Idempotency-Key` and bind it to merchant, operation, and request
+  hash through `IdempotencyService`.
+- Validate `customerId`, positive `amount`, ISO-style three-letter `currency`,
+  and optional `captureMethod`.
+- Normalize currency to uppercase before persistence and response.
+- Default missing `captureMethod` to `AUTOMATIC`.
+- Create PaymentIntent in `REQUIRES_CONFIRMATION`.
+- Persist `merchant_id`, `customer_id`, `amount`, `currency`, `capture_method`,
+  `status`, `created_at`, and `updated_at`.
+- Ensure customer lookup is tenant-scoped by `(id, merchant_id)`.
+- Emit/create `payment_intent.created` webhook delivery records only after the
+  PaymentIntent write is successful.
+- Return a public response that does not expose internal hashes, idempotency
+  hashes, or unrelated merchant state.
+- Add contract tests for successful create, missing idempotency key,
+  idempotency replay, same key with different body conflict, validation errors,
+  default capture method, uppercase currency normalization, and cross-merchant
+  customer rejection.
+
+Done when:
+
+- A merchant can create a PaymentIntent for its own customer.
+- Replaying the same request with the same idempotency key returns the original
+  response without creating another PaymentIntent or duplicate webhook delivery
+  intent.
+- Reusing the same idempotency key with a changed body returns `409`.
+- A merchant cannot create a PaymentIntent for another merchant's customer.
+- Tests prove response shape, tenant scoping, idempotency behavior, and
+  validation error contract.
+
+Defer:
+
+- Atomic duplicate-key race handling and lock/unique-conflict hardening to Day
+  8.
+- Confirm, PaymentAttempt creation, authorization, ledgering, and fraud
+  decisions to Days 9-13.
 
 Learn:
 
 - Payment state machine.
+- PaymentIntent as the customer-visible payment container.
+- Why idempotency starts at object creation, not only money movement.
+- Why cross-object tenant checks must be repository/database-backed.
 
 ### Day 7: Review And Refactor
 
 Deliver:
 
-- Architecture review.
-- Test cleanup.
-- README update.
+- Staff-level architecture review for Days 1-6.
+- Update the weekly architecture review with:
+  - payment lifecycle progress
+  - tenant/security risks reduced
+  - remaining idempotency, attempt, processor, fraud, and ledger risks
+  - explicit deferrals with target days
+- Run test cleanup only where it improves clarity without changing product
+  behavior.
+- Review root README, service README, and learning docs for stale Day 5/Day 6
+  status.
+- Add or update the Day 6 daily note and deep dive.
+- Run the commit readiness checklist.
+
+Done when:
+
+- Documentation accurately describes the runnable state.
+- The next implementation risks are visible before deeper payment side effects
+  are added.
+- No speculative schema or unused fraud/ML fields were added without lineage.
 
 Learn:
 
 - Weekly staff-level design review habit.
+- Distinguishing current product gaps from intentional deferrals.
+- Reviewer narrative: invariant, tradeoff, risk reduced, proof.
 
 ### Day 8: Idempotency
 
 Deliver:
 
-- Idempotency table.
-- Idempotency middleware/service.
-- Tests for replay.
+- Harden `IdempotencyService` for processor-safe future side effects.
+- Ensure records store merchant scope, key, operation or method/path, request
+  hash, status, response status, response body, creation time, and expiration.
+- Reserve a key before running the mutation and mark it `COMPLETED` only after
+  the mutation response is durable.
+- Reject in-progress duplicates deterministically.
+- Handle concurrent same-key requests through transaction boundaries,
+  uniqueness constraints, and duplicate-key race handling.
+- Ensure failed mutations do not cache success responses or hide retryable
+  errors.
+- Add tests for same request replay, changed request conflict, missing key,
+  concurrent same-key requests, response replay shape, merchant-scoped key
+  reuse, and rollback behavior after mutation failure.
+
+Done when:
+
+- Idempotency is safe enough to wrap future confirm, capture, cancel, refund,
+  and chargeback operations.
+- Duplicate retries cannot create duplicate durable side effects.
+- The service behavior is explained in docs before processor simulation lands.
+
+Defer:
+
+- Redis idempotency acceleration to a later reliability phase.
+- Long-term cleanup job for expired idempotency keys unless it is trivial.
 
 Learn:
 
 - Payment API reliability.
+- Why idempotency is a state machine, not a request cache.
+- Database uniqueness and transaction boundaries under retry storms.
 
 ### Day 9: PaymentAttempt
 
 Deliver:
 
-- Payment attempt table.
-- Attempt creation on confirm.
+- Bring `PaymentAttempt` from schema/scaffold into the domain model.
+- Create attempt entity/repository and status enum.
+- Model attempt fields: `payment_intent_id`, `payment_method_id`,
+  `idempotency_key`, `status`, `attempt_number`, `fraud_decision_id`,
+  `processor_authorization_id`, `three_ds_status`, and timestamps.
+- Add confirm request shape with `paymentMethodId`.
+- On confirm, load PaymentIntent and PaymentMethod through tenant-scoped
+  lookups.
+- Create a new PaymentAttempt only when the PaymentIntent is in a valid
+  confirmable status.
+- Number attempts monotonically per PaymentIntent.
+- Keep fraud decision and authorization fields nullable until Days 10-13
+  populate them.
+- Add tests for attempt creation, invalid status rejection, cross-merchant
+  PaymentIntent rejection, cross-merchant PaymentMethod rejection, and attempt
+  numbering.
+
+Done when:
+
+- PaymentAttempt becomes the immutable scoring/audit unit for confirm.
+- Confirm no longer mutates PaymentIntent without a durable attempt record.
+- Every future fraud decision has a clear lineage target.
+
+Defer:
+
+- Processor authorization details to Day 11.
+- FraudDecision and FeatureSnapshot population to Day 12.
+- 3DS completion endpoint until `REQUEST_3DS` behavior exists.
 
 Learn:
 
 - Attempt vs intent distinction.
+- Why fraud and ML lineage belongs to PaymentAttempt, not only PaymentIntent.
+- Confirmable payment state transitions.
 
 ### Day 10: Confirm Endpoint
 
 Deliver:
 
-- `POST /payment_intents/{id}/confirm`.
-- Basic status transition.
-- Stub `ALLOW` decision.
+- Implement `POST /payment_intents/{id}/confirm` as the first real-time
+  orchestration path.
+- Require `Idempotency-Key`.
+- Validate PaymentIntent status before confirm.
+- Validate PaymentMethod belongs to the PaymentIntent customer and current
+  merchant.
+- Create PaymentAttempt inside the idempotent transaction.
+- Add a decision-engine interface that returns a deterministic stub `ALLOW`
+  with reason code `RULES_NOT_ENABLED`.
+- Apply the `ALLOW` action by moving the attempt to the next processor-ready
+  state and the PaymentIntent to `PROCESSING` or authorization-ready status
+  agreed for Day 11.
+- Record request ID and trace-ready operation names in logs without sensitive
+  data.
+- Add tests for success, replay, changed-body conflict, invalid PaymentIntent
+  status, wrong-customer PaymentMethod, tenant rejection, and no duplicate
+  attempts on retry.
+
+Done when:
+
+- Confirm has a stable orchestration shape before processor and fraud details
+  are filled in.
+- The real-time path has clear extension points for features, rules, model
+  timeout fallback, and processor simulation.
+
+Defer:
+
+- Non-`ALLOW` actions to Day 12/Phase 3.
+- Ledger writes until capture/refund work.
+- Kafka/outbox until Phase 5; webhook delivery records may remain local
+  placeholders.
 
 Learn:
 
 - Transaction boundaries.
+- Real-time payment path design.
+- Where fraud decisioning fits without making the endpoint untestable.
 
 ### Day 11: Processor Simulator
 
 Deliver:
 
-- Processor adapter interface.
-- Processor simulator.
-- Authorization table.
+- Define `ProcessorAdapter` and `ProcessorAuthorizationResult`.
+- Implement deterministic simulator outcomes from test card metadata or a
+  simulator card catalog.
+- Persist `Authorization` records linked to PaymentAttempt.
+- Support initial outcomes: approved, issuer decline, insufficient funds,
+  suspected fraud decline, CVC failure, AVS line1 failure, AVS postal failure,
+  and 3DS required.
+- Map processor outcomes to PaymentAttempt and PaymentIntent statuses.
+- Persist processor response code, network status, authorized amount, currency,
+  verification results, and created time.
+- Add tests for each deterministic outcome and for idempotent confirm replay
+  after an authorization result exists.
+
+Done when:
+
+- Confirm can produce a durable authorization or durable decline.
+- Processor behavior is replaceable behind an adapter.
+- No raw card input is required downstream of PaymentMethod creation.
+
+Defer:
+
+- Capture, cancel/void, refund, and ledger entries to Phase 2.
+- Real PSP integration outside V1.
 
 Learn:
 
 - Adapter pattern.
+- Authorization vs capture.
+- Why processor result persistence matters for disputes, fraud labels, and
+  audit.
 
 ### Day 12: Fraud Decision Stub
 
 Deliver:
 
-- FraudDecision table.
-- Static decision engine.
-- Reason codes.
+- Persist `FraudDecision` for every PaymentAttempt.
+- Persist immutable `FeatureSnapshot` with `features_v1`, even if the first
+  feature set is small.
+- Add `RuleExecutionResult` scaffolding only if initial rules are evaluated;
+  otherwise defer until deterministic rules land.
+- Store action, risk score, risk level, ruleset version, latency, reason codes,
+  and created time.
+- Keep model version nullable until the model service exists.
+- Add initial reason codes for stub decisioning and processor simulator
+  outcomes.
+- Ensure `BLOCK`/`REQUEST_3DS`/`REVIEW` enum values exist but do not activate
+  behavior until rules decide them.
+- Add tests proving every confirm attempt gets exactly one FraudDecision and
+  FeatureSnapshot, including processor-decline attempts.
+
+Done when:
+
+- THAAP has auditable fraud lineage for every confirm attempt.
+- Fraud data is tied to PaymentAttempt and tenant scope.
+- The product can show why a payment was allowed, even before real rules/ML.
+
+Defer:
+
+- Real-time velocity counters to Phase 4.
+- Model scoring to Phase 7.
+- Graph signals to Phase 8.
+- Manual review case creation until `REVIEW` behavior is enabled.
 
 Learn:
 
 - Audit-first decision design.
+- Feature snapshots as the bridge between production decisions and offline ML.
+- Why nullable model fields are better than fake model lineage.
 
 ### Day 13: End-To-End Confirm
 
 Deliver:
 
-- Confirm creates attempt, fraud decision, authorization, and events placeholder.
-- Integration tests.
+- Wire confirm end to end:
+  - idempotency
+  - tenant-scoped PaymentIntent load
+  - tenant/customer-scoped PaymentMethod load
+  - PaymentAttempt creation
+  - FeatureSnapshot creation
+  - FraudDecision creation
+  - ProcessorAdapter call when action is `ALLOW`
+  - Authorization persistence
+  - PaymentIntent/PaymentAttempt final status update
+  - webhook delivery record creation for relevant events
+  - audit log records for confirm, fraud decision, authorization, and terminal
+    decline/block outcomes
+- Add integration tests for approved authorization, issuer decline, suspected
+  fraud decline, 3DS-required simulator outcome, idempotent replay, and invalid
+  transition.
+- Add one smoke/demo script that creates merchant, customer, payment method,
+  PaymentIntent, confirm, and then fetches resulting objects.
+
+Done when:
+
+- A local user can run the full create-to-confirm card-payment simulator flow.
+- The transaction detail data exists for a future analyst dashboard.
+- E2E behavior is repeatable with deterministic test cards.
+- Confirm and authorization decisions leave both domain lineage records and
+  audit records with safe payloads.
+
+Defer:
+
+- Capture/refund/ledger completeness to Phase 2.
+- Real fraud rules and manual review to Phase 3/4.
+- Dashboard UI until Phase 6.
 
 Learn:
 
 - E2E flow thinking.
+- Product demo design from durable records, not mocked screenshots.
+- How payments, fraud, webhook, and audit surfaces connect.
 
 ### Day 14: Demo And Notes
 
 Deliver:
 
-- Demo script.
-- Known gaps.
-- Next sprint plan.
+- Run the full Day 13 demo script from a clean local database.
+- Record a Day 14 demo note with:
+  - exact commands
+  - sample API responses with sensitive fields removed
+  - known product gaps
+  - known reliability gaps
+  - known fraud/ML lineage gaps
+  - next sprint risks
+- Update README current status from Day 5 to the completed Day 14 state.
+- Update service README and architecture docs if implementation changed source
+  of truth decisions.
+- Create the next detailed sprint plan for Phase 2:
+  - capture
+  - cancel/void
+  - refund
+  - ledger invariants
+  - webhook delivery retry behavior
+  - deterministic processor edge cases
+- Run the full backend test suite and commit readiness checklist.
+
+Done when:
+
+- The first complete authorization simulator demo is reproducible.
+- The next sprint is ready before starting capture/refund/ledger work.
+- Documentation, tests, and learning artifacts tell the same story.
 
 Learn:
 
 - Engineering communication.
+- Demo-driven architecture review.
+- Turning gaps into an executable next plan.
 
 ## 20. Test Plan
 
@@ -1757,7 +2540,26 @@ Learn:
 - `REVIEW` creates review case.
 - `REQUEST_3DS` moves intent to `REQUIRES_ACTION`.
 - Rule results and feature snapshots persist.
+- RiskContext persists safe decision-time context and never exposes raw
+  sensitive values.
 - Velocity counters exclude the current payment.
+- Card-testing incidents are created from abusive low-amount or setup patterns.
+- Post-authorization risk signals create recommendations and labels without
+  mutating the original FraudDecision.
+- Refund-and-report-fraud creates a label and can update list inputs according
+  to explicit policy.
+- Fraud labels support fraud type and source.
+
+### 20.5.1 Merchant Risk And Dispute Tests
+
+- Merchant risk policy thresholds affect block, review, and 3DS actions.
+- Policy activation requires simulation once ReplayEngine exists.
+- Merchant risk metrics include authorization rate, decline rate, chargeback
+  rate, fraud/dispute ratio, and enumeration ratio.
+- Dispute evidence packets link to chargebacks and payment attempts.
+- Friendly-fraud labels do not overwrite original real-time FraudDecision rows.
+- Card-testing mitigations can be recommended without silently changing merchant
+  policy.
 
 ### 20.6 Security Tests
 
@@ -1788,11 +2590,25 @@ Learn:
 12. No breaking API, event, rule, or database schema change without expand/contract migration plan.
 13. No merchant-facing data access without tenant context and tenant-scoped lookup.
 14. No event, feature, training row, graph node, model score, or analytics row without `merchant_id` or an explicit documented global/anonymized scope.
-15. No non-trivial platform concept, feature, or dependency without a first-principles learning note under `docs/learning/concepts/`.
-16. No deployment without rollback criteria once CI/CD begins.
-17. No implementation day is complete without the staff-level readiness and
+15. No post-authorization signal may rewrite an original FraudDecision; it must
+    create a new auditable recommendation, label, or case event.
+16. No raw identity, device, session, IP, email, phone, or address signal may be
+    persisted or exposed unless it has an explicit data classification and
+    minimization rule.
+17. No merchant risk policy, rule, or model threshold change without simulation
+    or an explicit documented emergency exception.
+18. No dispute workflow may treat every chargeback as fraud; reason code,
+    evidence, source, and label confidence must be preserved.
+19. No card-testing mitigation may silently disable legitimate merchant traffic;
+    it must create an incident record, metric, or audit trail.
+20. No feature may be called challenger-grade until it has durable state,
+    tests, explainability, operational metrics, and a demo path through the
+    payment lifecycle.
+21. No non-trivial platform concept, feature, or dependency without a first-principles learning note under `docs/learning/concepts/`.
+22. No deployment without rollback criteria once CI/CD begins.
+23. No implementation day is complete without the staff-level readiness and
     post-implementation review workflow in Section 18.
-18. No non-trivial implementation day is complete without a deep-dive learning
+24. No non-trivial implementation day is complete without a deep-dive learning
     artifact that makes the Staff-level code understandable end to end.
 
 ## 22. Coverage And Traceability
@@ -1809,22 +2625,25 @@ This master plan is shorter than the research plan because it removes:
 Nothing implementation-critical should live only in the research documents. Coverage mapping:
 
 - Product mission and scope: sections 1-2.
+- Challenger product bar and real-world product gaps: section 1.
 - PCI DSS scope and deployment target defaults: section 2.
+- Fraud taxonomy: section 2.
 - Architecture and deployables: section 3.
 - Public APIs: section 4.
-- Domain model: section 5.
+- Domain model, merchant risk profile, risk context, dispute evidence, and
+  card-testing incidents: section 5.
 - Processor simulator: section 6.
-- Fraud decisioning, rules, lifecycle, simulation: section 7.
-- Security and rate limiting: section 8.
+- Fraud decisioning, rules, lifecycle, risk policy, and simulation: section 7.
+- Security, rate limiting, and card-testing controls: section 8.
 - Feature engineering: section 9.
-- ML plan: section 10.
-- Graph intelligence: section 11.
-- Dashboard: section 12.
+- ML plan and model governance: section 10.
+- Graph and privacy-safe network intelligence: section 11.
+- Dashboard and developer/API surfaces: section 12.
 - GenAI agents: section 13.
 - Observability: section 14.
 - Events and webhooks: section 15.
-- Synthetic data: section 16.
-- Roadmap: section 17.
+- Synthetic data and fraud scenarios: section 16.
+- Roadmap, including product-grade risk operations: section 17.
 - Staff-level implementation review workflow: section 18.
 - First sprint: section 19.
 - Tests: section 20.

@@ -36,6 +36,8 @@ class ApiErrorContractTests {
     private static final String API_KEY = "X-Api-Key";
     private static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     private static final String REQUEST_ID = "X-Request-Id";
+    private static final String ADMIN_BOOTSTRAP_TOKEN = "X-Admin-Bootstrap-Token";
+    private static final String TEST_ADMIN_BOOTSTRAP_TOKEN = "test-admin-bootstrap-token";
 
     private MockMvc mockMvc;
 
@@ -258,6 +260,7 @@ class ApiErrorContractTests {
 
     private MerchantAccess createMerchant(String name) throws Exception {
         var response = mockMvc.perform(post("/admin/merchants")
+                        .header(ADMIN_BOOTSTRAP_TOKEN, TEST_ADMIN_BOOTSTRAP_TOKEN)
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

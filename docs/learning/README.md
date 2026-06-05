@@ -156,6 +156,7 @@ Current concept notes:
 
 - [Concept Note Template](concepts/CONCEPT_NOTE_TEMPLATE.md)
 - [API Error Contracts And Request IDs](concepts/API_ERROR_CONTRACTS_AND_REQUEST_IDS.md)
+- [API Credential Lifecycle From First Principles](concepts/API_CREDENTIAL_LIFECYCLE.md)
 - [API Validation From First Principles](concepts/API_VALIDATION.md)
 - [Database Migrations And Flyway](concepts/DATABASE_MIGRATIONS_AND_FLYWAY.md)
 - [Docker Compose Local Infrastructure From First Principles](concepts/DOCKER_COMPOSE_LOCAL_INFRASTRUCTURE.md)

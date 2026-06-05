@@ -22,3 +22,9 @@ management:
   health:
     redis:
       enabled: false
+
+thaap:
+  admin:
+    bootstrap-token: test-admin-bootstrap-token
+  security:
+    hash-pepper: test-hash-pepper-for-sensitive-value-contracts
