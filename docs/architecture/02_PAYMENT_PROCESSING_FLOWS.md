@@ -404,6 +404,7 @@ POST /chargebacks
   -> create Chargeback
   -> write dispute ledger entries
   -> create FraudLabel if reason indicates fraud
+  -> create or link DisputeEvidencePacket
   -> mark PaymentIntent DISPUTED
   -> emit chargeback.created
   -> create webhook deliveries
@@ -422,6 +423,15 @@ Fraud-label behavior:
 
 - fraudulent chargeback creates `FraudLabel`
 - non-fraud chargeback may create a dispute record but not a fraud label
+- friendly-fraud and policy-abuse cases require explicit fraud type, source,
+  and confidence instead of blindly treating every dispute as stolen-card fraud
+
+Dispute evidence packet:
+
+- links the chargeback to authorization, fraud decision, 3DS, AVS/CVC,
+  fulfillment, refund, prior undisputed transaction, and risk-context evidence
+- preserves reason code, due date, submission status, and outcome
+- must not mutate the original real-time FraudDecision
 
 ## 14. Idempotency Flow
 
