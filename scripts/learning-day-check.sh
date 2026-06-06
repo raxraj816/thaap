@@ -27,6 +27,7 @@ fi
 daily_note="docs/learning/daily/${date_arg}.md"
 deep_dive="docs/learning/daily/${date_arg}-deep-dive.md"
 checklist="docs/learning/DAILY_APPRENTICESHIP_CHECKLIST.md"
+agent_instructions="AGENTS.md"
 
 missing=0
 
@@ -64,8 +65,22 @@ else
   missing=1
 fi
 
+if [[ -f "$agent_instructions" ]]; then
+  echo "OK agent working agreement exists: $agent_instructions"
+else
+  echo "MISSING agent working agreement: $agent_instructions"
+  echo "Create AGENTS.md so future coding sessions remember the apprenticeship loop."
+  missing=1
+fi
+
 echo
 echo "Remember the completion rule:"
 echo "No non-trivial implementation day is complete until the daily note, deep dive, tests, and explain-back questions are handled."
+echo
+echo "Explain-back reminders:"
+echo "1. What tiny concept did we learn?"
+echo "2. What production invariant did we protect?"
+echo "3. What test or evidence proves it?"
+echo "4. What should the learner be able to explain without notes?"
 
 exit "$missing"

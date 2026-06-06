@@ -38,6 +38,13 @@ scripts/payments-api-run.sh
 
 ## Learning Workflow
 
+Create today's learning note, and optionally the deep dive:
+
+```bash
+scripts/learning-day-start.sh
+scripts/learning-day-start.sh --deep-dive
+```
+
 Check that today's Staff apprenticeship learning artifacts exist:
 
 ```bash
