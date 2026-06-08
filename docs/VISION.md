@@ -53,6 +53,57 @@ The platform should answer:
 - How do webhooks make payment state observable to merchants?
 - How do analysts investigate risk and tune controls?
 
+## 2.1 No-Compromise Product Bar
+
+THAAP should not become an architecture museum or a generic fraud demo. It
+should become a real, useful payment-risk operating system simulator.
+
+The winning wedge is not early parity with Stripe or Mastercard network data.
+Their production data moat is real. THAAP wins by being the most transparent,
+production-shaped fraud decisioning lab for:
+
+- payment lifecycle correctness
+- simulation
+- analyst workflows
+- rule governance
+- ML evaluation
+- explainability
+- agent-assisted fraud operations
+
+No feature is real until it has:
+
+- durable state
+- tests
+- audit trail
+- explanation surface
+- product workflow
+- operational signal
+
+The product should be optimized for complete, useful slices rather than broad
+surface area. A serious slice should be demoable end to end:
+
+```text
+merchant -> customer -> payment method -> payment intent -> attempt
+  -> fraud decision -> processor result -> review case
+  -> analyst decision -> label -> rule/model feedback
+```
+
+THAAP should be a fraud lab, not only a fraud detector. Synthetic scenarios
+should let the system demonstrate card testing, friendly fraud, account
+takeover, refund abuse, merchant fraud, dispute patterns, model drift, rule
+regressions, and analyst feedback loops.
+
+Every proposed product idea should pass this filter:
+
+- Does it improve payment correctness?
+- Does it improve fraud decision quality?
+- Does it improve analyst or merchant leverage?
+- Does it improve explainability, governance, or auditability?
+- Does it protect security, privacy, or tenant boundaries?
+- Can it be persisted, tested, replayed, operated, and demoed?
+
+If not, it is not yet product work.
+
 ## 3. Target Users
 
 ### 3.1 Builder / Learner
