@@ -51,7 +51,7 @@ Check that today's Staff apprenticeship learning artifacts exist:
 scripts/learning-day-check.sh
 ```
 
-For non-trivial implementation days:
+For non-trivial implementation chapters:
 
 ```bash
 scripts/learning-day-check.sh --deep-dive-required

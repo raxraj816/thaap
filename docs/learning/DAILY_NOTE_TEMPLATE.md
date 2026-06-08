@@ -42,4 +42,4 @@
 
 ## 11. Deep Dive Link
 
-- Add `daily/YYYY-MM-DD-deep-dive.md` for non-trivial implementation days.
+- Add `daily/YYYY-MM-DD-deep-dive.md` for non-trivial implementation chapters.

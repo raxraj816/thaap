@@ -71,7 +71,7 @@ Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
 
-Day 5 contract tests also cover merchant admin setup, including bootstrap-token
+Chapter 5 contract tests also cover merchant admin setup, including bootstrap-token
 gating, one-time API key reveal, persisted prefix/hash behavior, validation
 errors, and immediate use of the returned key against merchant-facing APIs.
 
@@ -80,6 +80,33 @@ card numbers are not returned or persisted. Customer PII is stored as keyed
 normalized hashes but hidden from public responses. Payment methods store an
 internal keyed fingerprint, while public responses expose only simulator-safe
 metadata: token, BIN, last4, funding type, and country.
+
+## PaymentIntent Create Contract
+
+`POST /payment_intents` creates the merchant-facing payment container for a
+customer owned by the authenticated merchant. The request must include
+`Idempotency-Key` and a body with `customerId`, positive `amount`, a
+three-letter `currency`, and optional `captureMethod`.
+
+The create path:
+
+- scopes the customer lookup to `(customer_id, merchant_id)`
+- stores `merchant_id`, `customer_id`, `amount`, normalized uppercase
+  `currency`, `capture_method`, `status`, `created_at`, and `updated_at`
+- defaults missing `captureMethod` to `AUTOMATIC`
+- starts each new PaymentIntent in `REQUIRES_CONFIRMATION`
+- creates `payment_intent.created` webhook delivery records for active
+  merchant endpoints after the PaymentIntent write succeeds
+- returns only the public PaymentIntent response, not idempotency hashes,
+  response bodies, API-key hashes, or unrelated merchant state
+
+Replaying the same request with the same idempotency key returns the original
+response without creating another PaymentIntent or duplicate webhook delivery.
+Reusing the same key with a changed body returns `409`.
+
+Confirm, PaymentAttempt creation, fraud decisioning, processor authorization,
+ledgering, and atomic duplicate-key race hardening remain deferred to the
+master-plan chapters that own those side effects.
 
 ## Database Migrations
 
@@ -94,7 +121,7 @@ foreign keys, composite tenant ownership constraints, hashed secret columns,
 webhook retry metadata, safe card metadata, capture method storage, and hot
 lookup indexes such as `(merchant_id, idempotency_key)`.
 
-Day 1-3 local databases were created with temporary Hibernate scaffolding. If
+Chapters 1-3 local databases were created with temporary Hibernate scaffolding. If
 that local PostgreSQL volume still exists, reset it before first Flyway startup:
 
 ```bash

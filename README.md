@@ -8,7 +8,7 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Day 5 is complete at merchant, customer, and payment-method API hardening level:
+Chapter 6 is complete at PaymentIntent create contract quality:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -36,6 +36,15 @@ Day 5 is complete at merchant, customer, and payment-method API hardening level:
   are not returned or persisted beyond the simulator boundary.
 - Simulated card input is reduced to internal fingerprinting plus public safe
   metadata such as token, BIN, last4, funding type, and country.
+- `POST /payment_intents` creates tenant-scoped PaymentIntents for owned
+  customers, requires `Idempotency-Key`, normalizes currency to uppercase,
+  defaults missing capture method to `AUTOMATIC`, starts in
+  `REQUIRES_CONFIRMATION`, and creates `payment_intent.created` webhook
+  delivery records for configured endpoints.
+- Chapter 6 contract tests prove PaymentIntent response shape, persisted state,
+  idempotency replay, conflict handling, validation errors, default capture
+  method, currency normalization, webhook delivery non-duplication, and
+  cross-merchant customer rejection.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 
@@ -117,8 +126,8 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Day 5 learning verification:
+Chapter 6 learning verification:
 
 ```bash
-scripts/learning-day-check.sh 2026-06-05 --deep-dive-required
+scripts/learning-day-check.sh 2026-06-09 --deep-dive-required
 ```
