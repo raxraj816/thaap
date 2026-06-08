@@ -25,6 +25,37 @@ LLMs stay out of the real-time payment authorization path.
 GenAI is offline, advisory, audited, and human-authorized.
 ```
 
+## THAAP Reference Quality Filter
+
+Reference material improves THAAP only when it is translated into sharper
+product judgment, stricter invariants, better tests, or clearer operating
+models. It degrades THAAP when it becomes buzzwords, copied architecture, or
+roadmap bloat.
+
+Good path:
+
+```text
+references -> principles -> THAAP vocabulary -> source-of-truth decisions
+  -> tested product slices
+```
+
+Bad path:
+
+```text
+references -> screenshots -> generic AI architecture -> bloated roadmap
+  -> no core payment/fraud depth
+```
+
+Every external idea must pass this filter before it influences THAAP:
+
+- Does it improve payment correctness?
+- Does it improve fraud decision quality?
+- Does it improve explainability or analyst leverage?
+- Does it protect tenant, privacy, or security boundaries?
+- Can THAAP persist it, test it, replay it, and operate it?
+
+If the answer is no, keep it as background only.
+
 ## Tier 1: Direct Product Benchmarks
 
 These are the most useful references for THAAP's challenger-product bar.
