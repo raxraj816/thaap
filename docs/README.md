@@ -34,8 +34,9 @@ Use these only for background, deeper reasoning, or source traceability:
 - [Original 180-day implementation plan](./references/research/ORIGINAL_180_DAY_IMPLEMENTATION_PLAN.md)
 - [Stripe Radar fraud platform prompt](./references/research/STRIPE_RADAR_FRAUD_PLATFORM_PROMPT.md)
 - [Useful links](./references/source-materials/useful_links.txt)
+- [Source-materials index](./references/source-materials/README.md)
 - [Mastercard advanced AI technology datasheet](./references/source-materials/mastercard_advanced_ai_technology_datasheet.pdf)
-- [AWS GenAI fraud detection reference architecture](./references/source-materials/aws_genai_fraud_detection_reference_architecture.jpg)
+- [AWS agentic GenAI fraud detection reference architecture](./references/source-materials/aws-agentic-genai-fraud-detection-reference-architecture.jpg)
 
 ## Rule For Future Docs
 

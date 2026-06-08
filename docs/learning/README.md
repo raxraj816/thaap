@@ -169,6 +169,7 @@ Concept notes should explain:
 Current concept notes:
 
 - [Concept Note Template](concepts/CONCEPT_NOTE_TEMPLATE.md)
+- [Agentic AI Guardrails For Fraud Operations From First Principles](concepts/AGENTIC_AI_GUARDRAILS_FOR_FRAUD_OPERATIONS.md)
 - [API Error Contracts And Request IDs](concepts/API_ERROR_CONTRACTS_AND_REQUEST_IDS.md)
 - [API Credential Lifecycle From First Principles](concepts/API_CREDENTIAL_LIFECYCLE.md)
 - [API Validation From First Principles](concepts/API_VALIDATION.md)

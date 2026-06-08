@@ -2656,8 +2656,9 @@ Use these for background and deeper reasoning:
 - `docs/references/research/RESEARCHED_END_TO_END_FRAUD_PLATFORM_PLAN.md`
 - `docs/references/research/ORIGINAL_180_DAY_IMPLEMENTATION_PLAN.md`
 - `docs/references/research/STRIPE_RADAR_FRAUD_PLATFORM_PROMPT.md`
+- `docs/references/source-materials/README.md`
 - `docs/references/source-materials/mastercard_advanced_ai_technology_datasheet.pdf`
-- `docs/references/source-materials/aws_genai_fraud_detection_reference_architecture.jpg`
+- `docs/references/source-materials/aws-agentic-genai-fraud-detection-reference-architecture.jpg`
 - `docs/references/source-materials/useful_links.txt`
 
 This master plan is authoritative for implementation.
