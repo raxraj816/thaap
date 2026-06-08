@@ -54,7 +54,7 @@ else
   if [[ -f "$deep_dive" ]]; then
     echo "OK optional deep dive exists: $deep_dive"
   else
-    echo "INFO no deep dive found. That is acceptable only for trivial or non-implementation days."
+    echo "INFO no deep dive found. That is acceptable only for trivial work or non-implementation sessions."
   fi
 fi
 
@@ -75,7 +75,7 @@ fi
 
 echo
 echo "Remember the completion rule:"
-echo "No non-trivial implementation day is complete until the daily note, deep dive, tests, and explain-back questions are handled."
+echo "No non-trivial implementation chapter is complete until the daily note, deep dive, tests, and explain-back questions are handled."
 echo
 echo "Explain-back reminders:"
 echo "1. What tiny concept did we learn?"

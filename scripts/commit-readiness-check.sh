@@ -51,12 +51,12 @@ done
 
 echo
 echo "Checking for obviously stale root README status..."
-if rg -n "Day 2 is complete|Day 3 is complete" README.md >/dev/null; then
+if rg -n "Chapter 2 is complete|Chapter 3 is complete" README.md >/dev/null; then
   echo "STALE README.md status found:"
-  rg -n "Day 2 is complete|Day 3 is complete" README.md
+  rg -n "Chapter 2 is complete|Chapter 3 is complete" README.md
   missing=1
 else
-  echo "OK README.md does not advertise stale Day 2/Day 3 status."
+  echo "OK README.md does not advertise stale Chapter 2/Chapter 3 status."
 fi
 
 echo

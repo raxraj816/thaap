@@ -48,7 +48,7 @@ Example:
 docs/learning/daily/2026-05-29.md
 ```
 
-For non-trivial implementation days, also create:
+For non-trivial implementation chapters, also create:
 
 ```text
 docs/learning/daily/YYYY-MM-DD-deep-dive.md
@@ -59,7 +59,7 @@ Use `docs/learning/DEEP_DIVE_TEMPLATE.md` for this artifact.
 ## What To Capture
 
 Use [DAILY_APPRENTICESHIP_CHECKLIST.md](DAILY_APPRENTICESHIP_CHECKLIST.md)
-at the start and end of each implementation day.
+at the start and end of each implementation chapter or work session.
 
 Start a light learning day:
 
@@ -67,7 +67,7 @@ Start a light learning day:
 scripts/learning-day-start.sh
 ```
 
-Start a non-trivial implementation day:
+Start a non-trivial implementation chapter:
 
 ```bash
 scripts/learning-day-start.sh --deep-dive
@@ -79,7 +79,7 @@ The quick local check is:
 scripts/learning-day-check.sh
 ```
 
-For non-trivial implementation days:
+For non-trivial implementation chapters:
 
 ```bash
 scripts/learning-day-check.sh --deep-dive-required

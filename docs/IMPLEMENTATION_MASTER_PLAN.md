@@ -1900,27 +1900,29 @@ Done when:
 
 ## 18. Staff-Level Implementation Review Workflow
 
-Every implementation day must run through this workflow before code changes,
-after implementation, and when external reviews arrive. The goal is to catch
-payment, fraud, security, ML-lineage, and operations issues before they become
-schema or API churn.
+Every implementation chapter must run through this workflow before code
+changes, after implementation, and when external reviews arrive. A chapter is a
+sequenced product-building unit, not a calendar day. Multiple chapters may be
+completed in one day when their dependencies, invariants, tests, and learning
+artifacts are satisfied. The goal is to catch payment, fraud, security,
+ML-lineage, and operations issues before they become schema or API churn.
 
-### 18.1 Day Readiness Review
+### 18.1 Chapter Readiness Review
 
-Before coding a day, write a short readiness review in the daily note or working
-thread:
+Before coding a chapter, write a short readiness review in the daily note or
+working thread:
 
-- What the master plan says for the day.
+- What the master plan says for the chapter.
 - What already exists in code and schema.
 - What production-shaped payments, fraud, security, ML, and operations systems
   would need from this slice.
 - What to implement now.
-- What to explicitly defer, with the target day or phase.
+- What to explicitly defer, with the target chapter or phase.
 - What tests will prove the slice.
 
-The day should not start from the deliverable list alone. The deliverable list
-is necessary but not sufficient; it must be filtered through the review lenses
-below.
+The chapter should not start from the deliverable list alone. The deliverable
+list is necessary but not sufficient; it must be filtered through the review
+lenses below.
 
 ### 18.2 Mandatory Review Lenses
 
@@ -1957,7 +1959,7 @@ Every review item must be classified before implementation:
 - **Accept now:** The item fixes a current security, tenant, data-minimization,
   operational, or stable payment-domain gap.
 - **Accept later:** The item is correct but depends on a later domain object,
-  behavior, or test harness. Assign the target day or phase.
+  behavior, or test harness. Assign the target chapter or phase.
 - **Reject:** The item conflicts with the master plan, creates speculative
   schema, weakens tenant/security guarantees, or violates the simulator scope.
 - **Needs design:** The item is plausible but needs an ADR, architecture update,
@@ -1967,9 +1969,24 @@ Do not implement review feedback merely because it sounds production-grade.
 Production-shaped architecture also means sequencing fields when their lineage,
 constraints, and behavior can be tested.
 
-### 18.4 Staff Checklist
+### 18.4 Deferral Discipline
 
-Before marking a day complete, answer these questions:
+Do not defer work merely because it belongs to a later named chapter if the
+current slice has satisfied its invariants and the next work is
+dependency-ready.
+
+Defer only when a required domain invariant, schema/API boundary, tenant or
+security boundary, fraud/ML lineage source, ledger correctness guarantee, or
+side-effect review is missing. Every deferral must name the exact reason, the
+owner chapter or implementation slice, and the evidence that would unblock it.
+
+When a slice finishes early and tests are green, pull forward the next safest
+vertical step toward the payment lifecycle instead of stopping at a narrow
+horizontal milestone.
+
+### 18.5 Staff Checklist
+
+Before marking a chapter complete, answer these questions:
 
 - Are any secrets stored raw?
 - Is any payment-sensitive or cardholder data persisted beyond the V1
@@ -1979,13 +1996,13 @@ Before marking a day complete, answer these questions:
 - Are operational records useful enough for retry, debugging, audit, and future
   metrics?
 - Are payment lifecycle primitives complete enough for the next two to three
-  implementation days?
+  implementation chapters?
 - Are fraud/ML fields backed by real lineage, constraints, and behavior tests?
 - Are H2-only assumptions covered by a PostgreSQL-backed path when the SQL is
   PostgreSQL-relevant?
 - Did the implementation update docs, learning notes, and tests together?
 
-### 18.5 Post-Implementation Self-Review
+### 18.6 Post-Implementation Self-Review
 
 After coding and before finalizing:
 
@@ -1994,7 +2011,7 @@ After coding and before finalizing:
 - Confirm tests cover the riskiest invariants, not only happy paths.
 - Record surprises and explicit deferrals in the daily note.
 
-### 18.6 Staff Engineer Apprenticeship Output
+### 18.7 Staff Engineer Apprenticeship Output
 
 THAAP is also an apprenticeship project. The current learning goal is to grow
 from hands-on implementation comfort toward Senior Staff Engineer / ML
@@ -2002,7 +2019,7 @@ Architect judgment for payments security and fraud detection within six months.
 The implementation should remain Staff-level, but it must be paired with
 learning artifacts that make the design, code, and tradeoffs fully explainable.
 
-Every non-trivial implementation day must include:
+Every non-trivial implementation chapter must include:
 
 - **Plain-English design brief:** What we are building, why a payments/fraud
   platform needs it, what can fail in production, and what is intentionally
@@ -2020,7 +2037,7 @@ The standard artifact is:
 docs/learning/daily/YYYY-MM-DD-deep-dive.md
 ```
 
-No major implementation day is complete until the learner can answer:
+No major implementation chapter is complete until the learner can answer:
 
 - What problem did we solve?
 - Why did we solve it this way?
@@ -2029,10 +2046,12 @@ No major implementation day is complete until the learner can answer:
 - What tests prove the important invariants?
 - How would this be explained in a Stripe/Mastercard-style design review?
 
-## 19. First 14-Day Execution Plan
+## 19. First 14-Chapter Execution Plan
 
-As of Day 5, the next execution set is Days 6-14. The goal is to move from
-secure object creation into a complete authorization simulator path:
+This plan is sequenced as chapters, not calendar days. Chapters may be completed
+faster than one per day, and multiple chapters may land in one focused session
+when the prior chapter's invariants are proven. The goal is to move from secure
+object creation into a complete authorization simulator path:
 
 ```text
 merchant
@@ -2046,7 +2065,7 @@ merchant
   -> webhook delivery record
 ```
 
-Product-readiness gates for Days 6-14:
+Product-readiness gates for Chapters 6-14:
 
 - Every merchant-facing mutation requires tenant context and idempotency.
 - Every cross-object lookup is tenant-scoped.
@@ -2058,10 +2077,10 @@ Product-readiness gates for Days 6-14:
   decision engine is still a deterministic stub.
 - Every processor result is persisted so later capture, refund, dispute, fraud
   labels, and analyst views have lineage.
-- Every day records explicit deferrals so payment, fraud, ML, and operations
-  gaps are visible instead of accidental.
+- Every chapter records explicit deferrals so payment, fraud, ML, and
+  operations gaps are visible instead of accidental.
 
-### Day 1: Product Scope And Repo
+### Chapter 1: Product Scope And Repo
 
 Deliver:
 
@@ -2076,7 +2095,7 @@ Learn:
 - PaymentIntent lifecycle.
 - Fraud decision lifecycle.
 
-### Day 2: Local Infrastructure
+### Chapter 2: Local Infrastructure
 
 Deliver:
 
@@ -2089,7 +2108,7 @@ Learn:
 - Local infra setup.
 - Spring profiles.
 
-### Day 3: API Foundation And Error Contract
+### Chapter 3: API Foundation And Error Contract
 
 Deliver:
 
@@ -2104,7 +2123,7 @@ Deliver:
 - Tests for request ID propagation and representative error responses.
 - README examples for request IDs and error response shape.
 
-Already in place before Day 3:
+Already in place before Chapter 3:
 
 - `payments-api` scaffold.
 - Actuator health, liveness, and readiness.
@@ -2119,7 +2138,7 @@ Learn:
 - Servlet filters and request correlation.
 - Production-shaped validation contracts.
 
-### Day 4: Database Migrations
+### Chapter 4: Database Migrations
 
 Deliver:
 
@@ -2140,7 +2159,7 @@ Learn:
 - Tenant-safe indexing and constraints.
 - Security and operations review before schema finalization.
 
-### Day 5: Merchant And Customer APIs
+### Chapter 5: Merchant And Customer APIs
 
 Deliver:
 
@@ -2156,7 +2175,7 @@ Learn:
 - Sensitive data simulation.
 - API credential lifecycle.
 
-### Day 6: PaymentIntent Create
+### Chapter 6: PaymentIntent Create
 
 Deliver:
 
@@ -2194,10 +2213,10 @@ Done when:
 
 Defer:
 
-- Atomic duplicate-key race handling and lock/unique-conflict hardening to Day
-  8.
+- Atomic duplicate-key race handling and lock/unique-conflict hardening to
+  Chapter 8.
 - Confirm, PaymentAttempt creation, authorization, ledgering, and fraud
-  decisions to Days 9-13.
+  decisions to Chapters 9-13.
 
 Learn:
 
@@ -2206,21 +2225,21 @@ Learn:
 - Why idempotency starts at object creation, not only money movement.
 - Why cross-object tenant checks must be repository/database-backed.
 
-### Day 7: Review And Refactor
+### Chapter 7: Review And Refactor
 
 Deliver:
 
-- Staff-level architecture review for Days 1-6.
+- Staff-level architecture review for Chapters 1-6.
 - Update the weekly architecture review with:
   - payment lifecycle progress
   - tenant/security risks reduced
   - remaining idempotency, attempt, processor, fraud, and ledger risks
-  - explicit deferrals with target days
+  - explicit deferrals with target chapters
 - Run test cleanup only where it improves clarity without changing product
   behavior.
-- Review root README, service README, and learning docs for stale Day 5/Day 6
+- Review root README, service README, and learning docs for stale Chapter 5/6
   status.
-- Add or update the Day 6 daily note and deep dive.
+- Add or update the Chapter 6 daily note and deep dive.
 - Run the commit readiness checklist.
 
 Done when:
@@ -2236,7 +2255,7 @@ Learn:
 - Distinguishing current product gaps from intentional deferrals.
 - Reviewer narrative: invariant, tradeoff, risk reduced, proof.
 
-### Day 8: Idempotency
+### Chapter 8: Idempotency
 
 Deliver:
 
@@ -2272,7 +2291,7 @@ Learn:
 - Why idempotency is a state machine, not a request cache.
 - Database uniqueness and transaction boundaries under retry storms.
 
-### Day 9: PaymentAttempt
+### Chapter 9: PaymentAttempt
 
 Deliver:
 
@@ -2287,7 +2306,7 @@ Deliver:
 - Create a new PaymentAttempt only when the PaymentIntent is in a valid
   confirmable status.
 - Number attempts monotonically per PaymentIntent.
-- Keep fraud decision and authorization fields nullable until Days 10-13
+- Keep fraud decision and authorization fields nullable until Chapters 10-13
   populate them.
 - Add tests for attempt creation, invalid status rejection, cross-merchant
   PaymentIntent rejection, cross-merchant PaymentMethod rejection, and attempt
@@ -2301,8 +2320,8 @@ Done when:
 
 Defer:
 
-- Processor authorization details to Day 11.
-- FraudDecision and FeatureSnapshot population to Day 12.
+- Processor authorization details to Chapter 11.
+- FraudDecision and FeatureSnapshot population to Chapter 12.
 - 3DS completion endpoint until `REQUEST_3DS` behavior exists.
 
 Learn:
@@ -2311,7 +2330,7 @@ Learn:
 - Why fraud and ML lineage belongs to PaymentAttempt, not only PaymentIntent.
 - Confirmable payment state transitions.
 
-### Day 10: Confirm Endpoint
+### Chapter 10: Confirm Endpoint
 
 Deliver:
 
@@ -2326,7 +2345,7 @@ Deliver:
   with reason code `RULES_NOT_ENABLED`.
 - Apply the `ALLOW` action by moving the attempt to the next processor-ready
   state and the PaymentIntent to `PROCESSING` or authorization-ready status
-  agreed for Day 11.
+  agreed for Chapter 11.
 - Record request ID and trace-ready operation names in logs without sensitive
   data.
 - Add tests for success, replay, changed-body conflict, invalid PaymentIntent
@@ -2342,7 +2361,7 @@ Done when:
 
 Defer:
 
-- Non-`ALLOW` actions to Day 12/Phase 3.
+- Non-`ALLOW` actions to Chapter 12/Phase 3.
 - Ledger writes until capture/refund work.
 - Kafka/outbox until Phase 5; webhook delivery records may remain local
   placeholders.
@@ -2353,7 +2372,7 @@ Learn:
 - Real-time payment path design.
 - Where fraud decisioning fits without making the endpoint untestable.
 
-### Day 11: Processor Simulator
+### Chapter 11: Processor Simulator
 
 Deliver:
 
@@ -2388,7 +2407,7 @@ Learn:
 - Why processor result persistence matters for disputes, fraud labels, and
   audit.
 
-### Day 12: Fraud Decision Stub
+### Chapter 12: Fraud Decision Stub
 
 Deliver:
 
@@ -2426,7 +2445,7 @@ Learn:
 - Feature snapshots as the bridge between production decisions and offline ML.
 - Why nullable model fields are better than fake model lineage.
 
-### Day 13: End-To-End Confirm
+### Chapter 13: End-To-End Confirm
 
 Deliver:
 
@@ -2469,19 +2488,20 @@ Learn:
 - Product demo design from durable records, not mocked screenshots.
 - How payments, fraud, webhook, and audit surfaces connect.
 
-### Day 14: Demo And Notes
+### Chapter 14: Demo And Notes
 
 Deliver:
 
-- Run the full Day 13 demo script from a clean local database.
-- Record a Day 14 demo note with:
+- Run the full Chapter 13 demo script from a clean local database.
+- Record a Chapter 14 demo note with:
   - exact commands
   - sample API responses with sensitive fields removed
   - known product gaps
   - known reliability gaps
   - known fraud/ML lineage gaps
   - next sprint risks
-- Update README current status from Day 5 to the completed Day 14 state.
+- Update README current status from Chapter 5 to the completed Chapter 14
+  state.
 - Update service README and architecture docs if implementation changed source
   of truth decisions.
 - Create the next detailed sprint plan for Phase 2:
@@ -2606,9 +2626,9 @@ Learn:
     payment lifecycle.
 21. No non-trivial platform concept, feature, or dependency without a first-principles learning note under `docs/learning/concepts/`.
 22. No deployment without rollback criteria once CI/CD begins.
-23. No implementation day is complete without the staff-level readiness and
+23. No implementation chapter is complete without the staff-level readiness and
     post-implementation review workflow in Section 18.
-24. No non-trivial implementation day is complete without a deep-dive learning
+24. No non-trivial implementation chapter is complete without a deep-dive learning
     artifact that makes the Staff-level code understandable end to end.
 
 ## 22. Coverage And Traceability

@@ -1,9 +1,9 @@
 # Daily Staff Apprenticeship Checklist
 
-Use this checklist every implementation day. The goal is to make Staff-level
+Use this checklist for every implementation chapter. The goal is to make Staff-level
 engineering understandable, repeatable, and explainable.
 
-## Start Of Day
+## Start Of Work
 
 - Run `scripts/learning-day-start.sh --deep-dive` for non-trivial work, or
   `scripts/learning-day-start.sh` for a light documentation/review day.
@@ -25,7 +25,7 @@ engineering understandable, repeatable, and explainable.
 - Record surprising tradeoffs or deferrals in the daily note while they are
   still fresh.
 
-## End Of Day
+## End Of Chapter Or Work Session
 
 - Run relevant tests or clearly record why they could not be run.
 - Update the daily note with what changed, what was learned, tests, tradeoffs,
@@ -39,7 +39,7 @@ engineering understandable, repeatable, and explainable.
 
 ## Brain Injection
 
-Before considering the day complete, the learner should answer these from
+Before considering the chapter complete, the learner should answer these from
 memory. For important slices, use `docs/learning/EXPLAIN_BACK_TEMPLATE.md`.
 
 1. What problem did we solve?
@@ -51,7 +51,7 @@ memory. For important slices, use `docs/learning/EXPLAIN_BACK_TEMPLATE.md`.
 
 ## Ownership Task
 
-For non-trivial implementation days, choose one tiny task the learner can own:
+For non-trivial implementation chapters, choose one tiny task the learner can own:
 
 - add or improve one test
 - trace one request flow in writing
@@ -67,13 +67,13 @@ Review weak concepts after 1 day, 1 week, and 1 month.
 
 ## Daily Command
 
-Start the day:
+Start the learning note for the day:
 
 ```bash
 scripts/learning-day-start.sh
 ```
 
-For non-trivial implementation days, start with:
+For non-trivial implementation chapters, start with:
 
 ```bash
 scripts/learning-day-start.sh --deep-dive
@@ -85,7 +85,7 @@ Run:
 scripts/learning-day-check.sh
 ```
 
-For non-trivial implementation days, run:
+For non-trivial implementation chapters, run:
 
 ```bash
 scripts/learning-day-check.sh --deep-dive-required

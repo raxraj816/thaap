@@ -35,6 +35,20 @@ For every non-trivial THAAP task:
    implementation work, a deep dive.
 6. End with an explain-back prompt or concise learning summary.
 
+## Chapter-Based Execution
+
+The implementation roadmap is chapter-based, not day-bound. A chapter is a
+sequenced product-building unit. Multiple chapters may be completed in one
+calendar day when dependencies, invariants, tests, and learning artifacts are
+satisfied.
+
+Do not slow down to preserve one chapter per day. Pull dependency-ready chapters
+forward aggressively, while preserving payment correctness, tenant isolation,
+security, fraud/ML lineage, auditability, and test proof.
+
+Daily learning notes remain dated because they are the work journal. They do not
+limit how many product chapters can be completed in a day.
+
 ## Required Learning Artifacts
 
 - Daily note: `docs/learning/daily/YYYY-MM-DD.md`
@@ -65,6 +79,30 @@ For each meaningful slice, cover:
 - tests as proof of invariants
 - what is intentionally deferred
 - how to explain it in a Stripe/Mastercard-style design review
+
+## Deferral Discipline
+
+Do not defer work merely because it belongs to a later named chapter if the
+current slice has satisfied its invariants and the next work is
+dependency-ready.
+
+Defer only when one of these is true:
+
+- a required domain invariant is missing
+- the needed schema/API boundary does not exist yet
+- adding the work would blur payment lifecycle, fraud lineage, tenant
+  isolation, security, or ledger correctness
+- the work would create unreviewed side effects in money movement, fraud
+  decisions, processor simulation, or durable ledger state
+
+Every deferral must name:
+
+- the exact reason
+- the owner chapter or implementation slice
+- the evidence that would unblock it
+
+When a slice finishes early and tests are green, pull forward the next safest
+vertical step instead of stopping at a narrow horizontal milestone.
 
 ## Non-Negotiable Habit
 
