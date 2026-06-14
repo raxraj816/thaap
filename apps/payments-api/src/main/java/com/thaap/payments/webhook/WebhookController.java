@@ -30,13 +30,9 @@ public class WebhookController {
     @ResponseStatus(HttpStatus.CREATED)
     public WebhookEndpointResponse createEndpoint(MerchantContext merchantContext,
             @Valid @RequestBody CreateWebhookEndpointRequest request) {
-        var signingSecret = newSigningSecret();
+        String signingSecret = WebhookSigningSecret.generate();
         return WebhookEndpointResponse.from(webhookEndpointRepository.save(new WebhookEndpoint(
                 merchantContext.merchantId(), request.url(), signingSecret)), signingSecret);
-    }
-
-    private String newSigningSecret() {
-        return "whsec_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     @GetMapping("/webhook_deliveries")

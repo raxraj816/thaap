@@ -31,8 +31,8 @@ public class MerchantContextArgumentResolver implements HandlerMethodArgumentRes
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
             NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
-        var request = webRequest.getNativeRequest(HttpServletRequest.class);
-        var apiKey = request == null ? null : request.getHeader(API_KEY_HEADER);
+        HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+        String apiKey = request == null ? null : request.getHeader(API_KEY_HEADER);
         if (apiKey == null || apiKey.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing X-Api-Key header");
         }

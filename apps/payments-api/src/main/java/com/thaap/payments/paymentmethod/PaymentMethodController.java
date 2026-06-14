@@ -50,11 +50,11 @@ public class PaymentMethodController {
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
         }
-        var normalizedCard = request.cardNumber().replace(" ", "");
+        String normalizedCard = request.cardNumber().replace(" ", "");
         if (!normalizedCard.matches("[0-9]{12,19}")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Card number must contain 12 to 19 digits");
         }
-        var paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
+        PaymentMethod paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
                 request.customerId(), "pm_tok_" + UUID.randomUUID().toString().replace("-", ""),
                 sensitiveValueHasher.hmacSha256("payment_method.card_fingerprint", normalizedCard),
                 normalizedCard.substring(0, 6),

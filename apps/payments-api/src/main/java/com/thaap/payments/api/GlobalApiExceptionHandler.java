@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -38,14 +39,14 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleRequestBodyValidation(MethodArgumentNotValidException exception,
             HttpServletRequest request, HttpServletResponse response) {
-        var fieldErrors = exception.getBindingResult().getFieldErrors().stream()
+        List<ApiErrorField> fieldErrors = exception.getBindingResult().getFieldErrors().stream()
                 .sorted(Comparator.comparing(FieldError::getField))
                 .map(error -> new ApiErrorField(error.getField(), defaultMessage(error.getDefaultMessage())))
                 .toList();
-        var globalErrors = exception.getBindingResult().getGlobalErrors().stream()
+        List<ApiErrorField> globalErrors = exception.getBindingResult().getGlobalErrors().stream()
                 .map(error -> new ApiErrorField(error.getObjectName(), defaultMessage(error.getDefaultMessage())))
                 .toList();
-        var errors = new ArrayList<ApiErrorField>();
+        List<ApiErrorField> errors = new ArrayList<>();
         errors.addAll(fieldErrors);
         errors.addAll(globalErrors);
         return error(HttpStatus.BAD_REQUEST, "validation_failed", "Request validation failed", request, response,
@@ -55,8 +56,8 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<ApiErrorResponse> handleMethodValidation(HandlerMethodValidationException exception,
             HttpServletRequest request, HttpServletResponse response) {
-        var errors = exception.getParameterValidationResults().stream()
-                .flatMap(result -> result.getResolvableErrors().stream()
+        List<ApiErrorField> errors = exception.getParameterValidationResults().stream()
+                .flatMap((ParameterValidationResult result) -> result.getResolvableErrors().stream()
                         .map(error -> new ApiErrorField(parameterName(result.getMethodParameter()), message(error))))
                 .toList();
         return error(HttpStatus.BAD_REQUEST, "validation_failed", "Request parameter validation failed", request, response,
@@ -66,7 +67,7 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ApiErrorResponse> handleConstraintViolation(ConstraintViolationException exception,
             HttpServletRequest request, HttpServletResponse response) {
-        var errors = exception.getConstraintViolations().stream()
+        List<ApiErrorField> errors = exception.getConstraintViolations().stream()
                 .map(violation -> new ApiErrorField(leafProperty(violation.getPropertyPath().toString()),
                         defaultMessage(violation.getMessage())))
                 .sorted(Comparator.comparing(ApiErrorField::field))
@@ -89,7 +90,7 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiErrorResponse> handleResponseStatus(ResponseStatusException exception,
             HttpServletRequest request, HttpServletResponse response) {
-        var status = HttpStatus.valueOf(exception.getStatusCode().value());
+        HttpStatus status = HttpStatus.valueOf(exception.getStatusCode().value());
         return error(status, errorCode(status), reasonOrDefault(exception.getReason(), status), request, response,
                 List.of());
     }
@@ -103,7 +104,7 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(ErrorResponseException.class)
     public ResponseEntity<ApiErrorResponse> handleErrorResponse(ErrorResponseException exception,
             HttpServletRequest request, HttpServletResponse response) {
-        var status = HttpStatus.valueOf(exception.getStatusCode().value());
+        HttpStatus status = HttpStatus.valueOf(exception.getStatusCode().value());
         return error(status, errorCode(status), reasonOrDefault(exception.getBody().getDetail(), status), request,
                 response,
                 List.of());
@@ -120,18 +121,18 @@ public class GlobalApiExceptionHandler {
 
     private ResponseEntity<ApiErrorResponse> error(HttpStatus status, String error, String message,
             HttpServletRequest request, HttpServletResponse response, List<ApiErrorField> fieldErrors) {
-        var requestId = requestId(request, response);
-        var body = new ApiErrorResponse(requestId, Instant.now(), status.value(), error, message,
+        String requestId = requestId(request, response);
+        ApiErrorResponse body = new ApiErrorResponse(requestId, Instant.now(), status.value(), error, message,
                 request.getRequestURI(), fieldErrors);
         return ResponseEntity.status(status).body(body);
     }
 
     private String requestId(HttpServletRequest request, HttpServletResponse response) {
-        var requestId = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
+        Object requestId = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
         if (requestId != null && !requestId.toString().isBlank()) {
             return requestId.toString();
         }
-        var fallback = UUID.randomUUID().toString();
+        String fallback = UUID.randomUUID().toString();
         request.setAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE, fallback);
         response.setHeader(RequestIdFilter.REQUEST_ID_HEADER, fallback);
         return fallback;
@@ -167,15 +168,15 @@ public class GlobalApiExceptionHandler {
     }
 
     private String parameterName(MethodParameter parameter) {
-        var requestParam = parameter.getParameterAnnotation(RequestParam.class);
+        RequestParam requestParam = parameter.getParameterAnnotation(RequestParam.class);
         if (requestParam != null) {
             return annotationName(requestParam.name(), requestParam.value(), parameter);
         }
-        var requestHeader = parameter.getParameterAnnotation(RequestHeader.class);
+        RequestHeader requestHeader = parameter.getParameterAnnotation(RequestHeader.class);
         if (requestHeader != null) {
             return annotationName(requestHeader.name(), requestHeader.value(), parameter);
         }
-        var pathVariable = parameter.getParameterAnnotation(PathVariable.class);
+        PathVariable pathVariable = parameter.getParameterAnnotation(PathVariable.class);
         if (pathVariable != null) {
             return annotationName(pathVariable.name(), pathVariable.value(), parameter);
         }
@@ -193,7 +194,7 @@ public class GlobalApiExceptionHandler {
     }
 
     private String fallbackParameterName(MethodParameter parameter) {
-        var parameterName = parameter.getParameterName();
+        String parameterName = parameter.getParameterName();
         return parameterName == null || parameterName.isBlank() ? "parameter" : parameterName;
     }
 
@@ -214,7 +215,7 @@ public class GlobalApiExceptionHandler {
     }
 
     private String leafProperty(String propertyPath) {
-        var dot = propertyPath.lastIndexOf('.');
+        int dot = propertyPath.lastIndexOf('.');
         if (dot < 0 || dot == propertyPath.length() - 1) {
             return propertyPath;
         }

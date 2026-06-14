@@ -2230,6 +2230,17 @@ Learn:
 Deliver:
 
 - Staff-level architecture review for Chapters 1-6.
+- Pull forward lifecycle hardening discovered during review before deeper
+  payment side effects:
+  - complete the PaymentIntent status vocabulary
+  - add transition guards for capture, cancel, and refund
+  - reject refund amounts that do not equal the captured PaymentIntent amount
+    until partial refund accounting exists
+  - return PaymentIntent `createdAt` and `updatedAt`
+  - add optional description and constrained metadata
+  - replace generic three-letter currency validation with a supported V1
+    currency allowlist
+  - add a simulator amount ceiling until processor/merchant-risk limits exist
 - Update the weekly architecture review with:
   - payment lifecycle progress
   - tenant/security risks reduced
@@ -2247,6 +2258,11 @@ Done when:
 - Documentation accurately describes the runnable state.
 - The next implementation risks are visible before deeper payment side effects
   are added.
+- Invalid PaymentIntent transitions fail with `409` and do not mutate state.
+- Refunds are rejected unless the PaymentIntent is captured and the requested
+  V1 refund amount equals the captured PaymentIntent amount.
+- PaymentIntent create rejects unsupported currencies and excessive amounts.
+- PaymentIntent responses include reconciliation timestamps.
 - No speculative schema or unused fraud/ML fields were added without lineage.
 
 Learn:

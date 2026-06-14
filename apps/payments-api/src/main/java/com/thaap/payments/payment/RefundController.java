@@ -9,7 +9,6 @@ import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -40,13 +39,12 @@ public class RefundController {
                 RefundResponse.class, () -> createRefundOnce(merchantContext, request));
     }
 
-    @Transactional
     protected ResponseEntity<RefundResponse> createRefundOnce(MerchantContext merchantContext,
             CreateRefundRequest request) {
-        var paymentIntent = paymentIntentRepository
-                .findByIdAndMerchantId(request.paymentIntentId(), merchantContext.merchantId())
+        PaymentIntent paymentIntent = paymentIntentRepository
+                .findByIdAndMerchantIdForUpdate(request.paymentIntentId(), merchantContext.merchantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentIntent was not found"));
-        paymentIntent.refund();
+        paymentIntent.refund(request.amount());
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "refund.created", paymentIntent.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new RefundResponse(UUID.randomUUID(), merchantContext.merchantId(), paymentIntent.getId(),
