@@ -17,6 +17,8 @@ import com.thaap.payments.webhook.WebhookDelivery;
 import com.thaap.payments.webhook.WebhookDeliveryRepository;
 import com.thaap.payments.webhook.WebhookEndpoint;
 import com.thaap.payments.webhook.WebhookEndpointRepository;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Locale;
@@ -86,6 +88,7 @@ class DatabaseMigrationTests {
                 "customers",
                 "payment_methods",
                 "payment_intents",
+                "payment_attempts",
                 "idempotency_records",
                 "webhook_endpoints",
                 "webhook_deliveries",
@@ -94,9 +97,13 @@ class DatabaseMigrationTests {
                 "review_cases");
 
         assertIndexExists("idempotency_records", "uk_idempotency_merchant_key");
+        assertIndexExists("idempotency_records", "idx_idempotency_merchant_status");
         assertIndexExists("merchants", "uk_merchants_api_key_hash");
         assertIndexExists("payment_intents", "uk_payment_intents_merchant_id_id");
         assertIndexExists("payment_intents", "idx_payment_intents_merchant_customer");
+        assertIndexExists("payment_attempts", "uk_payment_attempts_merchant_id_id");
+        assertIndexExists("payment_attempts", "uk_payment_attempts_intent_number");
+        assertIndexExists("payment_attempts", "idx_payment_attempts_merchant_created");
         assertIndexExists("payment_methods", "idx_payment_methods_merchant_bin");
         assertIndexExists("webhook_endpoints", "idx_webhook_endpoints_merchant_active");
         assertIndexExists("webhook_endpoints", "uk_webhook_endpoints_signing_secret_hash");
@@ -108,7 +115,11 @@ class DatabaseMigrationTests {
 
         assertThat(columnNames("merchants")).contains("api_key_prefix", "api_key_hash").doesNotContain("api_key");
         assertThat(columnNames("payment_methods")).contains("card_bin", "card_funding", "card_country");
-        assertThat(columnNames("payment_intents")).contains("capture_method");
+        assertThat(columnNames("payment_intents")).contains("capture_method", "description", "metadata");
+        assertThat(columnNames("payment_attempts")).contains("payment_intent_id", "payment_method_id",
+                "idempotency_key", "attempt_number", "fraud_decision_id", "processor_authorization_id",
+                "three_ds_status");
+        assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
         assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",
                 "delivered_at", "last_error");
@@ -141,11 +152,11 @@ class DatabaseMigrationTests {
         var merchantA = merchantRepository.saveAndFlush(new Merchant("merchant-a", "thaap_test_a"));
         var merchantB = merchantRepository.saveAndFlush(new Merchant("merchant-b", "thaap_test_b"));
 
-        idempotencyRepository.saveAndFlush(new IdempotencyRecord(merchantA.getId(), "shared-key", "request-a"));
-        idempotencyRepository.saveAndFlush(new IdempotencyRecord(merchantB.getId(), "shared-key", "request-b"));
+        idempotencyRepository.saveAndFlush(idempotencyRecord(merchantA.getId(), "shared-key", "request-a"));
+        idempotencyRepository.saveAndFlush(idempotencyRecord(merchantB.getId(), "shared-key", "request-b"));
 
         assertThatThrownBy(() -> idempotencyRepository.saveAndFlush(
-                new IdempotencyRecord(merchantA.getId(), "shared-key", "request-c")))
+                idempotencyRecord(merchantA.getId(), "shared-key", "request-c")))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -211,5 +222,10 @@ class DatabaseMigrationTests {
     private void assertIndexExists(String tableName, String indexName) throws SQLException {
         assertThat(indexNames(tableName))
                 .anySatisfy(actual -> assertThat(actual).startsWith(indexName));
+    }
+
+    private IdempotencyRecord idempotencyRecord(UUID merchantId, String key, String requestHash) {
+        return new IdempotencyRecord(merchantId, key, "test.operation", requestHash,
+                Instant.now().plus(1, ChronoUnit.DAYS));
     }
 }

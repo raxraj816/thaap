@@ -21,3 +21,5 @@ Status values:
 | Database migrations and Flyway | `docs/learning/concepts/DATABASE_MIGRATIONS_AND_FLYWAY.md` | 2026-06-02 | 2026-06-03 | 2026-06-09 | 2026-07-02 | new | Explain why Hibernate validate replaces update. |
 | Payment method tokenization | `docs/learning/concepts/PAYMENT_METHOD_TOKENIZATION.md` | 2026-05-31 | 2026-06-01 | 2026-06-07 | 2026-06-30 | new | Explain safe simulator metadata boundary. |
 | API credential lifecycle | `docs/learning/concepts/API_CREDENTIAL_LIFECYCLE.md` | 2026-06-05 | 2026-06-06 | 2026-06-12 | 2026-07-05 | new | Explain one-time reveal, prefix/hash storage, and future rotation. |
+| PaymentAttempt | `docs/learning/concepts/PAYMENT_ATTEMPT.md` | 2026-06-09 | 2026-06-10 | 2026-06-16 | 2026-07-09 | new | Explain why fraud and processor lineage attach to attempts. |
+| PaymentIntent state machine | `docs/learning/concepts/PAYMENT_INTENT_STATE_MACHINE.md` | 2026-06-15 | 2026-06-16 | 2026-06-22 | 2026-07-15 | new | Explain why invalid capture/refund transitions must fail before processor and ledger work. |

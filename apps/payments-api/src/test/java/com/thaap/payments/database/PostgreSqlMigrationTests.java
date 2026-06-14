@@ -44,6 +44,13 @@ class PostgreSqlMigrationTests {
         assertThat(applied).isEqualTo(1);
         assertThat(columnExists("payment_methods", "card_bin")).isTrue();
         assertThat(columnExists("payment_intents", "capture_method")).isTrue();
+        assertThat(columnExists("payment_intents", "description")).isTrue();
+        assertThat(columnExists("payment_intents", "metadata")).isTrue();
+        assertThat(columnExists("payment_attempts", "payment_intent_id")).isTrue();
+        assertThat(columnExists("payment_attempts", "payment_method_id")).isTrue();
+        assertThat(columnExists("payment_attempts", "attempt_number")).isTrue();
+        assertThat(columnExists("idempotency_records", "operation")).isTrue();
+        assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
     }
 

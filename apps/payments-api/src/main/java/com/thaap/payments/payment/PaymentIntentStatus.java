@@ -1,8 +1,16 @@
 package com.thaap.payments.payment;
 
 public enum PaymentIntentStatus {
+    REQUIRES_PAYMENT_METHOD,
     REQUIRES_CONFIRMATION,
+    REQUIRES_FRAUD_CHECK,
+    REQUIRES_ACTION,
+    PROCESSING,
+    AUTHORIZED,
+    REQUIRES_CAPTURE,
     CAPTURED,
     CANCELED,
-    REFUNDED
+    REFUNDED,
+    DISPUTED,
+    FAILED
 }

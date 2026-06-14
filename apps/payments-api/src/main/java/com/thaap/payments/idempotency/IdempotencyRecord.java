@@ -14,7 +14,10 @@ import java.util.UUID;
 @Entity
 @Table(name = "idempotency_records",
         uniqueConstraints = @UniqueConstraint(name = "uk_idempotency_merchant_key", columnNames = {"merchant_id", "idempotency_key"}),
-        indexes = @Index(name = "idx_idempotency_merchant", columnList = "merchant_id"))
+        indexes = {
+                @Index(name = "idx_idempotency_merchant", columnList = "merchant_id"),
+                @Index(name = "idx_idempotency_merchant_status", columnList = "merchant_id,status")
+        })
 public class IdempotencyRecord {
 
     @Id
@@ -27,16 +30,19 @@ public class IdempotencyRecord {
     private String key;
 
     @Column(nullable = false)
+    private String operation;
+
+    @Column(nullable = false)
     private String requestHash;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private IdempotencyStatus status;
 
-    @Column(nullable = false)
-    private int httpStatus;
+    @Column
+    private Integer httpStatus;
 
-    @Column(nullable = false, columnDefinition = "text")
+    @Column(columnDefinition = "text")
     private String responseBody;
 
     @Column(nullable = false)
@@ -45,23 +51,38 @@ public class IdempotencyRecord {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    @Column(nullable = false)
+    private Instant expiresAt;
+
     protected IdempotencyRecord() {
     }
 
-    public IdempotencyRecord(UUID merchantId, String key, String requestHash) {
+    public IdempotencyRecord(UUID merchantId, String key, String operation, String requestHash, Instant expiresAt) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.key = key;
+        this.operation = operation;
         this.requestHash = requestHash;
         this.status = IdempotencyStatus.IN_PROGRESS;
-        this.httpStatus = 0;
-        this.responseBody = "{}";
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+        this.expiresAt = expiresAt;
+    }
+
+    public UUID getId() {
+        return id;
     }
 
     public UUID getMerchantId() {
         return merchantId;
+    }
+
+    public String getKey() {
+        return key;
+    }
+
+    public String getOperation() {
+        return operation;
     }
 
     public String getRequestHash() {
@@ -72,12 +93,16 @@ public class IdempotencyRecord {
         return status;
     }
 
-    public int getHttpStatus() {
+    public Integer getHttpStatus() {
         return httpStatus;
     }
 
     public String getResponseBody() {
         return responseBody;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
     }
 
     public void complete(int httpStatus, String responseBody) {

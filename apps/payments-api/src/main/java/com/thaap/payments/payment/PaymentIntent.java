@@ -1,6 +1,7 @@
 package com.thaap.payments.payment;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -8,7 +9,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Entity
 @Table(name = "payment_intents", indexes = {
@@ -40,6 +44,13 @@ public class PaymentIntent {
     @Column(nullable = false)
     private PaymentIntentStatus status;
 
+    @Column(length = 500)
+    private String description;
+
+    @Convert(converter = PaymentIntentMetadataConverter.class)
+    @Column(nullable = false, columnDefinition = "text")
+    private Map<String, String> metadata;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -50,10 +61,15 @@ public class PaymentIntent {
     }
 
     public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency) {
-        this(merchantId, customerId, amount, currency, CaptureMethod.AUTOMATIC);
+        this(merchantId, customerId, amount, currency, CaptureMethod.AUTOMATIC, null, Map.of());
     }
 
     public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency, CaptureMethod captureMethod) {
+        this(merchantId, customerId, amount, currency, captureMethod, null, Map.of());
+    }
+
+    public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency, CaptureMethod captureMethod,
+            String description, Map<String, String> metadata) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.customerId = customerId;
@@ -61,6 +77,8 @@ public class PaymentIntent {
         this.currency = currency.toUpperCase();
         this.captureMethod = captureMethod;
         this.status = PaymentIntentStatus.REQUIRES_CONFIRMATION;
+        this.description = description;
+        this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -93,17 +111,58 @@ public class PaymentIntent {
         return status;
     }
 
+    public String getDescription() {
+        return description;
+    }
+
+    public Map<String, String> getMetadata() {
+        return metadata;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
     public void capture() {
+        if (status != PaymentIntentStatus.REQUIRES_CAPTURE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be captured from status " + status);
+        }
         this.status = PaymentIntentStatus.CAPTURED;
         this.updatedAt = Instant.now();
     }
 
     public void cancel() {
+        if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION
+                && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
+                && status != PaymentIntentStatus.REQUIRES_ACTION
+                && status != PaymentIntentStatus.REQUIRES_FRAUD_CHECK
+                && status != PaymentIntentStatus.AUTHORIZED
+                && status != PaymentIntentStatus.REQUIRES_CAPTURE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be canceled from status " + status);
+        }
         this.status = PaymentIntentStatus.CANCELED;
         this.updatedAt = Instant.now();
     }
 
     public void refund() {
+        refund(amount);
+    }
+
+    public void refund(long refundAmount) {
+        if (status != PaymentIntentStatus.CAPTURED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be refunded from status " + status);
+        }
+        if (refundAmount != amount) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
+        }
         this.status = PaymentIntentStatus.REFUNDED;
         this.updatedAt = Instant.now();
     }

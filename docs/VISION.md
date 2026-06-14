@@ -104,6 +104,46 @@ Every proposed product idea should pass this filter:
 
 If not, it is not yet product work.
 
+## 2.2 Speed-To-Real-Product Rule
+
+THAAP is competing against mature payment and fraud platforms, so it must avoid
+parity chasing. Early speed comes from a narrow, painful, believable wedge:
+
+```text
+simulate realistic payment risk -> explain the decision -> let an analyst act
+  -> feed the outcome back into rules, labels, and model evaluation
+```
+
+The fastest credible product path is not to build every payment feature first.
+It is to make one vertical fraud-risk loop feel real end to end:
+
+- Merchant can create and confirm a card payment.
+- The platform captures decision-time risk context.
+- Fraud rules produce an auditable decision with reason codes.
+- Risky attempts become review cases or blocked payments.
+- An analyst can understand, resolve, and label the case.
+- The outcome updates rule evaluation and future ML training data.
+- The whole flow can be replayed, demonstrated, tested, and operated locally.
+
+Work should be sequenced by shortest path to this loop. Infrastructure,
+framework, and UI work are only urgent when they unlock the loop or protect a
+critical invariant.
+
+For aggressive execution, prefer:
+
+- one merchant segment before many segments
+- one card-payment rail before many payment methods
+- one analyst queue before broad dashboards
+- deterministic rules before complex ML
+- synthetic repeatable scenarios before real integrations
+- local operability before cloud polish
+- explainability and auditability before opaque automation
+
+The product should be demoable at all times. A feature that cannot be shown in
+a merchant, payment, fraud, analyst, or learning workflow is not on the fastest
+path unless it protects correctness, security, tenant isolation, or operational
+resilience.
+
 ## 3. Target Users
 
 ### 3.1 Builder / Learner

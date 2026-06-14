@@ -67,7 +67,12 @@ class PaymentIntentCreateContractTests {
                   "customerId": "%s",
                   "amount": 1200,
                   "currency": "usd",
-                  "captureMethod": "MANUAL"
+                  "captureMethod": "MANUAL",
+                  "description": "Initial checkout authorization",
+                  "metadata": {
+                    "cart_id": "cart_123",
+                    "order_id": "order_456"
+                  }
                 }
                 """.formatted(customerId));
 
@@ -78,12 +83,18 @@ class PaymentIntentCreateContractTests {
         assertThat(response.get("currency").asText()).isEqualTo("USD");
         assertThat(response.get("captureMethod").asText()).isEqualTo("MANUAL");
         assertThat(response.get("status").asText()).isEqualTo("REQUIRES_CONFIRMATION");
+        assertThat(response.get("description").asText()).isEqualTo("Initial checkout authorization");
+        assertThat(response.get("metadata").get("cart_id").asText()).isEqualTo("cart_123");
+        assertThat(response.get("metadata").get("order_id").asText()).isEqualTo("order_456");
+        assertThat(response.get("createdAt").asText()).isNotBlank();
+        assertThat(response.get("updatedAt").asText()).isNotBlank();
         assertThat(response.has("requestHash")).isFalse();
         assertThat(response.has("responseBody")).isFalse();
         assertThat(response.has("apiKeyHash")).isFalse();
 
         var stored = jdbcTemplate.queryForMap("""
-                SELECT merchant_id, customer_id, amount, currency, capture_method, status, created_at, updated_at
+                SELECT merchant_id, customer_id, amount, currency, capture_method, status, description, metadata,
+                       created_at, updated_at
                 FROM payment_intents
                 WHERE id = ?
                 """, paymentIntentId);
@@ -93,6 +104,8 @@ class PaymentIntentCreateContractTests {
         assertThat(stored.get("CURRENCY")).isEqualTo("USD");
         assertThat(stored.get("CAPTURE_METHOD")).isEqualTo("MANUAL");
         assertThat(stored.get("STATUS")).isEqualTo("REQUIRES_CONFIRMATION");
+        assertThat(stored.get("DESCRIPTION")).isEqualTo("Initial checkout authorization");
+        assertThat(stored.get("METADATA").toString()).contains("\"cart_id\":\"cart_123\"");
         assertThat(stored.get("CREATED_AT")).isNotNull();
         assertThat(stored.get("UPDATED_AT")).isNotNull();
 
@@ -222,6 +235,97 @@ class PaymentIntentCreateContractTests {
         assertThat(error.get("message").asText()).isEqualTo("Request validation failed");
         assertThat(error.get("fieldErrors").findValuesAsText("field"))
                 .contains("customerId", "amount", "currency");
+        assertThat(countRows("payment_intents")).isZero();
+    }
+
+    @Test
+    void unsupportedCurrencyIsRejectedBeforePersistence() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customerId = createCustomer(merchant, "buyer-a@example.com");
+
+        var response = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "unsupported-currency")
+                        .header(REQUEST_ID, "req_unsupported_currency")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "amount": 1200,
+                                  "currency": "XYZ"
+                                }
+                                """.formatted(customerId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().string(REQUEST_ID, "req_unsupported_currency"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        var error = objectMapper.readTree(response);
+
+        assertStandardError(error, 400, "validation_failed", "req_unsupported_currency", "/payment_intents");
+        assertThat(error.get("fieldErrors").findValuesAsText("field")).contains("currency");
+        assertThat(countRows("payment_intents")).isZero();
+    }
+
+    @Test
+    void excessiveAmountIsRejectedBeforePersistence() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customerId = createCustomer(merchant, "buyer-a@example.com");
+
+        var response = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "amount-too-large")
+                        .header(REQUEST_ID, "req_amount_too_large")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "amount": 100000001,
+                                  "currency": "USD"
+                                }
+                                """.formatted(customerId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().string(REQUEST_ID, "req_amount_too_large"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        var error = objectMapper.readTree(response);
+
+        assertStandardError(error, 400, "validation_failed", "req_amount_too_large", "/payment_intents");
+        assertThat(error.get("fieldErrors").findValuesAsText("field")).contains("amount");
+        assertThat(countRows("payment_intents")).isZero();
+    }
+
+    @Test
+    void metadataShapeIsConstrained() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customerId = createCustomer(merchant, "buyer-a@example.com");
+
+        var response = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "bad-metadata")
+                        .header(REQUEST_ID, "req_bad_metadata")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "amount": 1200,
+                                  "currency": "USD",
+                                  "metadata": {
+                                    "bad key": "not allowed"
+                                  }
+                                }
+                                """.formatted(customerId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().string(REQUEST_ID, "req_bad_metadata"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        var error = objectMapper.readTree(response);
+
+        assertStandardError(error, 400, "validation_failed", "req_bad_metadata", "/payment_intents");
+        assertThat(error.get("fieldErrors").findValuesAsText("field"))
+                .anySatisfy(field -> assertThat(field).contains("metadata"));
         assertThat(countRows("payment_intents")).isZero();
     }
 

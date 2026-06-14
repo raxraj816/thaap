@@ -46,6 +46,8 @@ CREATE TABLE payment_intents (
     currency VARCHAR(3) NOT NULL,
     capture_method VARCHAR(32) NOT NULL,
     status VARCHAR(255) NOT NULL,
+    description VARCHAR(500),
+    metadata TEXT NOT NULL DEFAULT '{}',
     created_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     CONSTRAINT pk_payment_intents PRIMARY KEY (id),
@@ -54,16 +56,39 @@ CREATE TABLE payment_intents (
     CONSTRAINT fk_payment_intents_customer FOREIGN KEY (merchant_id, customer_id) REFERENCES customers (merchant_id, id)
 );
 
+CREATE TABLE payment_attempts (
+    id UUID NOT NULL,
+    merchant_id UUID NOT NULL,
+    payment_intent_id UUID NOT NULL,
+    payment_method_id UUID NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL,
+    status VARCHAR(255) NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    fraud_decision_id UUID,
+    processor_authorization_id VARCHAR(255),
+    three_ds_status VARCHAR(255),
+    created_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    CONSTRAINT pk_payment_attempts PRIMARY KEY (id),
+    CONSTRAINT uk_payment_attempts_merchant_id_id UNIQUE (merchant_id, id),
+    CONSTRAINT uk_payment_attempts_intent_number UNIQUE (merchant_id, payment_intent_id, attempt_number),
+    CONSTRAINT fk_payment_attempts_merchant FOREIGN KEY (merchant_id) REFERENCES merchants (id),
+    CONSTRAINT fk_payment_attempts_intent FOREIGN KEY (merchant_id, payment_intent_id) REFERENCES payment_intents (merchant_id, id),
+    CONSTRAINT fk_payment_attempts_method FOREIGN KEY (merchant_id, payment_method_id) REFERENCES payment_methods (merchant_id, id)
+);
+
 CREATE TABLE idempotency_records (
     id UUID NOT NULL,
     merchant_id UUID NOT NULL,
     idempotency_key VARCHAR(255) NOT NULL,
+    operation VARCHAR(255) NOT NULL,
     request_hash VARCHAR(255) NOT NULL,
     status VARCHAR(255) NOT NULL,
-    http_status INTEGER NOT NULL,
-    response_body TEXT NOT NULL,
+    http_status INTEGER,
+    response_body TEXT,
     created_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     CONSTRAINT pk_idempotency_records PRIMARY KEY (id),
     CONSTRAINT uk_idempotency_merchant_key UNIQUE (merchant_id, idempotency_key),
     CONSTRAINT fk_idempotency_records_merchant FOREIGN KEY (merchant_id) REFERENCES merchants (id)
@@ -136,7 +161,12 @@ CREATE INDEX idx_payment_methods_merchant_bin ON payment_methods (merchant_id, c
 CREATE INDEX idx_payment_intents_merchant ON payment_intents (merchant_id);
 CREATE INDEX idx_payment_intents_customer ON payment_intents (customer_id);
 CREATE INDEX idx_payment_intents_merchant_customer ON payment_intents (merchant_id, customer_id);
+CREATE INDEX idx_payment_attempts_merchant ON payment_attempts (merchant_id);
+CREATE INDEX idx_payment_attempts_payment_intent ON payment_attempts (payment_intent_id);
+CREATE INDEX idx_payment_attempts_payment_method ON payment_attempts (payment_method_id);
+CREATE INDEX idx_payment_attempts_merchant_created ON payment_attempts (merchant_id, created_at, id);
 CREATE INDEX idx_idempotency_merchant ON idempotency_records (merchant_id);
+CREATE INDEX idx_idempotency_merchant_status ON idempotency_records (merchant_id, status);
 CREATE INDEX idx_webhook_endpoints_merchant ON webhook_endpoints (merchant_id);
 CREATE INDEX idx_webhook_endpoints_merchant_active ON webhook_endpoints (merchant_id, active);
 CREATE INDEX idx_webhook_deliveries_merchant ON webhook_deliveries (merchant_id);

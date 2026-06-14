@@ -8,7 +8,8 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 6 is complete at PaymentIntent create contract quality:
+Chapter 9 is complete, with Chapter 7 lifecycle hardening pulled forward before
+deeper processor/fraud/ledger side effects:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -41,10 +42,38 @@ Chapter 6 is complete at PaymentIntent create contract quality:
   defaults missing capture method to `AUTOMATIC`, starts in
   `REQUIRES_CONFIRMATION`, and creates `payment_intent.created` webhook
   delivery records for configured endpoints.
+- PaymentIntent create now accepts optional `description` and constrained
+  string metadata, returns `createdAt`/`updatedAt`, rejects unsupported V1
+  currencies, and enforces a simulator transaction amount ceiling.
+- PaymentIntent state transitions now reject impossible capture/cancel/refund
+  mutations before processor, fraud, or ledger side effects can attach to bad
+  lifecycle state.
 - Chapter 6 contract tests prove PaymentIntent response shape, persisted state,
   idempotency replay, conflict handling, validation errors, default capture
   method, currency normalization, webhook delivery non-duplication, and
   cross-merchant customer rejection.
+- Chapter 7 review updated the architecture learning trail and made remaining
+  idempotency, attempt, processor, fraud, and ledger risks explicit before
+  deeper payment side effects.
+- `IdempotencyService` now reserves an `IN_PROGRESS` row before a mutation,
+  binds each key to merchant, operation, and request hash, completes the record
+  only after the mutation response is durable, rejects in-progress duplicates,
+  and releases reservations after failed mutations so retryable failures are
+  not cached.
+- Chapter 8 service tests prove completed replay, operation mismatch conflict,
+  in-progress duplicate rejection, rollback cleanup after mutation failure,
+  merchant-scoped key reuse, and in-progress storage shape.
+- `POST /payment_intents/{id}/confirm` now creates a tenant-scoped
+  `PaymentAttempt` for a valid PaymentIntent and PaymentMethod owned by the
+  same merchant/customer.
+- `GET /payment_attempts/{id}` fetches attempts through merchant scope.
+- Chapter 9 contract tests prove attempt creation, idempotent confirm replay,
+  monotonic attempt numbering, invalid status rejection, cross-merchant
+  PaymentIntent rejection, cross-merchant PaymentMethod rejection, and
+  wrong-customer PaymentMethod rejection, including concurrent confirm keys
+  producing distinct attempt numbers.
+- Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`
+  while capture/refund are rejected before authorization/capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 
@@ -126,7 +155,7 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Chapter 6 learning verification:
+Chapter 9 learning verification:
 
 ```bash
 scripts/learning-day-check.sh 2026-06-09 --deep-dive-required

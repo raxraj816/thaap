@@ -38,7 +38,7 @@ public class WebhookEndpoint {
     }
 
     public WebhookEndpoint(UUID merchantId, String url) {
-        this(merchantId, url, newSigningSecret());
+        this(merchantId, url, WebhookSigningSecret.generate());
     }
 
     public WebhookEndpoint(UUID merchantId, String url, String rawSigningSecret) {
@@ -49,10 +49,6 @@ public class WebhookEndpoint {
         this.signingSecretPrefix = SecretHasher.prefix(rawSigningSecret);
         this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
         this.createdAt = Instant.now();
-    }
-
-    private static String newSigningSecret() {
-        return "whsec_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     public UUID getId() {
