@@ -83,6 +83,15 @@ scripts/learning-day-check.sh --deep-dive-required
 scripts/commit-readiness-check.sh --deep-dive-required
 ```
 
+## Git Workflow
+
+For feature work, always create branches from `develop` and name them with the
+`feature/` prefix, for example `feature/payment-lifecycle-hardening`.
+
+Use another branch prefix only when the user explicitly asks for it. Do not use
+tool-default or agent-default branch prefixes when they conflict with this
+repository convention.
+
 ## Teaching Standard
 
 For each meaningful slice, cover:
