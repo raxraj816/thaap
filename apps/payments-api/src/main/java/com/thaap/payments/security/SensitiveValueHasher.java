@@ -24,7 +24,7 @@ public class SensitiveValueHasher {
 
     public String hmacSha256(String domain, String value) {
         try {
-            var mac = Mac.getInstance(HMAC_ALGORITHM);
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
             mac.init(keySpec);
             mac.update(domain.getBytes(StandardCharsets.UTF_8));
             mac.update((byte) 0);

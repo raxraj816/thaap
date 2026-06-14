@@ -24,7 +24,7 @@ public class RequestIdFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        var requestId = requestIdFrom(request);
+        String requestId = requestIdFrom(request);
         request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
         response.setHeader(REQUEST_ID_HEADER, requestId);
         MDC.put(MDC_KEY, requestId);
@@ -36,11 +36,11 @@ public class RequestIdFilter extends OncePerRequestFilter {
     }
 
     private String requestIdFrom(HttpServletRequest request) {
-        var header = request.getHeader(REQUEST_ID_HEADER);
+        String header = request.getHeader(REQUEST_ID_HEADER);
         if (header == null || header.isBlank()) {
             return UUID.randomUUID().toString();
         }
-        var trimmed = header.trim();
+        String trimmed = header.trim();
         if (trimmed.length() > MAX_REQUEST_ID_LENGTH || !trimmed.chars().allMatch(this::isVisibleAscii)) {
             return UUID.randomUUID().toString();
         }

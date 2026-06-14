@@ -44,8 +44,8 @@ public class IdempotencyService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
         }
 
-        var requestHash = requestHash(request);
-        var reservation = reserve(merchantContext.merchantId(), key, operation, requestHash);
+        String requestHash = requestHash(request);
+        IdempotencyReservation reservation = reserve(merchantContext.merchantId(), key, operation, requestHash);
         if (reservation.replayRecord() != null) {
             return replay(reservation.replayRecord(), responseType);
         }
@@ -60,7 +60,7 @@ public class IdempotencyService {
 
     private <T> ResponseEntity<T> replay(IdempotencyRecord record, Class<T> responseType) {
         try {
-            var response = objectMapper.readValue(record.getResponseBody(), responseType);
+            T response = objectMapper.readValue(record.getResponseBody(), responseType);
             return ResponseEntity.status(record.getHttpStatus()).body(response);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Stored idempotency response is not readable", exception);
@@ -79,7 +79,7 @@ public class IdempotencyService {
         return idempotencyRepository.findByMerchantIdAndKey(merchantId, key)
                 .map(record -> handleExisting(record, operation, requestHash))
                 .orElseGet(() -> {
-                    var record = new IdempotencyRecord(merchantId, key, operation, requestHash,
+                    IdempotencyRecord record = new IdempotencyRecord(merchantId, key, operation, requestHash,
                             Instant.now().plus(DEFAULT_KEY_TTL));
                     idempotencyRepository.saveAndFlush(record);
                     return IdempotencyReservation.reserved(record.getId());
@@ -87,7 +87,7 @@ public class IdempotencyService {
     }
 
     private IdempotencyReservation handleExisting(UUID merchantId, String key, String operation, String requestHash) {
-        var record = idempotencyRepository.findByMerchantIdAndKey(merchantId, key)
+        IdempotencyRecord record = idempotencyRepository.findByMerchantIdAndKey(merchantId, key)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                         "Idempotency key reservation could not be completed"));
         return handleExisting(record, operation, requestHash);
@@ -107,8 +107,8 @@ public class IdempotencyService {
     private <T> ResponseEntity<T> runOperationAndComplete(UUID recordId,
             Supplier<ResponseEntity<T>> operationSupplier) {
         return operationTransaction.execute(status -> {
-            var response = operationSupplier.get();
-            var record = idempotencyRepository.findById(recordId)
+            ResponseEntity<T> response = operationSupplier.get();
+            IdempotencyRecord record = idempotencyRepository.findById(recordId)
                     .orElseThrow(() -> new IllegalStateException("Idempotency reservation disappeared"));
             record.complete(response.getStatusCode().value(), write(response.getBody()));
             return response;

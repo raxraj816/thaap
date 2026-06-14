@@ -29,7 +29,7 @@ public class CustomerController {
     @ResponseStatus(HttpStatus.CREATED)
     public CustomerResponse createCustomer(MerchantContext merchantContext,
             @Valid @RequestBody CreateCustomerRequest request) {
-        var customer = customerRepository.save(new Customer(
+        Customer customer = customerRepository.save(new Customer(
                 merchantContext.merchantId(),
                 sensitiveValueHasher.hmacSha256Lowercase("customer.email", request.email()),
                 request.phone() == null || request.phone().isBlank()

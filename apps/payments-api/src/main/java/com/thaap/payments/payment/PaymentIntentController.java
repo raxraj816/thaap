@@ -5,6 +5,7 @@ import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
 import com.thaap.payments.paymentattempt.PaymentAttemptResponse;
+import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
@@ -66,7 +67,7 @@ public class PaymentIntentController {
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
         }
-        var paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
+        PaymentIntent paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
                 request.customerId(), request.amount(), request.currency(), request.normalizedCaptureMethod(),
                 request.description(), request.normalizedMetadata()));
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.created",
@@ -91,19 +92,19 @@ public class PaymentIntentController {
 
     protected ResponseEntity<PaymentAttemptResponse> confirmPaymentIntentOnce(MerchantContext merchantContext, UUID id,
             String idempotencyKey, ConfirmPaymentIntentRequest request) {
-        var paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
+        PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
         if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentIntent is not confirmable");
         }
-        var paymentMethod = paymentMethodRepository
+        PaymentMethod paymentMethod = paymentMethodRepository
                 .findByIdAndMerchantId(request.paymentMethodId(), merchantContext.merchantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentMethod was not found"));
         if (!paymentMethod.getCustomerId().equals(paymentIntent.getCustomerId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentMethod was not found for PaymentIntent");
         }
 
-        var attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
-        var paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
+        int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
+        PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
                 paymentMethod.getId(), idempotencyKey, attemptNumber));
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
@@ -130,7 +131,7 @@ public class PaymentIntentController {
 
     protected ResponseEntity<PaymentIntentResponse> mutatePaymentIntent(MerchantContext merchantContext, UUID id,
             java.util.function.Consumer<PaymentIntent> mutation, String eventType) {
-        var paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
+        PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
         mutation.accept(paymentIntent);
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), eventType, paymentIntent.getId());
         return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));

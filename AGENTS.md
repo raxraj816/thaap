@@ -105,6 +105,13 @@ For each meaningful slice, cover:
 - what is intentionally deferred
 - how to explain it in a Stripe/Mastercard-style design review
 
+## Java Style
+
+In production Java code, prefer explicit local variable types over `var`.
+Payment, fraud, security, tenant, idempotency, and ledger code should optimize
+for reviewability and learning clarity over brevity. Tests may use `var` only
+when the inferred type is obvious and does not hide a domain concept.
+
 ## Deferral Discipline
 
 Do not defer work merely because it belongs to a later named chapter if the

@@ -41,7 +41,7 @@ public class RefundController {
 
     protected ResponseEntity<RefundResponse> createRefundOnce(MerchantContext merchantContext,
             CreateRefundRequest request) {
-        var paymentIntent = paymentIntentRepository
+        PaymentIntent paymentIntent = paymentIntentRepository
                 .findByIdAndMerchantIdForUpdate(request.paymentIntentId(), merchantContext.merchantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentIntent was not found"));
         paymentIntent.refund(request.amount());

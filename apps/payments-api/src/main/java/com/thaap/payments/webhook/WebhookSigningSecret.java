@@ -13,7 +13,7 @@ final class WebhookSigningSecret {
     }
 
     static String generate() {
-        var bytes = new byte[SECRET_BYTES];
+        byte[] bytes = new byte[SECRET_BYTES];
         SECURE_RANDOM.nextBytes(bytes);
         return "whsec_" + URL_SAFE_BASE64.encodeToString(bytes);
     }

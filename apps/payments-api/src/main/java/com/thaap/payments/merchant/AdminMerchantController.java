@@ -32,8 +32,8 @@ public class AdminMerchantController {
             @RequestHeader(name = "X-Admin-Bootstrap-Token", required = false) String providedBootstrapToken,
             @Valid @RequestBody CreateMerchantRequest request) {
         requireBootstrapToken(providedBootstrapToken);
-        var apiKey = newApiKey();
-        var merchant = merchantRepository.save(new Merchant(request.name(), apiKey));
+        String apiKey = newApiKey();
+        Merchant merchant = merchantRepository.save(new Merchant(request.name(), apiKey));
         return MerchantResponse.from(merchant, apiKey);
     }
 
