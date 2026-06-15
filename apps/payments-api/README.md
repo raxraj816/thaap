@@ -181,7 +181,9 @@ fingerprints, or merchant secrets.
 
 Fraud decisioning, processor authorization, final PaymentIntent status mapping,
 FeatureSnapshot creation, and ledgering remain deferred to the master-plan
-chapters that own those side effects.
+chapters that own those side effects. When FeatureSnapshot is implemented, it
+must include freshness metadata: computed time, oldest feature timestamp, max
+feature age, freshness status, stale feature names, and missing feature names.
 
 ## Database Migrations
 

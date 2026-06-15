@@ -670,6 +670,10 @@ from audit payloads.
 - `modelVersion`
 - `rulesetVersion`
 - `latencyMs`
+- `decisionStartedAt`
+- `decisionCompletedAt`
+- `featureFreshnessStatus`
+- `maxFeatureAgeMs`
 - `reasonCodes`
 - `createdAt`
 
@@ -706,6 +710,12 @@ returned in public responses.
 - `fraudDecisionId`
 - `featuresJson`
 - `featureVersion`
+- `computedAt`
+- `oldestFeatureTimestamp`
+- `maxFeatureAgeMs`
+- `freshnessStatus`
+- `staleFeatureNames`
+- `missingFeatureNames`
 - `createdAt`
 
 `FraudRule`
@@ -1118,6 +1128,47 @@ Later:
 - Consider Feast or a custom feature store only when complexity justifies it.
 
 Velocity counters must exclude the current payment being evaluated.
+
+### 9.3 Real-Time Feature Freshness Contract
+
+Fraud quality is bounded by decision-time data freshness. A model or ruleset
+must not appear more trustworthy than the features it received.
+
+Every real-time fraud decision must record:
+
+- when decisioning started and completed
+- total decision latency in milliseconds
+- the feature schema version
+- when the feature snapshot was computed
+- the oldest feature timestamp used by the decision
+- the maximum feature age in milliseconds
+- whether feature freshness was `FRESH`, `STALE`, or `MISSING`
+- names of stale and missing features
+- whether stale or missing features affected the decision action or confidence
+
+V1 freshness rules:
+
+- Payment request fields are fresh at request time.
+- PostgreSQL-derived customer/payment history features are fresh at the
+  transaction timestamp used by the query.
+- Redis velocity counters must expose the counter update timestamp used for
+  scoring.
+- A feature with no trustworthy timestamp is `MISSING`, not fresh by default.
+- Stale features may still be used by deterministic rules only when the rule
+  records that freshness degraded confidence.
+
+Initial SLO:
+
+- fraud decision p95 latency below `100ms` inside `payments-api`
+- hard timeout and degraded outcome behavior must be explicit before external
+  model serving is introduced
+
+What not to build yet:
+
+- no Kafka/Flink pipeline until durable payment, attempt, feature, and replay
+  contracts exist
+- no GPU/Triton serving until deterministic rules, feature snapshots, offline
+  replay, and model promotion gates prove a need
 
 Point-in-time correctness rule:
 
@@ -1714,6 +1765,10 @@ Done when:
 
 - Every PaymentAttempt has a FraudDecision.
 - FeatureSnapshot records immutable decision-time values.
+- FeatureSnapshot records freshness metadata: computed time, oldest feature
+  timestamp, max feature age, freshness status, stale features, and missing
+  features.
+- FraudDecision records decision latency and feature freshness status.
 - FeatureValue supports point-in-time offline joins.
 - `BLOCK` prevents authorization.
 - `REQUEST_3DS` moves intent to `REQUIRES_ACTION`.
