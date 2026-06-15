@@ -104,7 +104,11 @@ docs/
 
 V1 is a card-payment simulator with integrated fraud detection. It does not move real money, persist raw PAN, persist CVV, or claim PCI certification.
 
-The real-time authorization path must be deterministic, bounded, observable, and auditable. LLMs are explicitly out of that path.
+The real-time authorization path must be deterministic, bounded, observable,
+and auditable. LLMs are explicitly out of that path. Future fraud decisions
+must preserve feature lineage and freshness proof: decision latency, feature
+schema version, snapshot compute time, oldest feature timestamp, max feature
+age, and stale/missing feature names.
 
 ## Canonical Terms
 

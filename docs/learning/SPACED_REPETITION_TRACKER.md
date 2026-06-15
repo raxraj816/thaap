@@ -23,3 +23,4 @@ Status values:
 | API credential lifecycle | `docs/learning/concepts/API_CREDENTIAL_LIFECYCLE.md` | 2026-06-05 | 2026-06-06 | 2026-06-12 | 2026-07-05 | new | Explain one-time reveal, prefix/hash storage, and future rotation. |
 | PaymentAttempt | `docs/learning/concepts/PAYMENT_ATTEMPT.md` | 2026-06-09 | 2026-06-10 | 2026-06-16 | 2026-07-09 | new | Explain why fraud and processor lineage attach to attempts. |
 | PaymentIntent state machine | `docs/learning/concepts/PAYMENT_INTENT_STATE_MACHINE.md` | 2026-06-15 | 2026-06-16 | 2026-06-22 | 2026-07-15 | new | Explain why invalid capture/refund transitions must fail before processor and ledger work. |
+| Real-time feature freshness | `docs/learning/concepts/REAL_TIME_FEATURE_FRESHNESS.md` | 2026-06-15 | 2026-06-16 | 2026-06-22 | 2026-07-15 | new | Explain why fraud decisions must record feature age and stale/missing feature names. |
