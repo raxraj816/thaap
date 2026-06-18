@@ -8,8 +8,9 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 9 is complete, with Chapter 7 lifecycle hardening pulled forward before
-deeper processor/fraud/ledger side effects:
+Chapter 10 is complete. Confirm is now the first real-time orchestration bridge,
+with processor authorization, durable fraud lineage, and ledger side effects
+still intentionally deferred to their owner chapters:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -66,12 +67,18 @@ deeper processor/fraud/ledger side effects:
 - `POST /payment_intents/{id}/confirm` now creates a tenant-scoped
   `PaymentAttempt` for a valid PaymentIntent and PaymentMethod owned by the
   same merchant/customer.
+- Confirm now calls a deterministic in-memory decision-engine interface that
+  returns `ALLOW` with reason code `RULES_NOT_ENABLED`, without persisting thin
+  fraud lineage before Chapter 12.
+- Successful confirm moves the `PaymentAttempt` from `CREATED` to
+  `READY_FOR_PROCESSOR` and the `PaymentIntent` from
+  `REQUIRES_CONFIRMATION` to `PROCESSING`.
 - `GET /payment_attempts/{id}` fetches attempts through merchant scope.
-- Chapter 9 contract tests prove attempt creation, idempotent confirm replay,
-  monotonic attempt numbering, invalid status rejection, cross-merchant
-  PaymentIntent rejection, cross-merchant PaymentMethod rejection, and
-  wrong-customer PaymentMethod rejection, including concurrent confirm keys
-  producing distinct attempt numbers.
+- Chapter 10 contract tests prove successful orchestration, idempotent confirm
+  replay, changed-body conflict, invalid status rejection, cross-merchant
+  PaymentIntent rejection, cross-merchant PaymentMethod rejection,
+  wrong-customer PaymentMethod rejection, one successful concurrent confirm,
+  no duplicate attempts, and no persisted `FraudDecision` or processor result.
 - Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`
   while capture/refund are rejected before authorization/capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
@@ -159,8 +166,8 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Chapter 9 learning verification:
+Chapter 10 learning verification:
 
 ```bash
-scripts/learning-day-check.sh 2026-06-09 --deep-dive-required
+scripts/learning-day-check.sh 2026-06-19 --deep-dive-required
 ```

@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Entity
 @Table(name = "payment_attempts",
@@ -118,5 +120,14 @@ public class PaymentAttempt {
 
     public ThreeDsStatus getThreeDsStatus() {
         return threeDsStatus;
+    }
+
+    public void markReadyForProcessor() {
+        if (status != PaymentAttemptStatus.CREATED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot be made processor-ready from status " + status);
+        }
+        this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
+        this.updatedAt = Instant.now();
     }
 }

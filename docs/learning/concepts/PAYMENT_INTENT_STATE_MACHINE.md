@@ -31,15 +31,17 @@ The V1 create path starts each PaymentIntent in `REQUIRES_CONFIRMATION`.
 
 Current guarded transitions:
 
+- `confirm` is allowed from `REQUIRES_CONFIRMATION` and moves the
+  PaymentIntent to `PROCESSING`
 - `cancel` is allowed from pre-terminal or uncaptured states such as
   `REQUIRES_CONFIRMATION`, `AUTHORIZED`, and `REQUIRES_CAPTURE`
 - `capture` is allowed only from `REQUIRES_CAPTURE`
 - `refund` is allowed only from `CAPTURED`
 - incompatible transitions return `409 conflict`
 
-The enum already includes future lifecycle states such as `PROCESSING`,
-`AUTHORIZED`, `REQUIRES_CAPTURE`, `DISPUTED`, and `FAILED`, but only transitions
-with current product meaning are active.
+The enum already includes future lifecycle states such as `AUTHORIZED`,
+`REQUIRES_CAPTURE`, `DISPUTED`, and `FAILED`, but only transitions with current
+product meaning are active.
 
 ## Schema And API Implications
 
@@ -71,6 +73,13 @@ must not contain PAN, CVV, secrets, or sensitive personal data.
 - refund before capture fails without mutating state
 - repeat cancel after terminal cancel fails without duplicate webhook delivery
 
+`PaymentIntentConfirmContractTests` proves:
+
+- successful confirm moves the PaymentIntent to `PROCESSING`
+- idempotent confirm replay preserves the original response
+- a distinct confirm key while processing returns conflict without creating a
+  duplicate attempt
+
 `PaymentIntentCreateContractTests` proves:
 
 - unsupported currencies are rejected
@@ -79,8 +88,8 @@ must not contain PAN, CVV, secrets, or sensitive personal data.
 
 ## Deferrals
 
-- Processor chapters will own transitions into `PROCESSING`, `AUTHORIZED`, and
-  `REQUIRES_CAPTURE`.
+- Processor chapters will own transitions from `PROCESSING` into `AUTHORIZED`,
+  `REQUIRES_CAPTURE`, failed, or retryable states.
 - Capture/ledger chapters will own money-movement records and double-entry
   proofs.
 - Refund chapters will add refund entities, amount bounds against captured

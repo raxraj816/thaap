@@ -127,6 +127,15 @@ public class PaymentIntent {
         return updatedAt;
     }
 
+    public void markProcessingAfterConfirm() {
+        if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be processed from status " + status);
+        }
+        this.status = PaymentIntentStatus.PROCESSING;
+        this.updatedAt = Instant.now();
+    }
+
     public void capture() {
         if (status != PaymentIntentStatus.REQUIRES_CAPTURE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
