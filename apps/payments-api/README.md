@@ -159,14 +159,15 @@ partial-refund accounting.
 `POST /payment_intents/{id}/confirm` creates the first durable scoring/audit
 unit for a payment flow: `PaymentAttempt`.
 
-The Chapter 10 confirm path:
+The Chapter 11 confirm path:
 
 - requires `Idempotency-Key`
 - accepts `paymentMethodId`
 - loads the PaymentIntent through `(id, merchant_id)`
 - loads the PaymentMethod through `(id, merchant_id)`
 - verifies the PaymentMethod belongs to the same customer as the PaymentIntent
-- only creates attempts for PaymentIntents in `REQUIRES_CONFIRMATION`
+- creates attempts for PaymentIntents in `REQUIRES_CONFIRMATION` or the
+  retryable-decline state `REQUIRES_PAYMENT_METHOD`
 - stores `payment_intent_id`, `payment_method_id`, `idempotency_key`, `status`,
   `attempt_number`, nullable fraud/processor/3DS fields, and timestamps
 - serializes attempt numbering with a pessimistic PaymentIntent row lock
@@ -174,6 +175,17 @@ The Chapter 10 confirm path:
   `ALLOW` with reason code `RULES_NOT_ENABLED`
 - moves the PaymentAttempt from `CREATED` to `READY_FOR_PROCESSOR`
 - moves the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`
+- calls `ProcessorAdapter` only after an `ALLOW` decision
+- persists a durable `Authorization` row with processor name, processor
+  reference, response code, network status, requested amount, authorized
+  amount, currency, verification checks, non-null 3DS result, simulator
+  outcome code, and creation time
+- maps approved outcomes to PaymentAttempt `AUTHORIZED` and PaymentIntent
+  `REQUIRES_CAPTURE`
+- maps retryable declines to PaymentAttempt `DECLINED` and PaymentIntent
+  `REQUIRES_PAYMENT_METHOD`
+- maps 3DS-required outcomes to PaymentAttempt `REQUIRES_ACTION`, PaymentIntent
+  `REQUIRES_ACTION`, and `threeDsStatus=REQUESTED`
 - emits `payment_attempt.created` delivery rows for active webhook endpoints
 
 The confirm response returns the public PaymentAttempt shape. It does not
@@ -182,13 +194,43 @@ fingerprints, or merchant secrets.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 
-Durable `FraudDecision`, `FeatureSnapshot`, processor authorization, final
-authorization/decline mapping, and ledgering remain deferred to the
-master-plan chapters that own those side effects. Chapter 10 deliberately does
-not persist the current thin `fraud_decisions` placeholder row. When
-FeatureSnapshot is implemented, it must include freshness metadata: computed
-time, oldest feature timestamp, max feature age, freshness status, stale
-feature names, and missing feature names.
+Durable `FraudDecision`, `FeatureSnapshot`, capture, ledgering, processor
+events, and audit logs remain deferred to the master-plan chapters that own
+those side effects. Chapter 11 deliberately does not persist the current thin
+`fraud_decisions` placeholder row. When FeatureSnapshot is implemented, it must
+include freshness metadata: computed time, oldest feature timestamp, max feature
+age, freshness status, stale feature names, and missing feature names.
+
+## Processor Simulator
+
+The processor simulator is deterministic and test-card driven, but it reads
+only safe stored card metadata after PaymentMethod creation. It does not depend
+on raw PAN after tokenization. The in-memory catalog key is explicitly
+`card_bin:card_last4`, for example `499999:0001`; this is simulator-specific
+lookup logic, not production processor-routing logic.
+
+Initial simulator catalog:
+
+- `4999990000000001` -> approved
+- `4999990000000002` -> issuer decline
+- `4999990000000003` -> insufficient funds
+- `4999990000000004` -> suspected fraud decline
+- `4999990000000005` -> CVC failure
+- `4999990000000006` -> AVS line1 failure
+- `4999990000000007` -> AVS postal failure
+- `4999990000000008` -> 3DS required
+- unknown simulator cards, including `4242424242424242` -> approved
+
+The `authorizations` table is the source of truth for processor outcomes. The
+`payment_attempts.processor_authorization_id` field stores the simulator
+processor reference for response correlation, but later capture, refund,
+dispute, fraud, and analyst workflows should join to `authorizations` for full
+processor truth. Each authorization stores both `requested_amount` and
+`authorized_amount` so future partial authorization handling can distinguish
+what THAAP asked for from what the network approved. Approved simulator
+authorizations set `authorized_amount` to the requested amount; declined and
+3DS-required simulator outcomes set `authorized_amount` to `0` because no funds
+are reserved yet.
 
 ## Database Migrations
 
@@ -205,6 +247,9 @@ webhook retry metadata, safe card metadata, PaymentIntent description/metadata,
 capture method storage, and hot lookup indexes such as
 `(merchant_id, idempotency_key)` and `(merchant_id, status)` for idempotency
 records.
+
+Chapter 11 authorizations are added through a follow-on Flyway migration. Do
+not edit an already-applied migration to add new durable product truth.
 
 Chapters 1-3 local databases were created with temporary Hibernate scaffolding. If
 that local PostgreSQL volume still exists, reset it before first Flyway startup:

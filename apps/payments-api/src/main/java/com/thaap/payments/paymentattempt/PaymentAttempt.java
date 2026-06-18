@@ -130,4 +130,33 @@ public class PaymentAttempt {
         this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
         this.updatedAt = Instant.now();
     }
+
+    public void markAuthorized(String processorAuthorizationId) {
+        requireProcessorReady("authorized");
+        this.status = PaymentAttemptStatus.AUTHORIZED;
+        this.processorAuthorizationId = processorAuthorizationId;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markDeclined(String processorAuthorizationId) {
+        requireProcessorReady("declined");
+        this.status = PaymentAttemptStatus.DECLINED;
+        this.processorAuthorizationId = processorAuthorizationId;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresAction(String processorAuthorizationId) {
+        requireProcessorReady("action-required");
+        this.status = PaymentAttemptStatus.REQUIRES_ACTION;
+        this.processorAuthorizationId = processorAuthorizationId;
+        this.threeDsStatus = ThreeDsStatus.REQUESTED;
+        this.updatedAt = Instant.now();
+    }
+
+    private void requireProcessorReady(String targetStatus) {
+        if (status != PaymentAttemptStatus.READY_FOR_PROCESSOR) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot be marked " + targetStatus + " from status " + status);
+        }
+    }
 }

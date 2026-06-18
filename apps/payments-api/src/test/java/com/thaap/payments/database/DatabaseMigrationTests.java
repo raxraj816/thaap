@@ -70,15 +70,23 @@ class DatabaseMigrationTests {
     }
 
     @Test
-    void flywayAppliedInitialSchemaMigration() {
-        var applied = jdbcTemplate.queryForObject("""
+    void flywayAppliedSchemaMigrations() {
+        var initialSchema = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM flyway_schema_history
                 WHERE version = '1'
                   AND success = TRUE
                 """, Integer.class);
+        var authorizationSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '2'
+                  AND description = 'add authorizations'
+                  AND success = TRUE
+                """, Integer.class);
 
-        assertThat(applied).isEqualTo(1);
+        assertThat(initialSchema).isEqualTo(1);
+        assertThat(authorizationSchema).isEqualTo(1);
     }
 
     @Test
@@ -89,6 +97,7 @@ class DatabaseMigrationTests {
                 "payment_methods",
                 "payment_intents",
                 "payment_attempts",
+                "authorizations",
                 "idempotency_records",
                 "webhook_endpoints",
                 "webhook_deliveries",
@@ -104,6 +113,10 @@ class DatabaseMigrationTests {
         assertIndexExists("payment_attempts", "uk_payment_attempts_merchant_id_id");
         assertIndexExists("payment_attempts", "uk_payment_attempts_intent_number");
         assertIndexExists("payment_attempts", "idx_payment_attempts_merchant_created");
+        assertIndexExists("authorizations", "uk_authorizations_merchant_id_id");
+        assertIndexExists("authorizations", "uk_authorizations_attempt");
+        assertIndexExists("authorizations", "uk_authorizations_processor_reference");
+        assertIndexExists("authorizations", "idx_authorizations_merchant_created");
         assertIndexExists("payment_methods", "idx_payment_methods_merchant_bin");
         assertIndexExists("webhook_endpoints", "idx_webhook_endpoints_merchant_active");
         assertIndexExists("webhook_endpoints", "uk_webhook_endpoints_signing_secret_hash");
@@ -119,6 +132,10 @@ class DatabaseMigrationTests {
         assertThat(columnNames("payment_attempts")).contains("payment_intent_id", "payment_method_id",
                 "idempotency_key", "attempt_number", "fraud_decision_id", "processor_authorization_id",
                 "three_ds_status");
+        assertThat(columnNames("authorizations")).contains("payment_attempt_id", "processor",
+                "processor_reference_id", "processor_response_code", "network_status", "authorized_amount",
+                "requested_amount", "currency", "status", "cvc_check", "avs_line1_check",
+                "avs_postal_code_check", "three_ds_result", "simulator_outcome_code", "created_at");
         assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
         assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",

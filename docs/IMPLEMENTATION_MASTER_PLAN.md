@@ -2468,6 +2468,19 @@ Deliver:
   parent PaymentIntent is `PROCESSING`.
 - Implement deterministic simulator outcomes from test card metadata or a
   simulator card catalog.
+- Use this initial safe-metadata simulator catalog, derived from stored
+  `card_bin` + `card_last4` after PaymentMethod tokenization:
+  - `4999990000000001`: approved
+  - `4999990000000002`: issuer decline
+  - `4999990000000003`: insufficient funds
+  - `4999990000000004`: suspected fraud decline
+  - `4999990000000005`: CVC failure
+  - `4999990000000006`: AVS line1 failure
+  - `4999990000000007`: AVS postal failure
+  - `4999990000000008`: 3DS required
+  - unknown simulator cards, including `4242424242424242`: approved
+- Keep the simulator lookup key explicit as `card_bin:card_last4`. This is a
+  THAAP simulator catalog convention, not a real PSP routing model.
 - Persist `Authorization` records in a dedicated `authorizations` table linked
   to `(merchant_id, payment_attempt_id)`. The authorization record, not the
   nullable `payment_attempts.processor_authorization_id` string alone, is the
@@ -2493,11 +2506,20 @@ Deliver:
   - PaymentIntent `REQUIRES_ACTION`
   - `three_ds_status` populated with the initial required/pending state
 - Persist processor name, processor authorization/reference ID, response code,
-  network status, authorized amount, currency, verification results, raw-safe
-  simulator outcome code, and created time.
+  network status, requested amount, authorized amount, currency, verification
+  results, non-null 3DS result, raw-safe simulator outcome code, and created
+  time.
+- Approved outcomes set `authorized_amount` to the requested amount. Declined
+  and 3DS-required outcomes set `authorized_amount` to `0` because they have
+  not reserved funds.
+- Add authorizations through a forward-only Flyway migration; do not mutate an
+  already-applied migration.
 - Add tests for each deterministic outcome, status mapping, retry after
   retryable decline, no retry while already authorized, and idempotent confirm
   replay after an authorization result exists.
+- Add hardening tests proving non-`ALLOW` fraud decisions never call the
+  processor, processor exceptions roll back from `PROCESSING`, and unknown
+  simulator cards default to approval.
 
 Done when:
 

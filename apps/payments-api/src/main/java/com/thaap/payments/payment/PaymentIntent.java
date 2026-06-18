@@ -128,11 +128,39 @@ public class PaymentIntent {
     }
 
     public void markProcessingAfterConfirm() {
-        if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION) {
+        if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION
+                && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "PaymentIntent cannot be processed from status " + status);
         }
         this.status = PaymentIntentStatus.PROCESSING;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresCaptureAfterAuthorization() {
+        if (status != PaymentIntentStatus.PROCESSING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be authorization-approved from status " + status);
+        }
+        this.status = PaymentIntentStatus.REQUIRES_CAPTURE;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresPaymentMethodAfterProcessorDecline() {
+        if (status != PaymentIntentStatus.PROCESSING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be processor-declined from status " + status);
+        }
+        this.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresActionAfterProcessorStepUp() {
+        if (status != PaymentIntentStatus.PROCESSING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot require action from status " + status);
+        }
+        this.status = PaymentIntentStatus.REQUIRES_ACTION;
         this.updatedAt = Instant.now();
     }
 
