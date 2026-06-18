@@ -94,6 +94,16 @@ repository convention.
 
 ## Teaching Standard
 
+Treat the founder as a sharp new intern whenever teaching a concept. Do not
+assume prior knowledge of payment systems, fraud operations, backend
+architecture, ML lifecycle, database transactions, security boundaries, testing
+strategy, or production operations.
+
+This does not mean oversimplify the work. It means explain each important idea
+from the ground up, name the hidden industry context, define domain language
+before relying on it, and connect implementation details to product, risk,
+security, data, and operational consequences.
+
 For each meaningful slice, cover:
 
 - first-principles mental model
