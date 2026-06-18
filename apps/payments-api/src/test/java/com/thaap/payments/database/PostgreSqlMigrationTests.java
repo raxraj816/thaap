@@ -49,6 +49,13 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("payment_attempts", "payment_intent_id")).isTrue();
         assertThat(columnExists("payment_attempts", "payment_method_id")).isTrue();
         assertThat(columnExists("payment_attempts", "attempt_number")).isTrue();
+        assertThat(columnExists("authorizations", "payment_attempt_id")).isTrue();
+        assertThat(columnExists("authorizations", "requested_amount")).isTrue();
+        assertThat(columnExists("authorizations", "authorized_amount")).isTrue();
+        assertThat(columnExists("authorizations", "three_ds_result")).isTrue();
+        assertThat(indexExists("authorizations", "uk_authorizations_attempt")).isTrue();
+        assertThat(indexExists("authorizations", "uk_authorizations_processor_reference")).isTrue();
+        assertThat(indexExists("authorizations", "idx_authorizations_merchant_created")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
@@ -61,6 +68,16 @@ class PostgreSqlMigrationTests {
                 WHERE table_name = ?
                   AND column_name = ?
                 """, Integer.class, tableName, columnName);
+        return count != null && count == 1;
+    }
+
+    private boolean indexExists(String tableName, String indexName) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM pg_indexes
+                WHERE tablename = ?
+                  AND indexname = ?
+                """, Integer.class, tableName, indexName);
         return count != null && count == 1;
     }
 }

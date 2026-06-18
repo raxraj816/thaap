@@ -1,5 +1,8 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.authorization.Authorization;
+import com.thaap.payments.authorization.AuthorizationRepository;
+import com.thaap.payments.authorization.AuthorizationStatus;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
@@ -11,6 +14,9 @@ import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
 import com.thaap.payments.paymentattempt.PaymentAttemptResponse;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
+import com.thaap.payments.processor.ProcessorAdapter;
+import com.thaap.payments.processor.ProcessorAuthorizationRequest;
+import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import jakarta.validation.Valid;
@@ -51,11 +57,14 @@ public class PaymentIntentController {
     private final IdempotencyService idempotencyService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final ConfirmDecisionEngine confirmDecisionEngine;
+    private final ProcessorAdapter processorAdapter;
+    private final AuthorizationRepository authorizationRepository;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
             IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService,
-            ConfirmDecisionEngine confirmDecisionEngine) {
+            ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
+            AuthorizationRepository authorizationRepository) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -63,6 +72,8 @@ public class PaymentIntentController {
         this.idempotencyService = idempotencyService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.confirmDecisionEngine = confirmDecisionEngine;
+        this.processorAdapter = processorAdapter;
+        this.authorizationRepository = authorizationRepository;
     }
 
     @PostMapping
@@ -96,6 +107,7 @@ public class PaymentIntentController {
             @PathVariable UUID id,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ConfirmPaymentIntentRequest request) {
+        // IdempotencyService runs the supplied confirm operation and response storage in one transaction.
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.confirm:" + id,
                 request, PaymentAttemptResponse.class,
                 () -> confirmPaymentIntentOnce(merchantContext, id, idempotencyKey, request));
@@ -104,7 +116,8 @@ public class PaymentIntentController {
     protected ResponseEntity<PaymentAttemptResponse> confirmPaymentIntentOnce(MerchantContext merchantContext, UUID id,
             String idempotencyKey, ConfirmPaymentIntentRequest request) {
         PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
-        if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION) {
+        if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION
+                && paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentIntent is not confirmable");
         }
         PaymentMethod paymentMethod = paymentMethodRepository
@@ -121,6 +134,12 @@ public class PaymentIntentController {
                 paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(), paymentIntent.getAmount(),
                 paymentIntent.getCurrency()));
         applyConfirmDecision(paymentIntent, paymentAttempt, decision);
+        ProcessorAuthorizationResult processorResult = processorAdapter.authorize(new ProcessorAuthorizationRequest(
+                merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(),
+                paymentIntent.getAmount(), paymentIntent.getCurrency(), paymentMethod.getCardBin(),
+                paymentMethod.getCardLast4()));
+        Authorization authorization = persistAuthorization(merchantContext, paymentAttempt, processorResult);
+        applyProcessorResult(paymentIntent, paymentAttempt, authorization);
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
@@ -138,6 +157,38 @@ public class PaymentIntentController {
                         + "action={} reasonCodes={}",
                 paymentIntent.getMerchantId(), paymentIntent.getId(), paymentAttempt.getId(), decision.action(),
                 decision.reasonCodes());
+    }
+
+    private Authorization persistAuthorization(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
+            ProcessorAuthorizationResult processorResult) {
+        Authorization authorization = new Authorization(merchantContext.merchantId(), paymentAttempt.getId(),
+                processorResult.processor(), processorResult.processorReferenceId(), processorResult.responseCode(),
+                processorResult.networkStatus(), processorResult.requestedAmount(), processorResult.authorizedAmount(),
+                processorResult.currency(), processorResult.status(), processorResult.cvcCheck(),
+                processorResult.avsLine1Check(), processorResult.avsPostalCodeCheck(), processorResult.threeDsResult(),
+                processorResult.simulatorOutcomeCode());
+        return authorizationRepository.save(authorization);
+    }
+
+    private void applyProcessorResult(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
+            Authorization authorization) {
+        if (authorization.getStatus() == AuthorizationStatus.APPROVED) {
+            paymentAttempt.markAuthorized(authorization.getProcessorReferenceId());
+            paymentIntent.markRequiresCaptureAfterAuthorization();
+        } else if (authorization.getStatus() == AuthorizationStatus.DECLINED) {
+            paymentAttempt.markDeclined(authorization.getProcessorReferenceId());
+            paymentIntent.markRequiresPaymentMethodAfterProcessorDecline();
+        } else if (authorization.getStatus() == AuthorizationStatus.REQUIRES_ACTION) {
+            paymentAttempt.markRequiresAction(authorization.getProcessorReferenceId());
+            paymentIntent.markRequiresActionAfterProcessorStepUp();
+        } else {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Processor authorization status is not supported: " + authorization.getStatus());
+        }
+        log.info("payment_intents.confirm processor result applied merchantId={} paymentIntentId={} "
+                        + "paymentAttemptId={} authorizationId={} status={} responseCode={}",
+                paymentIntent.getMerchantId(), paymentIntent.getId(), paymentAttempt.getId(), authorization.getId(),
+                authorization.getStatus(), authorization.getProcessorResponseCode());
     }
 
     @PostMapping("/{id}/capture")
