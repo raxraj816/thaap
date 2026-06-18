@@ -53,8 +53,10 @@ The attempt stores:
 - nullable 3DS status
 - timestamps
 
-Chapter 9 intentionally leaves fraud, processor, 3DS, and final status mapping
-empty. The point is to create lineage before creating outcomes.
+Chapter 10 moves a successful attempt to `READY_FOR_PROCESSOR` and moves the
+PaymentIntent to `PROCESSING`. It still leaves durable fraud decisions,
+processor authorization, 3DS, and final authorization/decline mapping empty.
+The point is to create an orchestration boundary before creating outcomes.
 
 ## Invariants
 
@@ -62,7 +64,10 @@ empty. The point is to create lineage before creating outcomes.
 - No PaymentAttempt without tenant-scoped PaymentMethod ownership.
 - No PaymentAttempt when the PaymentMethod belongs to a different customer.
 - No PaymentAttempt when the PaymentIntent is not confirmable.
-- Attempt numbers increase monotonically per PaymentIntent.
+- Attempt numbers increase monotonically per PaymentIntent as retryable states
+  are added. In Chapter 10, a successful confirm moves the parent PaymentIntent
+  to `PROCESSING`, so a distinct second confirm key is rejected until a later
+  processor outcome creates a retryable state.
 - Idempotent confirm replay returns the original attempt and does not create a
   duplicate.
 
@@ -73,9 +78,11 @@ empty. The point is to create lineage before creating outcomes.
 - confirm creates a durable attempt with nullable fraud/processor/3DS fields
 - the attempt can be fetched through `GET /payment_attempts/{id}`
 - idempotent replay does not create duplicate attempts or webhook deliveries
-- separate confirm keys create attempt numbers `1`, then `2`
-- concurrent confirm keys create distinct attempt numbers because confirm locks
-  the PaymentIntent row before numbering
+- changed-body reuse of the same idempotency key returns conflict
+- a separate confirm key after `PROCESSING` returns conflict without creating a
+  duplicate attempt
+- concurrent confirm keys produce one successful processor-ready attempt and
+  one conflict
 - invalid status, cross-merchant PaymentIntent, cross-merchant PaymentMethod,
   and wrong-customer PaymentMethod requests create no attempt
 

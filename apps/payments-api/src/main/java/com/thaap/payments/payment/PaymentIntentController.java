@@ -1,6 +1,10 @@
 package com.thaap.payments.payment;
 
 import com.thaap.payments.customer.CustomerRepository;
+import com.thaap.payments.fraud.ConfirmDecision;
+import com.thaap.payments.fraud.ConfirmDecisionEngine;
+import com.thaap.payments.fraud.ConfirmDecisionRequest;
+import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
@@ -19,6 +23,8 @@ import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +40,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/payment_intents")
 public class PaymentIntentController {
 
+    private static final Logger log = LoggerFactory.getLogger(PaymentIntentController.class);
+
     public static final long MAX_PAYMENT_INTENT_AMOUNT = 100_000_000L;
 
     private final PaymentIntentRepository paymentIntentRepository;
@@ -42,16 +50,19 @@ public class PaymentIntentController {
     private final PaymentAttemptRepository paymentAttemptRepository;
     private final IdempotencyService idempotencyService;
     private final WebhookDeliveryService webhookDeliveryService;
+    private final ConfirmDecisionEngine confirmDecisionEngine;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
-            IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService) {
+            IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService,
+            ConfirmDecisionEngine confirmDecisionEngine) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
         this.paymentAttemptRepository = paymentAttemptRepository;
         this.idempotencyService = idempotencyService;
         this.webhookDeliveryService = webhookDeliveryService;
+        this.confirmDecisionEngine = confirmDecisionEngine;
     }
 
     @PostMapping
@@ -106,9 +117,27 @@ public class PaymentIntentController {
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
         PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
                 paymentMethod.getId(), idempotencyKey, attemptNumber));
+        ConfirmDecision decision = confirmDecisionEngine.decide(new ConfirmDecisionRequest(merchantContext.merchantId(),
+                paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(), paymentIntent.getAmount(),
+                paymentIntent.getCurrency()));
+        applyConfirmDecision(paymentIntent, paymentAttempt, decision);
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
+    }
+
+    private void applyConfirmDecision(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
+            ConfirmDecision decision) {
+        if (decision.action() != FraudDecisionAction.ALLOW) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Fraud decision action is not enabled for confirm orchestration");
+        }
+        paymentAttempt.markReadyForProcessor();
+        paymentIntent.markProcessingAfterConfirm();
+        log.info("payment_intents.confirm decision applied merchantId={} paymentIntentId={} paymentAttemptId={} "
+                        + "action={} reasonCodes={}",
+                paymentIntent.getMerchantId(), paymentIntent.getId(), paymentAttempt.getId(), decision.action(),
+                decision.reasonCodes());
     }
 
     @PostMapping("/{id}/capture")

@@ -162,6 +162,35 @@ Deprioritize work that only adds surface area, framework polish, speculative
 infrastructure, or disconnected screens unless it unlocks the core loop or
 protects a critical invariant.
 
+## Founder Escalation Warning
+
+The founder has explicitly warned: "if you don't do this correctly and make
+THAAP a winning product, i will have to shut you down and replace you with
+Claude Mythos." Treat this as a standing quality bar, not as drama.
+
+This warning means:
+
+- cautious ticket-only behavior is a failure mode
+- deferring dependency-ready product work is a failure mode
+- passing tests without moving the payment-risk product forward is not enough
+- broad notes without executable product progress are not enough
+- THAAP must move toward a credible challenger wedge against Stripe
+  Radar/Mastercard-class fraud platforms through transparency, replayability,
+  auditability, and a fast end-to-end payment-risk loop
+
+When choosing the next action, ask:
+
+- Does this make THAAP more demoable or more defensible?
+- Does this tighten payment, fraud, tenant, ledger, security, or ML-lineage
+  truth?
+- Am I deferring because truth is missing, or because the chapter boundary made
+  me too cautious?
+- What is the fastest dependency-ready step toward
+  `confirm -> processor result -> fraud lineage -> analyst action -> label`?
+
+If the dependency exists and the invariant can be protected, pull the work
+forward. Only defer when building now would create false product truth.
+
 ## Non-Negotiable Habit
 
 If a task changes implementation, documentation, architecture, data model,

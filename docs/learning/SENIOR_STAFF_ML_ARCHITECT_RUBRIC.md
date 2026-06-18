@@ -115,8 +115,13 @@ Current score:
 
 ## Weekly Summary
 
-- Strongest improvement this week:
-- Weakest area this week:
-- One concept to revisit:
-- One code area to modify next:
-- One design-review narrative to practice:
+- Strongest improvement this week: payment lifecycle orchestration from
+  PaymentIntent confirm to processor-ready PaymentAttempt.
+- Weakest area this week: durable processor authorization modeling remains
+  deferred.
+- One concept to revisit: confirm orchestration as the boundary between
+  payment container, fraud decisioning, and processor authorization.
+- One code area to modify next: Chapter 11 authorization persistence and
+  deterministic processor simulator.
+- One design-review narrative to practice: why Chapter 10 uses an in-memory
+  decision interface instead of persisting incomplete fraud lineage.

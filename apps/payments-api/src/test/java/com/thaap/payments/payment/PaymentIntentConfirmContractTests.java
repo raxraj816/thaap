@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -59,7 +60,8 @@ class PaymentIntentConfirmContractTests {
     }
 
     @Test
-    void confirmCreatesPaymentAttemptWithoutFraudOrProcessorSideEffects() throws Exception {
+    void confirmMovesAttemptToProcessorReadyAndPaymentIntentToProcessingWithoutFraudOrProcessorSideEffects()
+            throws Exception {
         var merchant = createMerchant("merchant-a");
         var customerId = createCustomer(merchant, "buyer-a@example.com");
         var paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-a");
@@ -72,7 +74,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(response.get("merchantId").asText()).isEqualTo(merchant.id().toString());
         assertThat(response.get("paymentIntentId").asText()).isEqualTo(paymentIntentId.toString());
         assertThat(response.get("paymentMethodId").asText()).isEqualTo(paymentMethodId.toString());
-        assertThat(response.get("status").asText()).isEqualTo("CREATED");
+        assertThat(response.get("status").asText()).isEqualTo("READY_FOR_PROCESSOR");
         assertThat(response.get("attemptNumber").asInt()).isEqualTo(1);
         assertThat(response.get("fraudDecisionId").isNull()).isTrue();
         assertThat(response.get("processorAuthorizationId").isNull()).isTrue();
@@ -88,7 +90,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(stored.get("PAYMENT_INTENT_ID")).isEqualTo(paymentIntentId);
         assertThat(stored.get("PAYMENT_METHOD_ID")).isEqualTo(paymentMethodId);
         assertThat(stored.get("IDEMPOTENCY_KEY")).isEqualTo("confirm-attempt-a");
-        assertThat(stored.get("STATUS")).isEqualTo("CREATED");
+        assertThat(stored.get("STATUS")).isEqualTo("READY_FOR_PROCESSOR");
         assertThat(stored.get("ATTEMPT_NUMBER")).isEqualTo(1);
         assertThat(stored.get("FRAUD_DECISION_ID")).isNull();
         assertThat(stored.get("PROCESSOR_AUTHORIZATION_ID")).isNull();
@@ -98,6 +100,7 @@ class PaymentIntentConfirmContractTests {
 
         var fetched = getPaymentAttempt(merchant, paymentAttemptId);
         assertThat(fetched).isEqualTo(response);
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("PROCESSING");
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
         assertThat(countRows("fraud_decisions")).isZero();
@@ -115,27 +118,53 @@ class PaymentIntentConfirmContractTests {
         var replay = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-replay");
 
         assertThat(replay).isEqualTo(first);
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("PROCESSING");
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
     }
 
     @Test
-    void separateConfirmKeysCreateMonotonicAttemptNumbersForSamePaymentIntent() throws Exception {
+    void sameConfirmKeyWithChangedBodyReturnsConflictWithoutDuplicateAttempt() throws Exception {
         var merchant = createMerchant("merchant-a");
         var customerId = createCustomer(merchant, "buyer-a@example.com");
-        var paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-numbering");
-        var paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-numbering", 3400);
+        var firstPaymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-conflict-a");
+        var secondPaymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-conflict-b");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-conflict", 3300);
 
-        var first = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-number-1");
-        var second = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-number-2");
+        confirmPaymentIntent(merchant, paymentIntentId, firstPaymentMethodId, "confirm-changed-body");
 
-        assertThat(first.get("attemptNumber").asInt()).isEqualTo(1);
-        assertThat(second.get("attemptNumber").asInt()).isEqualTo(2);
-        assertThat(countRows("payment_attempts")).isEqualTo(2);
+        mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "confirm-changed-body")
+                        .contentType(APPLICATION_JSON)
+                        .content(confirmBody(secondPaymentMethodId)))
+                .andExpect(status().isConflict());
+        assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("PROCESSING");
     }
 
     @Test
-    void concurrentConfirmKeysCreateDistinctAttemptNumbersForSamePaymentIntent() throws Exception {
+    void separateConfirmKeyAfterProcessingIsRejectedWithoutDuplicateAttempt() throws Exception {
+        var merchant = createMerchant("merchant-a");
+        var customerId = createCustomer(merchant, "buyer-a@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-second-key");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-second-key", 3400);
+
+        var first = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-number-1");
+
+        assertThat(first.get("attemptNumber").asInt()).isEqualTo(1);
+        mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "confirm-number-2")
+                        .contentType(APPLICATION_JSON)
+                        .content(confirmBody(paymentMethodId)))
+                .andExpect(status().isConflict());
+        assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("PROCESSING");
+    }
+
+    @Test
+    void concurrentConfirmKeysCreateOneProcessorReadyAttemptForSamePaymentIntent() throws Exception {
         var merchant = createMerchant("merchant-a");
         var customerId = createCustomer(merchant, "buyer-a@example.com");
         var paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-concurrent");
@@ -143,17 +172,17 @@ class PaymentIntentConfirmContractTests {
         var executor = Executors.newFixedThreadPool(2);
 
         try {
-            var first = executor.submit(() -> confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId,
+            var first = executor.submit(() -> performConfirmPaymentIntent(merchant, paymentIntentId, paymentMethodId,
                     "confirm-concurrent-1"));
-            var second = executor.submit(() -> confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId,
+            var second = executor.submit(() -> performConfirmPaymentIntent(merchant, paymentIntentId, paymentMethodId,
                     "confirm-concurrent-2"));
 
             var firstResponse = first.get(5, TimeUnit.SECONDS);
             var secondResponse = second.get(5, TimeUnit.SECONDS);
 
-            assertThat(List.of(firstResponse.get("attemptNumber").asInt(), secondResponse.get("attemptNumber").asInt()))
-                    .containsExactlyInAnyOrder(1, 2);
-            assertThat(countRows("payment_attempts")).isEqualTo(2);
+            assertThat(statuses(firstResponse, secondResponse)).containsExactlyInAnyOrder(201, 409);
+            assertThat(countRows("payment_attempts")).isEqualTo(1);
+            assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("PROCESSING");
         } finally {
             executor.shutdownNow();
         }
@@ -324,6 +353,26 @@ class PaymentIntentConfirmContractTests {
         return objectMapper.readTree(response);
     }
 
+    private JsonNode getPaymentIntent(MerchantAccess merchant, UUID paymentIntentId) throws Exception {
+        var response = mockMvc.perform(get("/payment_intents/{id}", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response);
+    }
+
+    private MvcResult performConfirmPaymentIntent(MerchantAccess merchant, UUID paymentIntentId, UUID paymentMethodId,
+            String idempotencyKey) throws Exception {
+        return mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .contentType(APPLICATION_JSON)
+                        .content(confirmBody(paymentMethodId)))
+                .andReturn();
+    }
+
     private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
@@ -362,6 +411,10 @@ class PaymentIntentConfirmContractTests {
                 FROM webhook_deliveries
                 WHERE event_type = ?
                 """, Integer.class, eventType);
+    }
+
+    private List<Integer> statuses(MvcResult first, MvcResult second) {
+        return List.of(first.getResponse().getStatus(), second.getResponse().getStatus());
     }
 
     private record MerchantAccess(UUID id, String apiKey) {

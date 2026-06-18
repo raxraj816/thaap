@@ -2412,27 +2412,41 @@ Deliver:
 - Validate PaymentMethod belongs to the PaymentIntent customer and current
   merchant.
 - Create PaymentAttempt inside the idempotent transaction.
-- Add a decision-engine interface that returns a deterministic stub `ALLOW`
-  with reason code `RULES_NOT_ENABLED`.
-- Apply the `ALLOW` action by moving the attempt to the next processor-ready
-  state and the PaymentIntent to `PROCESSING` or authorization-ready status
-  agreed for Chapter 11.
+- Add a decision-engine interface for confirm orchestration. In Chapter 10 it
+  returns an in-memory deterministic stub decision:
+  - action: `ALLOW`
+  - reason code: `RULES_NOT_ENABLED`
+  - no persisted `FraudDecision`
+  - no persisted `FeatureSnapshot`
+- Apply the `ALLOW` action by moving the PaymentAttempt from `CREATED` to a new
+  processor-ready status, `READY_FOR_PROCESSOR`.
+- Move the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`.
+- Keep processor authorization uncalled and unpersisted until Chapter 11.
 - Record request ID and trace-ready operation names in logs without sensitive
   data.
 - Add tests for success, replay, changed-body conflict, invalid PaymentIntent
-  status, wrong-customer PaymentMethod, tenant rejection, and no duplicate
-  attempts on retry.
+  status, wrong-customer PaymentMethod, tenant rejection, no duplicate attempts
+  on retry, PaymentAttempt status `READY_FOR_PROCESSOR`, PaymentIntent status
+  `PROCESSING`, and no `FraudDecision`, `FeatureSnapshot`, processor
+  authorization, or ledger side effects.
 
 Done when:
 
-- Confirm has a stable orchestration shape before processor and fraud details
-  are filled in.
+- Confirm has a stable orchestration shape before processor and durable fraud
+  details are filled in.
 - The real-time path has clear extension points for features, rules, model
   timeout fallback, and processor simulation.
+- Chapter 10 does not write misleading thin fraud lineage using the current
+  placeholder `fraud_decisions` table.
 
 Defer:
 
+- Durable `FraudDecision`, `FeatureSnapshot`, risk score, risk level,
+  ruleset version, latency, reason codes, and feature freshness metadata to
+  Chapter 12.
 - Non-`ALLOW` actions to Chapter 12/Phase 3.
+- Processor authorization, authorization persistence, processor response codes,
+  and final authorization/decline status mapping to Chapter 11.
 - Ledger writes until capture/refund work.
 - Kafka/outbox until Phase 5; webhook delivery records may remain local
   placeholders.
@@ -2442,33 +2456,66 @@ Learn:
 - Transaction boundaries.
 - Real-time payment path design.
 - Where fraud decisioning fits without making the endpoint untestable.
+- Why an interface-level decision stub is safer than persisting incomplete
+  fraud lineage.
 
 ### Chapter 11: Processor Simulator
 
 Deliver:
 
 - Define `ProcessorAdapter` and `ProcessorAuthorizationResult`.
+- Chapter 11 starts only from a PaymentAttempt in `READY_FOR_PROCESSOR` whose
+  parent PaymentIntent is `PROCESSING`.
 - Implement deterministic simulator outcomes from test card metadata or a
   simulator card catalog.
-- Persist `Authorization` records linked to PaymentAttempt.
+- Persist `Authorization` records in a dedicated `authorizations` table linked
+  to `(merchant_id, payment_attempt_id)`. The authorization record, not the
+  nullable `payment_attempts.processor_authorization_id` string alone, is the
+  source of truth for processor results.
 - Support initial outcomes: approved, issuer decline, insufficient funds,
   suspected fraud decline, CVC failure, AVS line1 failure, AVS postal failure,
   and 3DS required.
-- Map processor outcomes to PaymentAttempt and PaymentIntent statuses.
-- Persist processor response code, network status, authorized amount, currency,
-  verification results, and created time.
-- Add tests for each deterministic outcome and for idempotent confirm replay
-  after an authorization result exists.
+- Add PaymentAttempt statuses needed for processor results, at minimum:
+  `AUTHORIZED`, `DECLINED`, and `REQUIRES_ACTION`.
+- Map approved processor outcomes to:
+  - PaymentAttempt `AUTHORIZED`
+  - PaymentIntent `REQUIRES_CAPTURE`
+  - no capture, ledger, or captured status yet, even when capture method is
+    `AUTOMATIC`
+- Map issuer decline, insufficient funds, suspected fraud decline, CVC failure,
+  AVS line1 failure, and AVS postal failure to:
+  - PaymentAttempt `DECLINED`
+  - PaymentIntent `REQUIRES_PAYMENT_METHOD`
+  - a retryable confirm state where a new idempotency key can create the next
+    attempt
+- Map 3DS-required outcomes to:
+  - PaymentAttempt `REQUIRES_ACTION`
+  - PaymentIntent `REQUIRES_ACTION`
+  - `three_ds_status` populated with the initial required/pending state
+- Persist processor name, processor authorization/reference ID, response code,
+  network status, authorized amount, currency, verification results, raw-safe
+  simulator outcome code, and created time.
+- Add tests for each deterministic outcome, status mapping, retry after
+  retryable decline, no retry while already authorized, and idempotent confirm
+  replay after an authorization result exists.
 
 Done when:
 
 - Confirm can produce a durable authorization or durable decline.
+- Idempotent confirm replay never creates a second authorization record or
+  calls the simulator twice.
+- A declined retryable result reopens the PaymentIntent for another confirm
+  attempt with a different idempotency key.
+- An authorized result does not allow another confirm attempt.
 - Processor behavior is replaceable behind an adapter.
 - No raw card input is required downstream of PaymentMethod creation.
+- Chapter 11 does not persist `FraudDecision` or `FeatureSnapshot`; Chapter 12
+  still owns durable fraud lineage, including processor-decline attempts.
 
 Defer:
 
-- Capture, cancel/void, refund, and ledger entries to Phase 2.
+- Automatic capture, manual capture endpoint behavior, cancel/void, refund, and
+  ledger entries to Phase 2.
 - Real PSP integration outside V1.
 
 Learn:

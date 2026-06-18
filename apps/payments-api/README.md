@@ -159,7 +159,7 @@ partial-refund accounting.
 `POST /payment_intents/{id}/confirm` creates the first durable scoring/audit
 unit for a payment flow: `PaymentAttempt`.
 
-The Chapter 9 confirm path:
+The Chapter 10 confirm path:
 
 - requires `Idempotency-Key`
 - accepts `paymentMethodId`
@@ -169,8 +169,11 @@ The Chapter 9 confirm path:
 - only creates attempts for PaymentIntents in `REQUIRES_CONFIRMATION`
 - stores `payment_intent_id`, `payment_method_id`, `idempotency_key`, `status`,
   `attempt_number`, nullable fraud/processor/3DS fields, and timestamps
-- numbers attempts monotonically per PaymentIntent
 - serializes attempt numbering with a pessimistic PaymentIntent row lock
+- calls a deterministic in-memory confirm decision engine that returns
+  `ALLOW` with reason code `RULES_NOT_ENABLED`
+- moves the PaymentAttempt from `CREATED` to `READY_FOR_PROCESSOR`
+- moves the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`
 - emits `payment_attempt.created` delivery rows for active webhook endpoints
 
 The confirm response returns the public PaymentAttempt shape. It does not
@@ -179,11 +182,13 @@ fingerprints, or merchant secrets.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 
-Fraud decisioning, processor authorization, final PaymentIntent status mapping,
-FeatureSnapshot creation, and ledgering remain deferred to the master-plan
-chapters that own those side effects. When FeatureSnapshot is implemented, it
-must include freshness metadata: computed time, oldest feature timestamp, max
-feature age, freshness status, stale feature names, and missing feature names.
+Durable `FraudDecision`, `FeatureSnapshot`, processor authorization, final
+authorization/decline mapping, and ledgering remain deferred to the
+master-plan chapters that own those side effects. Chapter 10 deliberately does
+not persist the current thin `fraud_decisions` placeholder row. When
+FeatureSnapshot is implemented, it must include freshness metadata: computed
+time, oldest feature timestamp, max feature age, freshness status, stale
+feature names, and missing feature names.
 
 ## Database Migrations
 
