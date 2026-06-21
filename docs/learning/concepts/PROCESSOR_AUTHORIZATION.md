@@ -28,9 +28,11 @@ training.
 ## How THAAP Uses It
 
 Chapter 11 adds a deterministic `ProcessorAdapter` and a durable
-`authorizations` table. Confirm now creates a PaymentAttempt, allows the stub
-fraud decision, calls the simulator, persists an authorization row, and maps
-the result to PaymentAttempt and PaymentIntent state.
+`authorizations` table. Chapter 12 now makes confirm persist honest fraud
+lineage before the processor call. Confirm creates a PaymentAttempt, records the
+stub `ALLOW` decision and `features_v1` snapshot, calls the simulator, persists
+an authorization row, and maps the result to PaymentAttempt and PaymentIntent
+state.
 
 Approved authorizations move the PaymentAttempt to `AUTHORIZED` and the
 PaymentIntent to `REQUIRES_CAPTURE`. Retryable declines move the PaymentAttempt
@@ -77,11 +79,11 @@ Chapter 11 tests prove approved, declined, verification-failure, and
 authorization, post-approval confirm is rejected, retryable decline permits a
 second attempt, tenant boundaries hold, non-`ALLOW` fraud decisions do not call
 the processor, processor exceptions roll back the confirm transaction, unknown
-simulator cards default to approval, and Chapter 11 still does not persist fraud
-lineage.
+simulator cards default to approval. Chapter 12 extends that proof by requiring
+one FraudDecision and one FeatureSnapshot per successful confirm attempt.
 
 ## What Remains To Build
 
 Automatic capture, manual capture, cancel/void, refunds, ledger entries,
-processor events, audit logs, durable fraud decisions, and feature snapshots are
-intentionally deferred to their owner chapters.
+processor events, audit logs, real rules, and model scoring are intentionally
+deferred to their owner chapters.

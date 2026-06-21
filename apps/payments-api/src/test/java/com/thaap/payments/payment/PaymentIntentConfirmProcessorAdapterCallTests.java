@@ -21,10 +21,12 @@ import com.thaap.payments.fraud.ConfirmDecisionEngine;
 import com.thaap.payments.fraud.ConfirmDecisionRequest;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionReasonCode;
+import com.thaap.payments.fraud.FraudRiskLevel;
 import com.thaap.payments.processor.ProcessorAdapter;
 import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.support.DatabaseCleaner;
+import java.math.BigDecimal;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,7 +83,8 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         databaseCleaner.clean();
         reset(processorAdapter, confirmDecisionEngine);
         when(confirmDecisionEngine.decide(any(ConfirmDecisionRequest.class)))
-                .thenReturn(new ConfirmDecision(FraudDecisionAction.ALLOW,
+                .thenReturn(new ConfirmDecision(FraudDecisionAction.ALLOW, BigDecimal.ZERO, FraudRiskLevel.LOW,
+                        "rules_stub_v1", null,
                         java.util.List.of(FraudDecisionReasonCode.RULES_NOT_ENABLED)));
         when(processorAdapter.authorize(any(ProcessorAuthorizationRequest.class)))
                 .thenReturn(new ProcessorAuthorizationResult("THAAP_SIMULATOR", "auth_sim_replay_proof",
@@ -102,6 +105,8 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
 
         verify(processorAdapter, times(1)).authorize(any(ProcessorAuthorizationRequest.class));
         org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isEqualTo(1);
     }
 
@@ -110,7 +115,7 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
     void nonAllowFraudDecisionDoesNotCallProcessorAdapterOrPersistAuthorization(FraudDecisionAction action)
             throws Exception {
         when(confirmDecisionEngine.decide(any(ConfirmDecisionRequest.class)))
-                .thenReturn(new ConfirmDecision(action,
+                .thenReturn(new ConfirmDecision(action, BigDecimal.ZERO, FraudRiskLevel.LOW, "rules_stub_v1", null,
                         java.util.List.of(FraudDecisionReasonCode.RULES_NOT_ENABLED)));
         MerchantAccess merchant = createMerchant("merchant-a");
         UUID customerId = createCustomer(merchant, "buyer-a@example.com");
@@ -121,6 +126,8 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
 
         verifyNoInteractions(processorAdapter);
         org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isZero();
         org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
     }
@@ -143,6 +150,8 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
 
         verify(processorAdapter, times(1)).authorize(any(ProcessorAuthorizationRequest.class));
         org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isZero();
         org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
     }

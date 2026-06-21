@@ -2559,8 +2559,10 @@ Deliver:
 - Store action, risk score, risk level, ruleset version, latency, reason codes,
   and created time.
 - Keep model version nullable until the model service exists.
-- Add initial reason codes for stub decisioning and processor simulator
-  outcomes.
+- Add the initial fraud decision reason code for stub decisioning:
+  `RULES_NOT_ENABLED`. Keep processor simulator outcome codes on
+  `Authorization`, because they are produced after the fraud decision and are
+  processor truth, not fraud-decision reason truth.
 - Ensure `BLOCK`/`REQUEST_3DS`/`REVIEW` enum values exist but do not activate
   behavior until rules decide them.
 - Add tests proving every confirm attempt gets exactly one FraudDecision and

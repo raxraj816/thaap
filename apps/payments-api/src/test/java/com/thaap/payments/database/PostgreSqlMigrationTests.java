@@ -56,6 +56,15 @@ class PostgreSqlMigrationTests {
         assertThat(indexExists("authorizations", "uk_authorizations_attempt")).isTrue();
         assertThat(indexExists("authorizations", "uk_authorizations_processor_reference")).isTrue();
         assertThat(indexExists("authorizations", "idx_authorizations_merchant_created")).isTrue();
+        assertThat(columnExists("fraud_decisions", "payment_attempt_id")).isTrue();
+        assertThat(columnExists("fraud_decisions", "risk_score")).isTrue();
+        assertThat(columnExists("fraud_decisions", "feature_freshness_status")).isTrue();
+        assertThat(columnExists("fraud_decisions", "reason_codes")).isTrue();
+        assertThat(columnExists("feature_snapshots", "fraud_decision_id")).isTrue();
+        assertThat(columnExists("feature_snapshots", "feature_version")).isTrue();
+        assertThat(columnExists("feature_snapshots", "features_json")).isTrue();
+        assertThat(indexExists("fraud_decisions", "uk_fraud_decisions_attempt")).isTrue();
+        assertThat(indexExists("feature_snapshots", "uk_feature_snapshots_decision")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();

@@ -8,8 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.thaap.payments.fraud.FraudDecision;
-import com.thaap.payments.fraud.FraudDecisionRepository;
 import com.thaap.payments.review.ReviewCase;
 import com.thaap.payments.review.ReviewCaseRepository;
 import com.thaap.payments.rules.FraudRule;
@@ -41,9 +39,6 @@ class MerchantTenantIsolationTests {
 
     @Autowired
     private ObjectMapper objectMapper;
-
-    @Autowired
-    private FraudDecisionRepository fraudDecisionRepository;
 
     @Autowired
     private FraudRuleRepository fraudRuleRepository;
@@ -271,11 +266,17 @@ class MerchantTenantIsolationTests {
     }
 
     @Test
-    void fraudRulesAndReviewsAreVisibleOnlyToOwningMerchant() throws Exception {
+    void fraudDecisionsRulesAndReviewsAreVisibleOnlyToOwningMerchant() throws Exception {
         var merchantA = createMerchant("merchant-a");
         var merchantB = createMerchant("merchant-b");
-        fraudDecisionRepository.save(new FraudDecision(merchantA.id(), "ALLOW"));
-        fraudDecisionRepository.save(new FraudDecision(merchantB.id(), "BLOCK"));
+        var customerA = createCustomer(merchantA, "buyer-a@example.com");
+        var customerB = createCustomer(merchantB, "buyer-b@example.com");
+        var paymentMethodA = createPaymentMethod(merchantA, customerA, "tenant-fraud-pm-a");
+        var paymentMethodB = createPaymentMethod(merchantB, customerB, "tenant-fraud-pm-b");
+        var paymentIntentA = createPaymentIntent(merchantA, customerA, "tenant-fraud-pi-a", 1200);
+        var paymentIntentB = createPaymentIntent(merchantB, customerB, "tenant-fraud-pi-b", 2300);
+        confirmPaymentIntent(merchantA, paymentIntentA, paymentMethodA, "tenant-fraud-confirm-a");
+        confirmPaymentIntent(merchantB, paymentIntentB, paymentMethodB, "tenant-fraud-confirm-b");
         fraudRuleRepository.save(new FraudRule(merchantA.id(), "a-rule"));
         fraudRuleRepository.save(new FraudRule(merchantB.id(), "b-rule"));
         reviewCaseRepository.save(new ReviewCase(merchantA.id(), "OPEN"));
@@ -287,6 +288,14 @@ class MerchantTenantIsolationTests {
 
         assertThat(fraudDecisions).hasSize(1);
         assertThat(fraudDecisions.get(0).get("action").asText()).isEqualTo("ALLOW");
+        assertThat(fraudDecisions.get(0).get("riskLevel").asText()).isEqualTo("LOW");
+        var fraudDecisionId = UUID.fromString(fraudDecisions.get(0).get("id").asText());
+        var fraudDecisionDetail = getObject("/fraud/decisions/" + fraudDecisionId, merchantA);
+        assertThat(fraudDecisionDetail.get("featureSnapshot").get("featureVersion").asText())
+                .isEqualTo("features_v1");
+        mockMvc.perform(get("/fraud/decisions/{id}", fraudDecisionId)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isNotFound());
         assertThat(rules).hasSize(1);
         assertThat(rules.get(0).get("name").asText()).isEqualTo("a-rule");
         assertThat(reviews).hasSize(1);
@@ -333,6 +342,38 @@ class MerchantTenantIsolationTests {
         return UUID.fromString(createPaymentIntentResponse(merchant, customerId, idempotencyKey, amount).get("id").asText());
     }
 
+    private UUID createPaymentMethod(MerchantAccess merchant, UUID customerId, String idempotencyKey) throws Exception {
+        var response = mockMvc.perform(post("/payment_methods")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "cardNumber": "4242424242424242"
+                                }
+                                """.formatted(customerId)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return UUID.fromString(objectMapper.readTree(response).get("id").asText());
+    }
+
+    private void confirmPaymentIntent(MerchantAccess merchant, UUID paymentIntentId, UUID paymentMethodId,
+            String idempotencyKey) throws Exception {
+        mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "paymentMethodId": "%s"
+                                }
+                                """.formatted(paymentMethodId)))
+                .andExpect(status().isCreated());
+    }
+
     private JsonNode createPaymentIntentResponse(MerchantAccess merchant, UUID customerId, String idempotencyKey,
             long amount) throws Exception {
         var response = mockMvc.perform(post("/payment_intents")
@@ -372,6 +413,16 @@ class MerchantTenantIsolationTests {
     }
 
     private JsonNode getArray(String path, MerchantAccess merchant) throws Exception {
+        var response = mockMvc.perform(get(path)
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response);
+    }
+
+    private JsonNode getObject(String path, MerchantAccess merchant) throws Exception {
         var response = mockMvc.perform(get(path)
                         .header(API_KEY, merchant.apiKey()))
                 .andExpect(status().isOk())

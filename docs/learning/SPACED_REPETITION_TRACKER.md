@@ -24,4 +24,6 @@ Status values:
 | PaymentAttempt | `docs/learning/concepts/PAYMENT_ATTEMPT.md` | 2026-06-09 | 2026-06-10 | 2026-06-16 | 2026-07-09 | new | Explain why fraud and processor lineage attach to attempts. |
 | PaymentIntent state machine | `docs/learning/concepts/PAYMENT_INTENT_STATE_MACHINE.md` | 2026-06-15 | 2026-06-16 | 2026-06-22 | 2026-07-15 | new | Explain why invalid capture/refund transitions must fail before processor and ledger work. |
 | Real-time feature freshness | `docs/learning/concepts/REAL_TIME_FEATURE_FRESHNESS.md` | 2026-06-15 | 2026-06-16 | 2026-06-22 | 2026-07-15 | new | Explain why fraud decisions must record feature age and stale/missing feature names. |
-| Confirm orchestration | `docs/learning/concepts/CONFIRM_ORCHESTRATION.md` | 2026-06-19 | 2026-06-20 | 2026-06-26 | 2026-07-19 | new | Explain why Chapter 10 adds an interface stub but defers durable fraud lineage. |
+| Confirm orchestration | `docs/learning/concepts/CONFIRM_ORCHESTRATION.md` | 2026-06-19 | 2026-06-20 | 2026-06-26 | 2026-07-19 | new | Explain how confirm now persists decision lineage before processor authorization. |
+| Processor authorization | `docs/learning/concepts/PROCESSOR_AUTHORIZATION.md` | 2026-06-19 | 2026-06-20 | 2026-06-26 | 2026-07-19 | new | Explain authorization vs capture and why processor truth matters. |
+| Fraud decision lineage | `docs/learning/concepts/FRAUD_DECISION_LINEAGE.md` | 2026-06-21 | 2026-06-22 | 2026-06-28 | 2026-07-21 | new | Explain FraudDecision vs FeatureSnapshot and why stub lineage must stay honest. |

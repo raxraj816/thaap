@@ -8,8 +8,8 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 11 is complete. Confirm now produces deterministic processor
-authorization outcomes, with durable fraud lineage and ledger side effects still
+Chapter 12 is complete. Confirm now produces deterministic processor
+authorization outcomes and durable fraud lineage, with ledger side effects still
 intentionally deferred to their owner chapters:
 
 - Monorepo structure is in place.
@@ -67,9 +67,12 @@ intentionally deferred to their owner chapters:
 - `POST /payment_intents/{id}/confirm` now creates a tenant-scoped
   `PaymentAttempt` for a valid PaymentIntent and PaymentMethod owned by the
   same merchant/customer.
-- Confirm calls a deterministic in-memory decision-engine interface that
-  returns `ALLOW` with reason code `RULES_NOT_ENABLED`, without persisting thin
-  fraud lineage before Chapter 12.
+- Confirm calls a deterministic in-memory decision-engine interface that returns
+  `ALLOW`, score `0.00`, risk level `LOW`, ruleset version `rules_stub_v1`, and
+  reason code `RULES_NOT_ENABLED`.
+- Confirm persists one tenant-scoped `FraudDecision` and one immutable
+  `FeatureSnapshot` for every successful confirm attempt before processor
+  authorization.
 - Successful confirm moves the `PaymentAttempt` from `CREATED` through
   `READY_FOR_PROCESSOR`, calls a `ProcessorAdapter` only for `ALLOW`
   decisions, persists an `Authorization`, and maps the processor result back
@@ -88,8 +91,12 @@ intentionally deferred to their owner chapters:
   cross-merchant rejection, wrong-customer PaymentMethod rejection, one
   successful concurrent confirm, retry after retryable decline, no duplicate
   authorizations, non-ALLOW fraud decisions never calling the processor,
-  processor failure rollback from `PROCESSING`, unknown simulator card default
-  approval, and no persisted `FraudDecision`.
+  processor failure rollback from `PROCESSING`, and unknown simulator card
+  default approval.
+- Chapter 12 tests prove approved, declined, 3DS-required, retry, replay,
+  conflict, rollback, and tenant-isolation paths preserve exactly one fraud
+  decision and one feature snapshot per successful confirm attempt, without
+  leaking raw card input or duplicating lineage.
 - Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`
   while capture/refund are rejected before authorization/capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
@@ -177,8 +184,8 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Chapter 11 learning verification:
+Chapter 12 learning verification:
 
 ```bash
-scripts/learning-day-check.sh 2026-06-19 --deep-dive-required
+scripts/learning-day-check.sh 2026-06-21 --deep-dive-required
 ```

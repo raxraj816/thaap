@@ -6,7 +6,7 @@ Before confirm, a PaymentIntent only says the merchant wants to collect money.
 After confirm, THAAP has a concrete PaymentAttempt that can be routed through
 fraud decisioning and processor authorization.
 
-## Current Chapter 10 Behavior
+## Current Chapter 12 Behavior
 
 `POST /payment_intents/{id}/confirm`:
 
@@ -15,23 +15,25 @@ fraud decisioning and processor authorization.
 - loads PaymentIntent and PaymentMethod through merchant scope
 - verifies the PaymentMethod belongs to the PaymentIntent customer
 - creates one durable PaymentAttempt
-- calls an in-memory decision-engine interface that returns `ALLOW` with
+- calls an in-memory decision-engine interface that returns `ALLOW`, score
+  `0.00`, risk level `LOW`, ruleset version `rules_stub_v1`, and
   `RULES_NOT_ENABLED`
+- persists one `FraudDecision`
+- persists one immutable `FeatureSnapshot`
+- attaches the fraud decision to the PaymentAttempt
 - moves PaymentAttempt to `READY_FOR_PROCESSOR`
 - moves PaymentIntent to `PROCESSING`
 
-The confirm path does not persist `FraudDecision`, `FeatureSnapshot`, processor
-authorization, or ledger entries yet.
+The confirm path now persists fraud lineage and processor authorization. It
+still does not persist capture, ledger, processor-event, or audit-log side
+effects.
 
 ## Why This Boundary Matters
 
-The system needs a real-time shape before it has real rules, models, or
-processor outcomes. The interface boundary lets Chapter 12 replace the stub
-with durable fraud lineage without changing the merchant-facing confirm API.
-
-Persisting a thin fraud row in Chapter 10 would be misleading because it would
-lack score, risk level, reason codes, latency, feature snapshot, and freshness
-proof.
+The system needs a real-time shape that is fast enough for payment confirm and
+honest enough for later fraud review. Chapter 12 keeps the decision stub simple
+but no longer thin: it records score, risk level, reason codes, latency, feature
+snapshot, and freshness proof.
 
 ## Invariants
 
@@ -40,9 +42,13 @@ proof.
 - No confirm with a PaymentMethod for a different customer.
 - No duplicate attempt for an idempotent replay.
 - No second successful confirm while the PaymentIntent is `PROCESSING`.
-- No durable fraud, processor, or ledger side effects in Chapter 10.
+- Exactly one durable fraud decision and one feature snapshot per successful
+  confirm attempt.
+- No durable fraud lineage when confirm fails before attempt creation or the
+  confirm transaction rolls back.
+- No ledger side effects during confirm.
 
 ## Explain-Back Prompt
 
-Explain why Chapter 10 adds a fraud decision interface but does not persist a
-FraudDecision row.
+Explain why Chapter 12 persists honest stub lineage instead of fake rules or
+fake model lineage.
