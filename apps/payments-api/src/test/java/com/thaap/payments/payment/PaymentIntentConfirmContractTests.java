@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
@@ -130,7 +131,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(featuresJson).contains("\"card_bin\":\"499999\"");
         assertThat(featuresJson).doesNotContain("4999990000000001");
         assertThat(featuresJson.getBytes(StandardCharsets.UTF_8).length)
-                .isLessThanOrEqualTo(PaymentIntentController.MAX_FEATURE_SNAPSHOT_JSON_BYTES);
+                .isLessThanOrEqualTo(PaymentIntentController.DEFAULT_MAX_FEATURE_SNAPSHOT_JSON_BYTES);
         assertThat(featureSnapshot.get("FRESHNESS_STATUS")).isEqualTo("FRESH");
         assertThat(featureSnapshot.get("STALE_FEATURE_NAMES")).isEqualTo("[]");
         assertThat(featureSnapshot.get("MISSING_FEATURE_NAMES")).isEqualTo("[]");
@@ -160,6 +161,41 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
+        assertThat(countAuditLogsByAction("payment_intent.confirmed")).isEqualTo(1);
+        assertThat(countAuditLogsByAction("fraud_decision.completed")).isEqualTo(1);
+        assertThat(countAuditLogsByAction("authorization.approved")).isEqualTo(1);
+        List<AuditLogRow> auditRows = auditRowsForRequest("req-confirm-flow");
+        assertThat(auditRows).hasSize(3);
+        assertThat(auditRows).extracting(AuditLogRow::actorId).containsOnly(merchant.apiKeyPrefix());
+        assertThat(auditRows).extracting(AuditLogRow::action)
+                .containsExactly("payment_intent.confirmed", "fraud_decision.completed", "authorization.approved");
+        AuditLogRow paymentIntentAudit = auditRow(auditRows, "payment_intent.confirmed");
+        assertThat(paymentIntentAudit.aggregateType()).isEqualTo("payment_intent");
+        assertThat(paymentIntentAudit.beforeJson().get("status").asText()).isEqualTo("REQUIRES_CONFIRMATION");
+        assertThat(paymentIntentAudit.afterJson().get("paymentIntentId").asText()).isEqualTo(paymentIntentId.toString());
+        assertThat(paymentIntentAudit.afterJson().get("paymentAttemptId").asText())
+                .isEqualTo(paymentAttemptId.toString());
+        assertThat(paymentIntentAudit.afterJson().get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
+        assertThat(paymentIntentAudit.afterJson().get("paymentAttemptStatus").asText()).isEqualTo("AUTHORIZED");
+
+        AuditLogRow fraudDecisionAudit = auditRow(auditRows, "fraud_decision.completed");
+        assertThat(fraudDecisionAudit.aggregateType()).isEqualTo("fraud_decision");
+        assertThat(fraudDecisionAudit.beforeJson()).isNull();
+        assertThat(fraudDecisionAudit.afterJson().get("fraudDecisionId").asText()).isEqualTo(fraudDecisionId.toString());
+        assertThat(fraudDecisionAudit.afterJson().get("action").asText()).isEqualTo("ALLOW");
+        assertThat(fraudDecisionAudit.afterJson().get("reasonCodes").get(0).asText()).isEqualTo("RULES_NOT_ENABLED");
+
+        AuditLogRow authorizationAudit = auditRow(auditRows, "authorization.approved");
+        assertThat(authorizationAudit.aggregateType()).isEqualTo("authorization");
+        assertThat(authorizationAudit.beforeJson()).isNull();
+        assertThat(authorizationAudit.afterJson().get("status").asText()).isEqualTo("APPROVED");
+        assertThat(authorizationAudit.afterJson().get("processorResponseCode").asText()).isEqualTo("APPROVED");
+        assertThat(auditRows.toString())
+                .doesNotContain("4999990000000001")
+                .doesNotContain("buyer-a@example.com")
+                .doesNotContain(merchant.apiKey())
+                .doesNotContain("confirm-attempt-a");
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
     }
 
@@ -219,6 +255,8 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
+        assertThat(countAuditLogsByAction("authorization.declined")).isEqualTo(1);
     }
 
     @Test
@@ -248,6 +286,8 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
+        assertThat(countAuditLogsByAction("authorization.requires_action")).isEqualTo(1);
     }
 
     @Test
@@ -267,6 +307,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
     }
 
@@ -290,6 +331,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
     }
 
@@ -313,6 +355,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
     }
 
@@ -338,6 +381,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(2);
         assertThat(countRows("feature_snapshots")).isEqualTo(2);
         assertThat(countRows("authorizations")).isEqualTo(2);
+        assertThat(countRows("audit_logs")).isEqualTo(6);
     }
 
     @Test
@@ -362,6 +406,7 @@ class PaymentIntentConfirmContractTests {
             assertThat(countRows("fraud_decisions")).isEqualTo(1);
             assertThat(countRows("feature_snapshots")).isEqualTo(1);
             assertThat(countRows("authorizations")).isEqualTo(1);
+            assertThat(countRows("audit_logs")).isEqualTo(3);
             assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
         } finally {
             executor.shutdownNow();
@@ -386,6 +431,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
     }
 
     @Test
@@ -407,6 +453,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
     }
 
     @Test
@@ -428,6 +475,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
     }
 
     @Test
@@ -448,6 +496,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
     }
 
     private static Stream<Arguments> declineCards() {
@@ -474,7 +523,8 @@ class PaymentIntentConfirmContractTests {
                 .getResponse()
                 .getContentAsString();
         var json = objectMapper.readTree(response);
-        return new MerchantAccess(UUID.fromString(json.get("id").asText()), json.get("apiKey").asText());
+        return new MerchantAccess(UUID.fromString(json.get("id").asText()), json.get("apiKeyPrefix").asText(),
+                json.get("apiKey").asText());
     }
 
     private UUID createCustomer(MerchantAccess merchant, String email) throws Exception {
@@ -541,6 +591,7 @@ class PaymentIntentConfirmContractTests {
         var response = mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
                         .header(API_KEY, merchant.apiKey())
                         .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .header(RequestIdFilter.REQUEST_ID_HEADER, "req-confirm-flow")
                         .contentType(APPLICATION_JSON)
                         .content(confirmBody(paymentMethodId)))
                 .andExpect(status().isCreated())
@@ -575,6 +626,7 @@ class PaymentIntentConfirmContractTests {
         return mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
                         .header(API_KEY, merchant.apiKey())
                         .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .header(RequestIdFilter.REQUEST_ID_HEADER, "req-confirm-flow")
                         .contentType(APPLICATION_JSON)
                         .content(confirmBody(paymentMethodId)))
                 .andReturn();
@@ -650,10 +702,54 @@ class PaymentIntentConfirmContractTests {
                 """, Integer.class, eventType);
     }
 
+    private int countAuditLogsByAction(String action) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit_logs
+                WHERE action = ?
+                """, Integer.class, action);
+    }
+
+    private List<AuditLogRow> auditRowsForRequest(String requestId) {
+        return jdbcTemplate.query("""
+                SELECT actor_id, action, aggregate_type, before_json, after_json
+                FROM audit_logs
+                WHERE request_id = ?
+                ORDER BY created_at, id
+                """, (resultSet, rowNumber) -> new AuditLogRow(
+                resultSet.getString("actor_id"),
+                resultSet.getString("action"),
+                resultSet.getString("aggregate_type"),
+                readNullableJson(resultSet.getString("before_json")),
+                readNullableJson(resultSet.getString("after_json"))), requestId);
+    }
+
+    private AuditLogRow auditRow(List<AuditLogRow> auditRows, String action) {
+        return auditRows.stream()
+                .filter(row -> row.action().equals(action))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing audit action: " + action));
+    }
+
+    private JsonNode readNullableJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(json);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Audit payload JSON was not readable", exception);
+        }
+    }
+
     private List<Integer> statuses(MvcResult first, MvcResult second) {
         return List.of(first.getResponse().getStatus(), second.getResponse().getStatus());
     }
 
-    private record MerchantAccess(UUID id, String apiKey) {
+    private record MerchantAccess(UUID id, String apiKeyPrefix, String apiKey) {
+    }
+
+    private record AuditLogRow(String actorId, String action, String aggregateType, JsonNode beforeJson,
+            JsonNode afterJson) {
     }
 }

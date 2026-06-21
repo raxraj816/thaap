@@ -1,6 +1,8 @@
 package com.thaap.payments.payment;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thaap.payments.api.RequestIdFilter;
+import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -25,6 +27,9 @@ import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -41,6 +46,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -59,7 +65,7 @@ public class PaymentIntentController {
     private static final Logger log = LoggerFactory.getLogger(PaymentIntentController.class);
 
     public static final long MAX_PAYMENT_INTENT_AMOUNT = 100_000_000L;
-    static final int MAX_FEATURE_SNAPSHOT_JSON_BYTES = 16_384;
+    static final int DEFAULT_MAX_FEATURE_SNAPSHOT_JSON_BYTES = 16_384;
     private static final ObjectMapper FEATURE_SNAPSHOT_OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private final PaymentIntentRepository paymentIntentRepository;
@@ -73,13 +79,22 @@ public class PaymentIntentController {
     private final AuthorizationRepository authorizationRepository;
     private final FraudDecisionRepository fraudDecisionRepository;
     private final FeatureSnapshotRepository featureSnapshotRepository;
+    private final AuditLogService auditLogService;
+    private final int maxFeatureSnapshotJsonBytes;
+    private final Counter featureSnapshotTooLargeCounter;
+    private final Counter featureSnapshotSerializationErrorCounter;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
             IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService,
             ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
             AuthorizationRepository authorizationRepository, FraudDecisionRepository fraudDecisionRepository,
-            FeatureSnapshotRepository featureSnapshotRepository) {
+            FeatureSnapshotRepository featureSnapshotRepository, AuditLogService auditLogService,
+            MeterRegistry meterRegistry,
+            @Value("${thaap.fraud.feature-snapshot.max-json-bytes:16384}") int maxFeatureSnapshotJsonBytes) {
+        if (maxFeatureSnapshotJsonBytes <= 0) {
+            throw new IllegalArgumentException("thaap.fraud.feature-snapshot.max-json-bytes must be positive");
+        }
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -91,6 +106,11 @@ public class PaymentIntentController {
         this.authorizationRepository = authorizationRepository;
         this.fraudDecisionRepository = fraudDecisionRepository;
         this.featureSnapshotRepository = featureSnapshotRepository;
+        this.auditLogService = auditLogService;
+        this.maxFeatureSnapshotJsonBytes = maxFeatureSnapshotJsonBytes;
+        this.featureSnapshotTooLargeCounter = meterRegistry.counter("thaap.feature.snapshot.too_large");
+        this.featureSnapshotSerializationErrorCounter = meterRegistry.counter(
+                "thaap.feature.snapshot.serialization_errors");
     }
 
     @PostMapping
@@ -123,16 +143,18 @@ public class PaymentIntentController {
     public ResponseEntity<PaymentAttemptResponse> confirmPaymentIntent(MerchantContext merchantContext,
             @PathVariable UUID id,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            @Valid @RequestBody ConfirmPaymentIntentRequest request) {
+            @Valid @RequestBody ConfirmPaymentIntentRequest request, HttpServletRequest httpServletRequest) {
         // IdempotencyService runs the supplied confirm operation and response storage in one transaction.
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.confirm:" + id,
                 request, PaymentAttemptResponse.class,
-                () -> confirmPaymentIntentOnce(merchantContext, id, idempotencyKey, request));
+                () -> confirmPaymentIntentOnce(merchantContext, id, idempotencyKey, request,
+                        requestIdFrom(httpServletRequest)));
     }
 
     protected ResponseEntity<PaymentAttemptResponse> confirmPaymentIntentOnce(MerchantContext merchantContext, UUID id,
-            String idempotencyKey, ConfirmPaymentIntentRequest request) {
+            String idempotencyKey, ConfirmPaymentIntentRequest request, String requestId) {
         PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
+        PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION
                 && paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentIntent is not confirmable");
@@ -166,6 +188,8 @@ public class PaymentIntentController {
                 paymentMethod.getCardLast4()));
         Authorization authorization = persistAuthorization(merchantContext, paymentAttempt, processorResult);
         applyProcessorResult(paymentIntent, paymentAttempt, authorization);
+        recordConfirmAuditLogs(merchantContext, requestId, startingStatus, paymentIntent, paymentAttempt, fraudDecision,
+                authorization);
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
@@ -212,13 +236,15 @@ public class PaymentIntentController {
         try {
             byte[] serialized = FEATURE_SNAPSHOT_OBJECT_MAPPER.writeValueAsString(features)
                     .getBytes(StandardCharsets.UTF_8);
-            if (serialized.length > MAX_FEATURE_SNAPSHOT_JSON_BYTES) {
+            if (serialized.length > maxFeatureSnapshotJsonBytes) {
+                featureSnapshotTooLargeCounter.increment();
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                         "Feature snapshot exceeded safe storage limit");
             }
         } catch (ResponseStatusException exception) {
             throw exception;
         } catch (Exception exception) {
+            featureSnapshotSerializationErrorCounter.increment();
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Feature snapshot could not be serialized", exception);
         }
@@ -268,6 +294,26 @@ public class PaymentIntentController {
                         + "paymentAttemptId={} authorizationId={} status={} responseCode={}",
                 paymentIntent.getMerchantId(), paymentIntent.getId(), paymentAttempt.getId(), authorization.getId(),
                 authorization.getStatus(), authorization.getProcessorResponseCode());
+    }
+
+    private void recordConfirmAuditLogs(MerchantContext merchantContext, String requestId,
+            PaymentIntentStatus startingStatus, PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
+            FraudDecision fraudDecision, Authorization authorization) {
+        List<ConfirmAuditEventMapper.ConfirmAuditEvent> auditEvents = ConfirmAuditEventMapper.eventsForConfirm(
+                startingStatus, paymentIntent, paymentAttempt, fraudDecision, authorization);
+        for (ConfirmAuditEventMapper.ConfirmAuditEvent auditEvent : auditEvents) {
+            auditLogService.recordMerchantApiAction(merchantContext, requestId, auditEvent.action(),
+                    auditEvent.aggregateType(), auditEvent.aggregateId(), auditEvent.reason(), auditEvent.before(),
+                    auditEvent.after());
+        }
+    }
+
+    private String requestIdFrom(HttpServletRequest request) {
+        Object requestId = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
+        if (requestId == null || requestId.toString().isBlank()) {
+            return "unknown";
+        }
+        return requestId.toString();
     }
 
     @PostMapping("/{id}/capture")

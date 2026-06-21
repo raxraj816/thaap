@@ -65,6 +65,12 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("feature_snapshots", "features_json")).isTrue();
         assertThat(indexExists("fraud_decisions", "uk_fraud_decisions_attempt")).isTrue();
         assertThat(indexExists("feature_snapshots", "uk_feature_snapshots_decision")).isTrue();
+        assertThat(columnExists("audit_logs", "merchant_id")).isTrue();
+        assertThat(columnExists("audit_logs", "action")).isTrue();
+        assertThat(columnExists("audit_logs", "request_id")).isTrue();
+        assertThat(columnExists("audit_logs", "after_json")).isTrue();
+        assertThat(indexExists("audit_logs", "idx_audit_logs_merchant_created")).isTrue();
+        assertThat(indexExists("audit_logs", "idx_audit_logs_merchant_aggregate")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();

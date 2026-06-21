@@ -27,3 +27,4 @@ Status values:
 | Confirm orchestration | `docs/learning/concepts/CONFIRM_ORCHESTRATION.md` | 2026-06-19 | 2026-06-20 | 2026-06-26 | 2026-07-19 | new | Explain how confirm now persists decision lineage before processor authorization. |
 | Processor authorization | `docs/learning/concepts/PROCESSOR_AUTHORIZATION.md` | 2026-06-19 | 2026-06-20 | 2026-06-26 | 2026-07-19 | new | Explain authorization vs capture and why processor truth matters. |
 | Fraud decision lineage | `docs/learning/concepts/FRAUD_DECISION_LINEAGE.md` | 2026-06-21 | 2026-06-22 | 2026-06-28 | 2026-07-21 | new | Explain FraudDecision vs FeatureSnapshot and why stub lineage must stay honest. |
+| Audit logs | `docs/learning/concepts/AUDIT_LOGS.md` | 2026-06-21 | 2026-06-22 | 2026-06-28 | 2026-07-21 | new | Explain why audit records are separate from domain state and fraud lineage. |

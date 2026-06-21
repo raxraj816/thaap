@@ -93,6 +93,7 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
         assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
     }
 

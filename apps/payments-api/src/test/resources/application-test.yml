@@ -28,3 +28,6 @@ thaap:
     bootstrap-token: test-admin-bootstrap-token
   security:
     hash-pepper: test-hash-pepper-for-sensitive-value-contracts
+  fraud:
+    feature-snapshot:
+      max-json-bytes: 16384

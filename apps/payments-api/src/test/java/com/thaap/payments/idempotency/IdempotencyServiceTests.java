@@ -208,7 +208,7 @@ class IdempotencyServiceTests {
     }
 
     private MerchantContext context(Merchant merchant) {
-        return new MerchantContext(merchant.getId(), merchant.getName());
+        return new MerchantContext(merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix());
     }
 
     private String requestHash(TestRequest request) throws JsonProcessingException {
