@@ -108,6 +108,7 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isEqualTo(3);
     }
 
     @ParameterizedTest
@@ -129,6 +130,7 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isZero();
         org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
     }
 
@@ -153,6 +155,7 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isZero();
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isZero();
         org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
     }
 

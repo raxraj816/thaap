@@ -2062,9 +2062,16 @@ Before marking a chapter complete, answer these questions:
 After coding and before finalizing:
 
 - Re-run the mandatory review lenses against the actual diff.
+- Run the Senior Staff adversarial review gate from the commit readiness
+  checklist: payment/fraud invariants, tenant/security, redaction, transaction
+  rollback, observability/failure modes, test evidence, and
+  Stripe/Mastercard-style reviewer objections.
 - Compare accepted and deferred review items against the implementation.
+- Pull forward cheap, valid fixes before handoff.
 - Confirm tests cover the riskiest invariants, not only happy paths.
-- Record surprises and explicit deferrals in the daily note.
+- Record surprises, accepted risks, rejected items, and explicit deferrals in
+  the daily note. Every true deferral must name the owner slice/chapter and the
+  evidence that would unblock it.
 
 ### 18.7 Staff Engineer Apprenticeship Output
 

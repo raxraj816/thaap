@@ -67,3 +67,6 @@ thaap:
     bootstrap-token: ${THAAP_ADMIN_BOOTSTRAP_TOKEN:}
   security:
     hash-pepper: ${THAAP_HASH_PEPPER:}
+  fraud:
+    feature-snapshot:
+      max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}

@@ -28,6 +28,8 @@ engineering understandable, repeatable, and explainable.
 ## End Of Chapter Or Work Session
 
 - Run relevant tests or clearly record why they could not be run.
+- Run the Senior Staff adversarial review gate from
+  `docs/COMMIT_READINESS_CHECKLIST.md`.
 - Update the daily note with what changed, what was learned, tests, tradeoffs,
   open questions, and next steps.
 - For any non-trivial implementation slice, create or update

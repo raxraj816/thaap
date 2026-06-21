@@ -94,10 +94,18 @@ class DatabaseMigrationTests {
                   AND description = 'add fraud lineage'
                   AND success = TRUE
                 """, Integer.class);
+        var auditLogSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '4'
+                  AND description = 'add audit logs'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
         assertThat(fraudLineageSchema).isEqualTo(1);
+        assertThat(auditLogSchema).isEqualTo(1);
     }
 
     @Test
@@ -114,6 +122,7 @@ class DatabaseMigrationTests {
                 "webhook_deliveries",
                 "fraud_decisions",
                 "feature_snapshots",
+                "audit_logs",
                 "fraud_rules",
                 "review_cases");
 
@@ -142,6 +151,10 @@ class DatabaseMigrationTests {
         assertIndexExists("feature_snapshots", "uk_feature_snapshots_decision");
         assertIndexExists("feature_snapshots", "uk_feature_snapshots_attempt");
         assertIndexExists("feature_snapshots", "idx_feature_snapshots_merchant_created");
+        assertIndexExists("audit_logs", "idx_audit_logs_merchant_created");
+        assertIndexExists("audit_logs", "idx_audit_logs_merchant_action_created");
+        assertIndexExists("audit_logs", "idx_audit_logs_merchant_aggregate");
+        assertIndexExists("audit_logs", "idx_audit_logs_request_id");
         assertIndexExists("fraud_rules", "idx_fraud_rules_merchant_created");
         assertIndexExists("review_cases", "idx_review_cases_merchant_created");
 
@@ -163,6 +176,9 @@ class DatabaseMigrationTests {
                 "feature_version", "features_json", "computed_at", "oldest_feature_timestamp",
                 "max_feature_age_ms", "freshness_status", "stale_feature_names", "missing_feature_names",
                 "created_at");
+        assertThat(columnNames("audit_logs")).contains("merchant_id", "actor_type", "actor_id", "action",
+                "aggregate_type", "aggregate_id", "request_id", "trace_id", "reason", "before_json",
+                "after_json", "created_at");
         assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
         assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",

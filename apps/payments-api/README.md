@@ -159,7 +159,7 @@ partial-refund accounting.
 `POST /payment_intents/{id}/confirm` creates the first durable scoring/audit
 unit for a payment flow: `PaymentAttempt`.
 
-The Chapter 12 confirm path:
+The Chapter 13 confirm path:
 
 - requires `Idempotency-Key`
 - accepts `paymentMethodId`
@@ -194,18 +194,48 @@ The Chapter 12 confirm path:
   `REQUIRES_PAYMENT_METHOD`
 - maps 3DS-required outcomes to PaymentAttempt `REQUIRES_ACTION`, PaymentIntent
   `REQUIRES_ACTION`, and `threeDsStatus=REQUESTED`
+- writes `audit_logs` for `payment_intent.confirmed`,
+  `fraud_decision.completed`, and the final authorization outcome
 - emits `payment_attempt.created` delivery rows for active webhook endpoints
 
 The confirm response returns the public PaymentAttempt shape. It does not
 include internal request hashes, stored idempotency response bodies, card
-fingerprints, or merchant secrets.
+fingerprints, or merchant secrets. Audit payloads also omit raw card input, raw
+PII, API keys, card fingerprints, and idempotency hashes.
+`AuditLogService` sanitizes before/after payloads at the service boundary so a
+future caller cannot accidentally persist raw PAN, CVV, API keys,
+idempotency keys, email, phone, passwords, tokens, or long card-like digit
+sequences. Audit actor identity stores `actor_type=MERCHANT_API_KEY` and
+`actor_id` as the API-key prefix, while `merchant_id` remains the tenant
+boundary.
+
+The feature snapshot storage guard defaults to `16384` serialized JSON bytes
+and can be configured with:
+
+```yaml
+thaap:
+  fraud:
+    feature-snapshot:
+      max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}
+```
+
+Actuator metrics include:
+
+- `thaap.audit.logs.created`
+- `thaap.audit.logs.failed`
+- `thaap.feature.snapshot.too_large`
+- `thaap.feature.snapshot.serialization_errors`
+
+Audit created/failed counters are transaction-completion counters: an audit row
+counts as created only after commit, and counts as failed if it was registered
+but the surrounding transaction rolls back or cannot commit.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 
-Capture, ledgering, processor events, and audit logs remain deferred to the
-master-plan chapters that own those side effects. Chapter 12 deliberately keeps
-the decision stub honest: it records `RULES_NOT_ENABLED` and nullable
-`modelVersion` rather than pretending real rules or model lineage exists.
+Capture, ledgering, and processor events remain deferred to the master-plan
+chapters that own those side effects. Chapter 13 deliberately keeps the
+decision stub honest: it records `RULES_NOT_ENABLED` and nullable `modelVersion`
+rather than pretending real rules or model lineage exists.
 Processor simulator outcomes are stored on `Authorization.simulatorOutcomeCode`
 because they are produced after the fraud decision and represent processor
 truth, not fraud-decision reason truth.
@@ -263,6 +293,25 @@ records.
 
 Chapter 11 authorizations are added through a follow-on Flyway migration. Do
 not edit an already-applied migration to add new durable product truth.
+
+V4 creates the `audit_logs` table and its first query indexes. For local
+development and test databases, the single Flyway migration is intentionally
+simple. For a real production rollout on a live high-traffic database, split the
+operational rollout:
+
+- deploy application code with the audit-write behavior behind normal migration
+  sequencing
+- create new audit tables before writes depend on them
+- use `CREATE INDEX CONCURRENTLY` for indexes on large live tables
+- add heavyweight foreign keys with `NOT VALID`, then validate them in a
+  follow-up migration
+- watch Flyway logs plus `thaap.audit.logs.failed`,
+  `thaap.audit.logs.created`, `thaap.feature.snapshot.too_large`, and
+  `thaap.feature.snapshot.serialization_errors`
+
+The current V4 migration creates a new table, so it does not index an existing
+large payment table. The production rule still matters because later fraud,
+ledger, and audit migrations will touch hotter tables.
 
 Chapters 1-3 local databases were created with temporary Hibernate scaffolding. If
 that local PostgreSQL volume still exists, reset it before first Flyway startup:

@@ -36,6 +36,14 @@ Run the Spring Boot API from the repository root:
 scripts/payments-api-run.sh
 ```
 
+Run the Chapter 13 create-to-confirm demo against a running local API:
+
+```bash
+scripts/demo-confirm-flow.sh
+THAAP_DEMO_CARD=4999990000000002 scripts/demo-confirm-flow.sh
+THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
+```
+
 ## Learning Workflow
 
 Create today's learning note, and optionally the deep dive:
@@ -70,3 +78,7 @@ Run the commit-readiness gate before saying a change is ready to commit:
 ```bash
 scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests
 ```
+
+The readiness gate prints the Senior Staff adversarial review lenses. Use that
+output to classify reviewer-style findings as fixed now, accepted risk,
+deferred, or rejected as not applicable before handoff.

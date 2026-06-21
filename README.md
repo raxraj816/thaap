@@ -8,9 +8,9 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 12 is complete. Confirm now produces deterministic processor
-authorization outcomes and durable fraud lineage, with ledger side effects still
-intentionally deferred to their owner chapters:
+Chapter 13 is complete. Confirm now produces deterministic processor
+authorization outcomes, durable fraud lineage, and safe audit records, with
+ledger side effects still intentionally deferred to their owner chapters:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -97,6 +97,16 @@ intentionally deferred to their owner chapters:
   conflict, rollback, and tenant-isolation paths preserve exactly one fraud
   decision and one feature snapshot per successful confirm attempt, without
   leaking raw card input or duplicating lineage.
+- Chapter 13 adds durable `audit_logs` for confirm, fraud-decision completion,
+  and processor authorization outcomes, with request IDs and safe before/after
+  payloads.
+- Chapter 13 tests prove approved, declined, 3DS-required, replay, invalid
+  transition, processor rollback, and snapshot rollback paths create the right
+  audit records without leaking raw card input, raw PII, API keys, card
+  fingerprints, or idempotency hashes.
+- `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
+  -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
+  demo against a running API.
 - Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`
   while capture/refund are rejected before authorization/capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
@@ -184,7 +194,15 @@ scripts/local-infra-up.sh
 scripts/payments-api-run.sh
 ```
 
-Chapter 12 learning verification:
+Chapter 13 demo:
+
+```bash
+scripts/demo-confirm-flow.sh
+THAAP_DEMO_CARD=4999990000000002 scripts/demo-confirm-flow.sh
+THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
+```
+
+Chapter 13 learning verification:
 
 ```bash
 scripts/learning-day-check.sh 2026-06-21 --deep-dive-required

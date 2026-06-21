@@ -38,7 +38,7 @@ public class MerchantContextArgumentResolver implements HandlerMethodArgumentRes
         }
         return merchantRepository.findByApiKeyHash(SecretHasher.sha256(apiKey))
                 .filter(merchant -> merchant.isActive())
-                .map(merchant -> new MerchantContext(merchant.getId(), merchant.getName()))
+                .map(merchant -> new MerchantContext(merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
     }
 }

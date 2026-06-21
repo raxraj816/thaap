@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 public class DatabaseCleaner {
 
     private static final String[] TABLES = {
+            "audit_logs",
             "webhook_deliveries",
             "authorizations",
             "feature_snapshots",

@@ -74,6 +74,24 @@ echo
 echo "Diff stat:"
 git diff --stat
 
+echo
+echo "Senior Staff adversarial review gate:"
+echo "- Payment/fraud invariant review: lifecycle, fraud lineage, idempotency, state transitions."
+echo "- Tenant isolation and security review: merchant scoping, actor identity, credentials, authorization boundaries."
+echo "- Sensitive-data/redaction review: PAN, CVV, PII, API keys, tokens, fingerprints, bank/tax data, idempotency secrets."
+echo "- Transaction boundary and rollback review: partial writes, retries, replay, external side effects, false truth."
+echo "- Observability and failure-mode review: logs, metrics, comments, debuggability, consciously deferred signals."
+echo "- Test evidence review: riskiest invariant, rollback path, tenant boundary, privacy boundary, idempotency behavior."
+echo "- Stripe/Mastercard reviewer pass: first likely objection is fixed, tested, documented, or explicitly deferred."
+echo "- Cheap-fix pull-forward: valid low-cost review comments are fixed before handoff."
+echo "- Deferral discipline: every true deferral names reason, owner slice/chapter, and unblock evidence."
+echo
+echo "Review disposition format:"
+echo "- Fixed now: implemented and covered by tests/docs where relevant."
+echo "- Accepted risk: acceptable for this simulator/product slice, with reason recorded."
+echo "- Deferred: blocked by missing invariant/boundary/lineage/owner slice, with unblock evidence."
+echo "- Rejected as not applicable: conflicts with current product truth, simulator scope, or architecture direction."
+
 if [[ "$run_tests" == true ]]; then
   echo
   echo "Running backend tests..."
@@ -86,5 +104,6 @@ echo "- Check root README and service README for truthful current status."
 echo "- Check master plan if scope, sequencing, or invariants changed."
 echo "- Check runtime smoke test evidence if local startup behavior changed."
 echo "- Check that unrelated files are not mixed into the commit."
+echo "- Include adversarial-review status, cheap fixes, true deferrals, and proof in the final handoff."
 
 exit "$missing"

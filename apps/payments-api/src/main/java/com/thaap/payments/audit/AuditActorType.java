@@ -1,0 +1,5 @@
+package com.thaap.payments.audit;
+
+public enum AuditActorType {
+    MERCHANT_API_KEY
+}
