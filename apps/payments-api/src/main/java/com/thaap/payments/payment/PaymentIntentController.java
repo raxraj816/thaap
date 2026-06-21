@@ -1,5 +1,6 @@
 package com.thaap.payments.payment;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -7,7 +8,12 @@ import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
 import com.thaap.payments.fraud.ConfirmDecisionRequest;
+import com.thaap.payments.fraud.FeatureFreshnessStatus;
+import com.thaap.payments.fraud.FeatureSnapshot;
+import com.thaap.payments.fraud.FeatureSnapshotRepository;
+import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.fraud.FraudDecisionAction;
+import com.thaap.payments.fraud.FraudDecisionRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
@@ -26,7 +32,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -49,6 +59,8 @@ public class PaymentIntentController {
     private static final Logger log = LoggerFactory.getLogger(PaymentIntentController.class);
 
     public static final long MAX_PAYMENT_INTENT_AMOUNT = 100_000_000L;
+    static final int MAX_FEATURE_SNAPSHOT_JSON_BYTES = 16_384;
+    private static final ObjectMapper FEATURE_SNAPSHOT_OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private final PaymentIntentRepository paymentIntentRepository;
     private final CustomerRepository customerRepository;
@@ -59,12 +71,15 @@ public class PaymentIntentController {
     private final ConfirmDecisionEngine confirmDecisionEngine;
     private final ProcessorAdapter processorAdapter;
     private final AuthorizationRepository authorizationRepository;
+    private final FraudDecisionRepository fraudDecisionRepository;
+    private final FeatureSnapshotRepository featureSnapshotRepository;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
             IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService,
             ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
-            AuthorizationRepository authorizationRepository) {
+            AuthorizationRepository authorizationRepository, FraudDecisionRepository fraudDecisionRepository,
+            FeatureSnapshotRepository featureSnapshotRepository) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -74,6 +89,8 @@ public class PaymentIntentController {
         this.confirmDecisionEngine = confirmDecisionEngine;
         this.processorAdapter = processorAdapter;
         this.authorizationRepository = authorizationRepository;
+        this.fraudDecisionRepository = fraudDecisionRepository;
+        this.featureSnapshotRepository = featureSnapshotRepository;
     }
 
     @PostMapping
@@ -130,9 +147,18 @@ public class PaymentIntentController {
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
         PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
                 paymentMethod.getId(), idempotencyKey, attemptNumber));
+        FeatureSnapshotDraft featureSnapshotDraft = buildFeatureSnapshot(paymentIntent, paymentAttempt, paymentMethod);
+        Instant decisionStartedAt = Instant.now();
         ConfirmDecision decision = confirmDecisionEngine.decide(new ConfirmDecisionRequest(merchantContext.merchantId(),
                 paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(), paymentIntent.getAmount(),
-                paymentIntent.getCurrency()));
+                paymentIntent.getCurrency(), paymentIntent.getCaptureMethod(), paymentAttempt.getAttemptNumber(),
+                paymentMethod.getCardBin(), paymentMethod.getCardLast4(), paymentMethod.getCardCountry(),
+                paymentMethod.getCardFunding().name()));
+        Instant decisionCompletedAt = Instant.now();
+        long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
+        FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, featureSnapshotDraft,
+                decision, latencyMs, decisionStartedAt, decisionCompletedAt);
+        paymentAttempt.attachFraudDecision(fraudDecision.getId());
         applyConfirmDecision(paymentIntent, paymentAttempt, decision);
         ProcessorAuthorizationResult processorResult = processorAdapter.authorize(new ProcessorAuthorizationRequest(
                 merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(),
@@ -143,6 +169,59 @@ public class PaymentIntentController {
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
+    }
+
+    private FeatureSnapshotDraft buildFeatureSnapshot(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
+            PaymentMethod paymentMethod) {
+        Instant computedAt = Instant.now();
+        Map<String, Object> features = new LinkedHashMap<>();
+        features.put("payment_amount", paymentIntent.getAmount());
+        features.put("payment_currency", paymentIntent.getCurrency());
+        features.put("capture_method", paymentIntent.getCaptureMethod().name());
+        features.put("attempt_number", paymentAttempt.getAttemptNumber());
+        features.put("card_bin", paymentMethod.getCardBin());
+        features.put("card_last4", paymentMethod.getCardLast4());
+        features.put("card_country", paymentMethod.getCardCountry());
+        features.put("card_funding", paymentMethod.getCardFunding().name());
+        features.put("payment_intent_id", paymentIntent.getId().toString());
+        features.put("payment_attempt_id", paymentAttempt.getId().toString());
+        features.put("payment_method_id", paymentMethod.getId().toString());
+        requireFeatureSnapshotWithinStorageGuard(features);
+        long maxFeatureAgeMs = 0L;
+        return new FeatureSnapshotDraft(features, computedAt, computedAt, maxFeatureAgeMs,
+                FeatureFreshnessStatus.FRESH, List.of(), List.of());
+    }
+
+    private FraudDecision persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
+            FeatureSnapshotDraft featureSnapshotDraft, ConfirmDecision decision, long latencyMs,
+            Instant decisionStartedAt, Instant decisionCompletedAt) {
+        // IdempotencyService keeps lineage, attempt mutation, authorization, and completion in one transaction.
+        // A later failure rolls these writes back together instead of leaving partial confirm evidence.
+        FraudDecision fraudDecision = fraudDecisionRepository.save(new FraudDecision(merchantContext.merchantId(),
+                paymentAttempt.getId(), decision, latencyMs, decisionStartedAt, decisionCompletedAt,
+                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.maxFeatureAgeMs()));
+        featureSnapshotRepository.save(new FeatureSnapshot(merchantContext.merchantId(), fraudDecision.getId(),
+                paymentAttempt.getId(), featureSnapshotDraft.features(), featureSnapshotDraft.computedAt(),
+                featureSnapshotDraft.oldestFeatureTimestamp(), featureSnapshotDraft.maxFeatureAgeMs(),
+                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.staleFeatureNames(),
+                featureSnapshotDraft.missingFeatureNames()));
+        return fraudDecision;
+    }
+
+    private void requireFeatureSnapshotWithinStorageGuard(Map<String, Object> features) {
+        try {
+            byte[] serialized = FEATURE_SNAPSHOT_OBJECT_MAPPER.writeValueAsString(features)
+                    .getBytes(StandardCharsets.UTF_8);
+            if (serialized.length > MAX_FEATURE_SNAPSHOT_JSON_BYTES) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Feature snapshot exceeded safe storage limit");
+            }
+        } catch (ResponseStatusException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Feature snapshot could not be serialized", exception);
+        }
     }
 
     private void applyConfirmDecision(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
@@ -260,5 +339,10 @@ public class PaymentIntentController {
     }
 
     private record EmptyMutationRequest() {
+    }
+
+    private record FeatureSnapshotDraft(Map<String, Object> features, Instant computedAt,
+            Instant oldestFeatureTimestamp, long maxFeatureAgeMs, FeatureFreshnessStatus freshnessStatus,
+            List<String> staleFeatureNames, List<String> missingFeatureNames) {
     }
 }

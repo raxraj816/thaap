@@ -159,7 +159,7 @@ partial-refund accounting.
 `POST /payment_intents/{id}/confirm` creates the first durable scoring/audit
 unit for a payment flow: `PaymentAttempt`.
 
-The Chapter 11 confirm path:
+The Chapter 12 confirm path:
 
 - requires `Idempotency-Key`
 - accepts `paymentMethodId`
@@ -171,8 +171,16 @@ The Chapter 11 confirm path:
 - stores `payment_intent_id`, `payment_method_id`, `idempotency_key`, `status`,
   `attempt_number`, nullable fraud/processor/3DS fields, and timestamps
 - serializes attempt numbering with a pessimistic PaymentIntent row lock
-- calls a deterministic in-memory confirm decision engine that returns
-  `ALLOW` with reason code `RULES_NOT_ENABLED`
+- calls a deterministic in-memory confirm decision engine that returns `ALLOW`,
+  risk score `0.00`, risk level `LOW`, ruleset version `rules_stub_v1`, nullable
+  model version, and reason code `RULES_NOT_ENABLED`
+- persists a durable `FraudDecision` with action, risk score, risk level,
+  latency, ruleset version, reason codes, feature freshness status, and
+  decision timestamps
+- persists an immutable `FeatureSnapshot` with `features_v1`, safe
+  decision-time features, computed time, oldest feature timestamp, max feature
+  age, freshness status, and stale/missing feature names
+- attaches the `fraudDecisionId` to the PaymentAttempt
 - moves the PaymentAttempt from `CREATED` to `READY_FOR_PROCESSOR`
 - moves the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`
 - calls `ProcessorAdapter` only after an `ALLOW` decision
@@ -194,12 +202,17 @@ fingerprints, or merchant secrets.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 
-Durable `FraudDecision`, `FeatureSnapshot`, capture, ledgering, processor
-events, and audit logs remain deferred to the master-plan chapters that own
-those side effects. Chapter 11 deliberately does not persist the current thin
-`fraud_decisions` placeholder row. When FeatureSnapshot is implemented, it must
-include freshness metadata: computed time, oldest feature timestamp, max feature
-age, freshness status, stale feature names, and missing feature names.
+Capture, ledgering, processor events, and audit logs remain deferred to the
+master-plan chapters that own those side effects. Chapter 12 deliberately keeps
+the decision stub honest: it records `RULES_NOT_ENABLED` and nullable
+`modelVersion` rather than pretending real rules or model lineage exists.
+Processor simulator outcomes are stored on `Authorization.simulatorOutcomeCode`
+because they are produced after the fraud decision and represent processor
+truth, not fraud-decision reason truth.
+
+`GET /fraud/decisions` returns tenant-scoped decision summaries.
+`GET /fraud/decisions/{id}` returns a tenant-scoped decision plus its linked
+feature snapshot.
 
 ## Processor Simulator
 

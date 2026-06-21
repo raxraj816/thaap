@@ -50,6 +50,7 @@ public class PaymentAttempt {
     @Column(nullable = false)
     private int attemptNumber;
 
+    // Correlation pointer for API reads; durable ownership stays FraudDecision -> PaymentAttempt to avoid circular FKs.
     @Column(name = "fraud_decision_id")
     private UUID fraudDecisionId;
 
@@ -120,6 +121,18 @@ public class PaymentAttempt {
 
     public ThreeDsStatus getThreeDsStatus() {
         return threeDsStatus;
+    }
+
+    public void attachFraudDecision(UUID fraudDecisionId) {
+        if (status != PaymentAttemptStatus.CREATED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot attach fraud decision from status " + status);
+        }
+        if (this.fraudDecisionId != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentAttempt already has a fraud decision");
+        }
+        this.fraudDecisionId = fraudDecisionId;
+        this.updatedAt = Instant.now();
     }
 
     public void markReadyForProcessor() {

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -80,9 +81,10 @@ class PaymentIntentConfirmContractTests {
         assertThat(response.get("paymentMethodId").asText()).isEqualTo(paymentMethodId.toString());
         assertThat(response.get("status").asText()).isEqualTo("AUTHORIZED");
         assertThat(response.get("attemptNumber").asInt()).isEqualTo(1);
-        assertThat(response.get("fraudDecisionId").isNull()).isTrue();
+        assertThat(response.get("fraudDecisionId").isNull()).isFalse();
         assertThat(response.get("processorAuthorizationId").asText()).startsWith("auth_sim_");
         assertThat(response.get("threeDsStatus").isNull()).isTrue();
+        var fraudDecisionId = UUID.fromString(response.get("fraudDecisionId").asText());
 
         var stored = jdbcTemplate.queryForMap("""
                 SELECT merchant_id, payment_intent_id, payment_method_id, idempotency_key, status, attempt_number,
@@ -96,11 +98,42 @@ class PaymentIntentConfirmContractTests {
         assertThat(stored.get("IDEMPOTENCY_KEY")).isEqualTo("confirm-attempt-a");
         assertThat(stored.get("STATUS")).isEqualTo("AUTHORIZED");
         assertThat(stored.get("ATTEMPT_NUMBER")).isEqualTo(1);
-        assertThat(stored.get("FRAUD_DECISION_ID")).isNull();
+        assertThat(stored.get("FRAUD_DECISION_ID")).isEqualTo(fraudDecisionId);
         assertThat(stored.get("PROCESSOR_AUTHORIZATION_ID")).isEqualTo(response.get("processorAuthorizationId").asText());
         assertThat(stored.get("THREE_DS_STATUS")).isNull();
         assertThat(stored.get("CREATED_AT")).isNotNull();
         assertThat(stored.get("UPDATED_AT")).isNotNull();
+
+        var fraudDecision = fraudDecisionById(fraudDecisionId);
+        assertThat(fraudDecision.get("MERCHANT_ID")).isEqualTo(merchant.id());
+        assertThat(fraudDecision.get("PAYMENT_ATTEMPT_ID")).isEqualTo(paymentAttemptId);
+        assertThat(fraudDecision.get("RISK_SCORE").toString()).isEqualTo("0.0000");
+        assertThat(fraudDecision.get("RISK_LEVEL")).isEqualTo("LOW");
+        assertThat(fraudDecision.get("ACTION")).isEqualTo("ALLOW");
+        assertThat(fraudDecision.get("MODEL_VERSION")).isNull();
+        assertThat(fraudDecision.get("RULESET_VERSION")).isEqualTo("rules_stub_v1");
+        assertThat((Long) fraudDecision.get("LATENCY_MS")).isGreaterThanOrEqualTo(0L);
+        assertThat(fraudDecision.get("DECISION_STARTED_AT")).isNotNull();
+        assertThat(fraudDecision.get("DECISION_COMPLETED_AT")).isNotNull();
+        assertThat(fraudDecision.get("FEATURE_FRESHNESS_STATUS")).isEqualTo("FRESH");
+        assertThat(fraudDecision.get("MAX_FEATURE_AGE_MS")).isEqualTo(0L);
+        assertThat(fraudDecision.get("REASON_CODES")).isEqualTo("[\"RULES_NOT_ENABLED\"]");
+        assertThat(fraudDecision.get("CREATED_AT")).isNotNull();
+
+        var featureSnapshot = featureSnapshotForDecision(fraudDecisionId);
+        var featuresJson = featureSnapshot.get("FEATURES_JSON").toString();
+        assertThat(featureSnapshot.get("MERCHANT_ID")).isEqualTo(merchant.id());
+        assertThat(featureSnapshot.get("PAYMENT_ATTEMPT_ID")).isEqualTo(paymentAttemptId);
+        assertThat(featureSnapshot.get("FEATURE_VERSION")).isEqualTo("features_v1");
+        assertThat(featuresJson).contains("\"payment_amount\":1200");
+        assertThat(featuresJson).contains("\"payment_currency\":\"USD\"");
+        assertThat(featuresJson).contains("\"card_bin\":\"499999\"");
+        assertThat(featuresJson).doesNotContain("4999990000000001");
+        assertThat(featuresJson.getBytes(StandardCharsets.UTF_8).length)
+                .isLessThanOrEqualTo(PaymentIntentController.MAX_FEATURE_SNAPSHOT_JSON_BYTES);
+        assertThat(featureSnapshot.get("FRESHNESS_STATUS")).isEqualTo("FRESH");
+        assertThat(featureSnapshot.get("STALE_FEATURE_NAMES")).isEqualTo("[]");
+        assertThat(featureSnapshot.get("MISSING_FEATURE_NAMES")).isEqualTo("[]");
 
         var authorization = authorizationForAttempt(paymentAttemptId);
         assertThat(authorization.get("MERCHANT_ID")).isEqualTo(merchant.id());
@@ -124,9 +157,10 @@ class PaymentIntentConfirmContractTests {
         assertThat(fetched).isEqualTo(response);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
         assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
-        assertThat(countRows("fraud_decisions")).isZero();
     }
 
     @Test
@@ -178,8 +212,13 @@ class PaymentIntentConfirmContractTests {
         assertThat(authorization.get("AVS_POSTAL_CODE_CHECK")).isEqualTo(avsPostalCheck);
         assertThat(authorization.get("THREE_DS_RESULT")).isEqualTo("NOT_REQUIRED");
         assertThat(authorization.get("SIMULATOR_OUTCOME_CODE")).isEqualTo(responseCode);
+        assertThat(response.get("fraudDecisionId").isNull()).isFalse();
+        UUID fraudDecisionId = UUID.fromString(response.get("fraudDecisionId").asText());
+        assertThat(fraudDecisionById(fraudDecisionId).get("ACTION")).isEqualTo("ALLOW");
+        assertThat(featureSnapshotForDecision(fraudDecisionId).get("FEATURE_VERSION")).isEqualTo("features_v1");
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
-        assertThat(countRows("fraud_decisions")).isZero();
     }
 
     @Test
@@ -205,8 +244,10 @@ class PaymentIntentConfirmContractTests {
         assertThat(authorization.get("STATUS")).isEqualTo("REQUIRES_ACTION");
         assertThat(authorization.get("THREE_DS_RESULT")).isEqualTo("REQUIRED");
         assertThat(authorization.get("SIMULATOR_OUTCOME_CODE")).isEqualTo("THREE_DS_REQUIRED");
+        assertThat(response.get("fraudDecisionId").isNull()).isFalse();
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
-        assertThat(countRows("fraud_decisions")).isZero();
     }
 
     @Test
@@ -223,6 +264,8 @@ class PaymentIntentConfirmContractTests {
         assertThat(replay).isEqualTo(first);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
         assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
     }
@@ -244,6 +287,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(secondPaymentMethodId)))
                 .andExpect(status().isConflict());
         assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
     }
@@ -265,6 +310,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(paymentMethodId)))
                 .andExpect(status().isConflict());
         assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
     }
@@ -288,6 +335,8 @@ class PaymentIntentConfirmContractTests {
         assertThat(approved.get("attemptNumber").asInt()).isEqualTo(2);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
         assertThat(countRows("payment_attempts")).isEqualTo(2);
+        assertThat(countRows("fraud_decisions")).isEqualTo(2);
+        assertThat(countRows("feature_snapshots")).isEqualTo(2);
         assertThat(countRows("authorizations")).isEqualTo(2);
     }
 
@@ -310,6 +359,8 @@ class PaymentIntentConfirmContractTests {
 
             assertThat(statuses(firstResponse, secondResponse)).containsExactlyInAnyOrder(201, 409);
             assertThat(countRows("payment_attempts")).isEqualTo(1);
+            assertThat(countRows("fraud_decisions")).isEqualTo(1);
+            assertThat(countRows("feature_snapshots")).isEqualTo(1);
             assertThat(countRows("authorizations")).isEqualTo(1);
             assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
         } finally {
@@ -332,6 +383,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(paymentMethodId)))
                 .andExpect(status().isConflict());
         assertThat(countRows("payment_attempts")).isZero();
+        assertThat(countRows("fraud_decisions")).isZero();
+        assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
     }
 
@@ -351,6 +404,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(paymentMethodB)))
                 .andExpect(status().isNotFound());
         assertThat(countRows("payment_attempts")).isZero();
+        assertThat(countRows("fraud_decisions")).isZero();
+        assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
     }
 
@@ -370,6 +425,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(paymentMethodB)))
                 .andExpect(status().isNotFound());
         assertThat(countRows("payment_attempts")).isZero();
+        assertThat(countRows("fraud_decisions")).isZero();
+        assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
     }
 
@@ -388,6 +445,8 @@ class PaymentIntentConfirmContractTests {
                         .content(confirmBody(paymentMethodB)))
                 .andExpect(status().isNotFound());
         assertThat(countRows("payment_attempts")).isZero();
+        assertThat(countRows("fraud_decisions")).isZero();
+        assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
     }
 
@@ -561,6 +620,26 @@ class PaymentIntentConfirmContractTests {
                 FROM authorizations
                 WHERE payment_attempt_id = ?
                 """, paymentAttemptId);
+    }
+
+    private java.util.Map<String, Object> fraudDecisionById(UUID fraudDecisionId) {
+        return jdbcTemplate.queryForMap("""
+                SELECT merchant_id, payment_attempt_id, risk_score, risk_level, action, model_version, ruleset_version,
+                       latency_ms, decision_started_at, decision_completed_at, feature_freshness_status,
+                       max_feature_age_ms, reason_codes, created_at
+                FROM fraud_decisions
+                WHERE id = ?
+                """, fraudDecisionId);
+    }
+
+    private java.util.Map<String, Object> featureSnapshotForDecision(UUID fraudDecisionId) {
+        return jdbcTemplate.queryForMap("""
+                SELECT merchant_id, fraud_decision_id, payment_attempt_id, feature_version, features_json, computed_at,
+                       oldest_feature_timestamp, max_feature_age_ms, freshness_status, stale_feature_names,
+                       missing_feature_names, created_at
+                FROM feature_snapshots
+                WHERE fraud_decision_id = ?
+                """, fraudDecisionId);
     }
 
     private int countWebhookDeliveries(String eventType) {
