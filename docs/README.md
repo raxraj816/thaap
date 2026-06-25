@@ -26,6 +26,15 @@ Daily implementation learning notes live here:
 - [learning/README.md](./learning/README.md)
 - [learning/DAILY_NOTE_TEMPLATE.md](./learning/DAILY_NOTE_TEMPLATE.md)
 
+## Technical Blog
+
+Weekly public-facing technical posts are drafted from the learning trail here:
+
+- [blog/README.md](./blog/README.md)
+- [blog/POST_TEMPLATE.md](./blog/POST_TEMPLATE.md)
+- [blog/EDITORIAL_RUBRIC.md](./blog/EDITORIAL_RUBRIC.md)
+- [blog/TOPIC_BACKLOG.md](./blog/TOPIC_BACKLOG.md)
+
 ## Reference Material
 
 Use these only for background, deeper reasoning, or source traceability:
@@ -47,6 +56,7 @@ Use these only for background, deeper reasoning, or source traceability:
 - Put durable architecture decisions under `adr/`.
 - Put Mermaid diagram sources under `diagrams/`.
 - Put daily implementation learning notes under `learning/daily/`.
+- Put weekly public technical writing under `blog/`.
 - Put research notes under `references/research/`.
 - Put PDFs, images, exported link lists, and other source artifacts under `references/source-materials/`.
 - Do not create competing implementation plans outside the master plan.
