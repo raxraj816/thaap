@@ -71,6 +71,31 @@ Check that the weekly architecture review and growth-tracking artifacts exist:
 scripts/learning-week-check.sh
 ```
 
+## Technical Blog Workflow
+
+Create a weekly technical blog draft from the post template:
+
+```bash
+scripts/blog-week-start.sh YYYY-WNN short-slug
+```
+
+Example:
+
+```bash
+scripts/blog-week-start.sh 2026-W25 why-fraud-systems-need-explainable-intelligence
+```
+
+Drafts live in `docs/blog/drafts/` and should be checked against
+`docs/blog/WEEKLY_BLOG_CHECKLIST.md` before moving to `docs/blog/published/`.
+
+Check public drafts for private product names, repo paths, branches, commits,
+and build-status language:
+
+```bash
+scripts/blog-public-check.sh
+scripts/blog-public-check.sh docs/blog/drafts/YYYY-WNN-short-slug.md
+```
+
 ## Commit Readiness
 
 Run the commit-readiness gate before saying a change is ready to commit:
