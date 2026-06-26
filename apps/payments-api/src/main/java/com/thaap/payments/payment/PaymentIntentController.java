@@ -17,9 +17,12 @@ import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
+import com.thaap.payments.ledger.LedgerEntry;
+import com.thaap.payments.ledger.LedgerService;
 import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
 import com.thaap.payments.paymentattempt.PaymentAttemptResponse;
+import com.thaap.payments.paymentattempt.PaymentAttemptStatus;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.processor.ProcessorAdapter;
@@ -80,6 +83,7 @@ public class PaymentIntentController {
     private final FraudDecisionRepository fraudDecisionRepository;
     private final FeatureSnapshotRepository featureSnapshotRepository;
     private final AuditLogService auditLogService;
+    private final LedgerService ledgerService;
     private final int maxFeatureSnapshotJsonBytes;
     private final Counter featureSnapshotTooLargeCounter;
     private final Counter featureSnapshotSerializationErrorCounter;
@@ -90,7 +94,7 @@ public class PaymentIntentController {
             ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
             AuthorizationRepository authorizationRepository, FraudDecisionRepository fraudDecisionRepository,
             FeatureSnapshotRepository featureSnapshotRepository, AuditLogService auditLogService,
-            MeterRegistry meterRegistry,
+            LedgerService ledgerService, MeterRegistry meterRegistry,
             @Value("${thaap.fraud.feature-snapshot.max-json-bytes:16384}") int maxFeatureSnapshotJsonBytes) {
         if (maxFeatureSnapshotJsonBytes <= 0) {
             throw new IllegalArgumentException("thaap.fraud.feature-snapshot.max-json-bytes must be positive");
@@ -107,6 +111,7 @@ public class PaymentIntentController {
         this.fraudDecisionRepository = fraudDecisionRepository;
         this.featureSnapshotRepository = featureSnapshotRepository;
         this.auditLogService = auditLogService;
+        this.ledgerService = ledgerService;
         this.maxFeatureSnapshotJsonBytes = maxFeatureSnapshotJsonBytes;
         this.featureSnapshotTooLargeCounter = meterRegistry.counter("thaap.feature.snapshot.too_large");
         this.featureSnapshotSerializationErrorCounter = meterRegistry.counter(
@@ -319,10 +324,37 @@ public class PaymentIntentController {
     @PostMapping("/{id}/capture")
     public ResponseEntity<PaymentIntentResponse> capturePaymentIntent(MerchantContext merchantContext,
             @PathVariable UUID id,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpServletRequest) {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.capture:" + id,
-                new EmptyMutationRequest(), PaymentIntentResponse.class, () -> mutatePaymentIntent(merchantContext, id,
-                        PaymentIntent::capture, "payment_intent.captured"));
+                new EmptyMutationRequest(), PaymentIntentResponse.class,
+                () -> capturePaymentIntentOnce(merchantContext, id, requestIdFrom(httpServletRequest)));
+    }
+
+    protected ResponseEntity<PaymentIntentResponse> capturePaymentIntentOnce(MerchantContext merchantContext, UUID id,
+            String requestId) {
+        PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
+        PaymentIntentStatus startingStatus = paymentIntent.getStatus();
+        if (startingStatus != PaymentIntentStatus.REQUIRES_CAPTURE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be captured from status " + startingStatus);
+        }
+        Authorization authorization = latestApprovedAuthorization(merchantContext, id);
+        if (!authorization.getCurrency().equals(paymentIntent.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Approved authorization currency does not match PaymentIntent");
+        }
+        if (authorization.getAuthorizedAmount() != paymentIntent.getAmount()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Approved authorization amount does not match PaymentIntent");
+        }
+        LedgerService.CaptureLedgerResult ledgerResult = ledgerService.recordCapture(merchantContext.merchantId(),
+                paymentIntent.getId(), authorization.getAuthorizedAmount(), authorization.getCurrency());
+        paymentIntent.capture();
+        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.captured",
+                paymentIntent.getId());
+        recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult);
+        return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
     }
 
     @PostMapping("/{id}/cancel")
@@ -332,6 +364,40 @@ public class PaymentIntentController {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.cancel:" + id,
                 new EmptyMutationRequest(), PaymentIntentResponse.class, () -> mutatePaymentIntent(merchantContext, id,
                         PaymentIntent::cancel, "payment_intent.canceled"));
+    }
+
+    private Authorization latestApprovedAuthorization(MerchantContext merchantContext, UUID paymentIntentId) {
+        return authorizationRepository.findApprovedAuthorizationsForPaymentIntent(merchantContext.merchantId(),
+                        paymentIntentId, PaymentAttemptStatus.AUTHORIZED, AuthorizationStatus.APPROVED)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                        "PaymentIntent does not have an approved authorization to capture"));
+    }
+
+    private void recordCaptureAuditLog(MerchantContext merchantContext, String requestId,
+            PaymentIntentStatus startingStatus, PaymentIntent paymentIntent, Authorization authorization,
+            LedgerService.CaptureLedgerResult ledgerResult) {
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("paymentIntentId", paymentIntent.getId().toString());
+        before.put("status", startingStatus.name());
+        before.put("amount", paymentIntent.getAmount());
+        before.put("currency", paymentIntent.getCurrency());
+
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("paymentIntentId", paymentIntent.getId().toString());
+        after.put("status", paymentIntent.getStatus().name());
+        after.put("captureAmount", authorization.getAuthorizedAmount());
+        after.put("currency", authorization.getCurrency());
+        after.put("authorizationId", authorization.getId().toString());
+        after.put("transactionGroupId", ledgerResult.transactionGroupId().toString());
+        after.put("ledgerEntryIds", ledgerResult.entries().stream()
+                .map(LedgerEntry::getId)
+                .map(UUID::toString)
+                .toList());
+        auditLogService.recordMerchantApiAction(merchantContext, requestId, "payment_intent.captured",
+                "payment_intent", paymentIntent.getId(), "PaymentIntent captured with balanced ledger entries",
+                before, after);
     }
 
     protected ResponseEntity<PaymentIntentResponse> mutatePaymentIntent(MerchantContext merchantContext, UUID id,

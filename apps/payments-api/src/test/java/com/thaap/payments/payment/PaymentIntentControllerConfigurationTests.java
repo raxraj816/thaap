@@ -11,6 +11,7 @@ import com.thaap.payments.fraud.ConfirmDecisionEngine;
 import com.thaap.payments.fraud.FeatureSnapshotRepository;
 import com.thaap.payments.fraud.FraudDecisionRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
+import com.thaap.payments.ledger.LedgerService;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.processor.ProcessorAdapter;
@@ -49,6 +50,7 @@ class PaymentIntentControllerConfigurationTests {
                 mock(FraudDecisionRepository.class),
                 mock(FeatureSnapshotRepository.class),
                 mock(AuditLogService.class),
+                mock(LedgerService.class),
                 new SimpleMeterRegistry(),
                 maxFeatureSnapshotJsonBytes);
     }

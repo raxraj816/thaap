@@ -1723,6 +1723,74 @@ Done when:
 - Invalid status transitions fail.
 - Synthetic data can generate repeatable happy-path, decline, and basic fraud scenarios.
 
+Current completion state:
+
+- Merchant creation, customer creation, simulated card payment method creation,
+  PaymentIntent creation, PaymentAttempt creation on confirm, idempotency replay,
+  and basic state transitions are implemented and covered by contract tests.
+- Chapter 15 capture with balanced ledger entries has already been pulled forward
+  and implemented in the current worktree.
+- Phase 1 is not complete until the synthetic data generator v1 requirement is
+  implemented. This is a Phase 1 closure chapter before additional Phase 2
+  chapters continue.
+
+Phase 1 closure chapter:
+
+1. Chapter 16: Synthetic Scenario Generator V1.
+
+   Build:
+
+   - A deterministic local generator for repeatable payment-core scenarios.
+   - Scenario families for:
+     - happy-path approved authorization
+     - retryable processor decline
+     - basic card-testing or suspicious repeated-attempt pattern
+   - Generated merchants, customers, simulated card payment methods,
+     PaymentIntents, and confirms through the public API rather than direct
+     database writes.
+   - A seed or run identifier so a founder, engineer, or future model pipeline
+     can reproduce the same scenario structure.
+   - A sanitized summary artifact containing merchant IDs, PaymentIntent IDs,
+     PaymentAttempt IDs, scenario labels, final statuses, fraud decision IDs,
+     and processor outcome codes.
+   - Documentation for how to run the generator locally and how to interpret the
+     output.
+
+   Invariants:
+
+   - Generated data must be tenant-scoped; one generated merchant cannot read or
+     mutate another generated merchant's objects.
+   - Generator runs must not persist raw PAN, CVV, raw buyer email, raw phone,
+     API keys, idempotency hashes, or internal card fingerprints in summary
+     output.
+   - Generated scenarios must use the same public API path as demos and tests so
+     generated truth exercises merchant auth, idempotency, validation,
+     PaymentIntent lifecycle, PaymentAttempt creation, processor simulation, and
+     fraud lineage.
+   - Same seed and scenario config must create the same scenario labels, card
+     fixture choices, and expected outcome classes.
+   - Decline and suspicious scenarios must not create false capture or ledger
+     truth.
+
+   Required proof:
+
+   - Generator smoke test or script verification for approved, decline, and
+     basic suspicious/card-testing scenario families.
+   - Determinism test for scenario plan output from the same seed.
+   - Tenant isolation check across generated merchants.
+   - Sensitive-data scan of generator summary output.
+   - README or script docs showing exact local command usage.
+   - Learning note explaining why synthetic payment data is Phase 1 product
+     infrastructure for fraud/ML, not later polish.
+
+   Defer:
+
+   - Large-scale volume generation, delayed fraud labels, chargeback labels,
+     graph-ring synthesis, model-training datasets, and offline replay reports to
+     later fraud/ML chapters.
+   - Direct database seeding unless a future data-pipeline chapter needs it;
+     Chapter 16 should prove the public payment core loop first.
+
 ### Phase 2: Processor, Capture, Refund, Ledger, Webhooks
 
 Build:
@@ -1737,6 +1805,247 @@ Build:
 - Webhook endpoint and delivery records.
 - AuditLog MVP for capture, cancel/void, refund, ledger, and webhook endpoint
   actions.
+
+Completed chapter:
+
+- Chapter 15 adds full-amount capture from `REQUIRES_CAPTURE` after a
+  tenant-scoped approved authorization.
+- Capture writes a balanced ledger transaction group with debit
+  `CUSTOMER_RECEIVABLE` and credit `MERCHANT_PAYABLE`.
+- Capture state change, ledger entries, webhook delivery records, audit log, and
+  idempotency completion share one transaction boundary.
+- The ledger schema requires capture source rows to reference a same-merchant
+  PaymentIntent and blocks duplicate capture account postings.
+- `GET /ledger/entries` exposes safe tenant-scoped ledger rows through a bounded
+  read API.
+
+Remaining Phase 2 work:
+
+- Cancel/void authorization semantics after processor approval.
+- Refund ledger entries and refund object truth.
+- Fees, payout settlement, disputes, and chargeback ledger groups.
+- Webhook delivery execution/retry behavior beyond delivery records.
+
+Detailed Phase 2 chapter plan:
+
+1. Chapter 15: Capture With Balanced Ledger Entries.
+
+   Status: complete in the current implementation chapter.
+
+   Build:
+
+   - Full-amount `POST /payment_intents/{id}/capture` from
+     `REQUIRES_CAPTURE`.
+   - Approved tenant-scoped authorization lookup before capture.
+   - Append-only capture ledger group.
+   - Database-backed ledger source integrity for capture rows.
+   - `GET /ledger/entries` for bounded tenant-scoped ledger inspection.
+   - `payment_intent.captured` webhook delivery records.
+   - Safe `payment_intent.captured` audit log.
+
+   Invariants:
+
+   - No captured PaymentIntent without an approved authorization.
+   - No captured PaymentIntent without balanced debit and credit ledger entries.
+   - Capture ledger rows must reference a same-merchant PaymentIntent source.
+   - One capture source cannot post the same ledger account row twice.
+   - Capture state, ledger rows, webhook delivery records, audit log, and
+     idempotency completion succeed or roll back together.
+   - Idempotent replay must not duplicate money, webhook, or audit truth.
+   - Merchant A must not capture or inspect Merchant B's payment or ledger rows.
+   - Ledger listing must be bounded so merchant financial history is not exposed
+     through an unbounded query.
+
+   Required proof:
+
+   - Approved capture contract test.
+   - Balanced ledger entry test.
+   - Database constraint test for orphan source, cross-merchant source,
+     duplicate account row, and invalid capture account/direction pair.
+   - Idempotent replay test.
+   - Double-capture rejection test.
+   - Declined and 3DS-required capture rejection tests.
+   - Cross-merchant capture and ledger-read rejection tests.
+   - Bounded ledger-read test.
+   - Rollback test proving ledger persistence failure leaves no captured state.
+
+   Defer:
+
+   - Partial capture, fees, reserves, payouts, disputes, and refund ledger groups.
+
+2. Chapter 17: Cancel/Void Authorization Semantics.
+
+   Chapter 17 starts by hardening capture-method semantics before refund work:
+   `MANUAL` PaymentIntents keep the separate capture call, while `AUTOMATIC`
+   PaymentIntents must either capture during approved confirm or move through a
+   clearly owned automatic-capture orchestration. This is not part of the Chapter
+   15 ledger fix because it changes confirm behavior, audit/webhook truth,
+   idempotency, and the PaymentIntent response contract.
+
+   Build:
+
+   - Distinguish `AUTOMATIC` from `MANUAL` capture behavior after approved
+     authorization.
+   - Harden `POST /payment_intents/{id}/cancel` for uncaptured payment states.
+   - Distinguish pre-authorization cancellation from post-authorization void.
+   - Persist enough void/cancel evidence to prove an approved authorization can no
+     longer be captured after cancellation.
+   - Write safe `payment_intent.canceled` audit logs with before/after state and
+     authorization context when present.
+   - Emit `payment_intent.canceled` webhook delivery records without duplication.
+
+   Invariants:
+
+   - A captured, refunded, disputed, failed, or already canceled PaymentIntent
+     cannot be canceled.
+   - `MANUAL` capture is the only capture method allowed to wait in
+     `REQUIRES_CAPTURE` for the public capture endpoint.
+   - `AUTOMATIC` capture must not silently behave like manual capture; its
+     capture, ledger, webhook, audit, and idempotency truth must be explicit.
+   - A canceled approved authorization cannot later be captured.
+   - Cancel from `REQUIRES_CONFIRMATION` does not invent processor truth.
+   - Cancel from `REQUIRES_CAPTURE` records void intent against the approved
+     authorization before the payment becomes terminally canceled.
+   - Cancel, webhook delivery record, audit log, and idempotency completion share
+     one transaction boundary.
+   - Tenant isolation applies to cancel, void evidence, audit rows, and webhook
+     delivery rows.
+
+   Required proof:
+
+   - Cancel before confirm succeeds and creates safe audit/webhook truth.
+   - Approved `MANUAL` confirm remains eligible for the separate capture endpoint.
+   - Approved `AUTOMATIC` confirm follows the documented automatic-capture
+     behavior and does not leave ambiguous manual-capture eligibility.
+   - Cancel after approved authorization succeeds and blocks later capture.
+   - Cancel after decline or 3DS-required follows the documented product rule.
+   - Cancel after capture/refund/dispute is rejected.
+   - Idempotent replay returns the original canceled response.
+   - Changed-body or operation mismatch on the same idempotency key returns `409`.
+   - Cross-merchant cancel is rejected.
+   - Rollback test proves a webhook/audit failure does not leave false canceled
+     state.
+
+   Defer:
+
+   - Real network reversal APIs until a real PSP integration exists.
+   - Partial voids because THAAP has not introduced partial capture yet.
+
+3. Chapter 18: Refund Object Truth And Refund Ledger Entries.
+
+   Build:
+
+   - Replace the current refund state guard with a real refund mutation path.
+   - Create durable refund truth for a full captured PaymentIntent refund.
+   - Add refund ledger group entries that reverse capture accounting.
+   - Emit `refund.created` and/or `payment_intent.refunded` webhook delivery
+     records.
+   - Write safe refund audit logs with payment, refund, authorization, and ledger
+     references.
+
+   Invariants:
+
+   - Refund is allowed only after capture.
+   - V1 refund amount must equal the captured PaymentIntent amount until partial
+     refund accounting exists.
+   - Refund ledger entries must balance and must reference the original captured
+     payment.
+   - Refund state, refund record, ledger rows, webhook delivery records, audit
+     log, and idempotency completion succeed or roll back together.
+   - Double refund and over-refund are rejected.
+   - Refunds must not mutate or rewrite the original FraudDecision.
+
+   Required proof:
+
+   - Full refund after capture succeeds.
+   - Refund before capture, after cancel, after decline, and after 3DS-required
+     are rejected.
+   - Balanced refund ledger entries test.
+   - Idempotent refund replay test.
+   - Double-refund and over-refund rejection tests.
+   - Tenant isolation tests for refund mutation and refund/ledger reads.
+   - Rollback test proving ledger persistence failure leaves no refunded state.
+
+   Defer:
+
+   - Partial refunds, refund reasons taxonomy, refund review approval, fee
+     reversal, dispute offsets, and external acquirer refund calls.
+
+4. Chapter 19: Webhook Delivery Execution And Retry Behavior.
+
+   Build:
+
+   - Add a delivery executor that claims due `PENDING` or retryable deliveries.
+   - Sign outgoing payloads with stored webhook signing secrets.
+   - Record attempt count, last attempt time, next attempt time, final success,
+     and safe failure reason.
+   - Add deterministic retry/backoff behavior for local tests.
+   - Add operational counters for attempts, successes, failures, exhausted
+     retries, and delivery latency.
+
+   Invariants:
+
+   - Creating a delivery record is not the same as delivering the webhook.
+   - One delivery attempt must be claimed by only one worker at a time.
+   - Retry must not create duplicate delivery truth for the same delivery row.
+   - Delivery payloads must not expose raw PAN, CVV, API keys, card fingerprints,
+     idempotency hashes, email, or phone.
+   - Webhook execution must not roll back already committed payment truth.
+   - Failed webhook delivery must be observable and retryable without changing
+     payment, fraud, or ledger state.
+
+   Required proof:
+
+   - Successful delivery moves a row to `SUCCEEDED`.
+   - Transient failure increments attempt count and schedules retry.
+   - Exhausted retries move a row to terminal `FAILED`.
+   - Duplicate worker claim/concurrency test.
+   - Signature verification test using the stored signing secret boundary.
+   - Payload redaction test.
+   - Tenant-scoped listing still hides other merchants' deliveries.
+
+   Defer:
+
+   - Kafka/outbox, dead-letter queues, endpoint rate limits, and merchant-facing
+     replay controls until local delivery semantics are proven.
+
+5. Chapter 20: Deterministic Processor Edge Cases And Replayable Demo
+   evidence.
+
+   Build:
+
+   - Expand the simulator catalog into a documented processor fixture contract.
+   - Cover approved, issuer decline, insufficient funds, suspected fraud, CVC
+     failure, AVS line1 failure, AVS postal failure, 3DS-required, and unknown
+     simulator card approval.
+   - Add demo commands or a small scenario runner for the major processor paths.
+   - Record sanitized evidence showing payment status, attempt status,
+     authorization response, fraud lineage, audit log, webhook delivery record,
+     and ledger effect where applicable.
+
+   Invariants:
+
+   - Processor outcomes are processor truth, not fraud-decision reason truth.
+   - Declines and verification failures must not create capture eligibility.
+   - 3DS-required must not create capture or ledger truth before challenge
+     completion exists.
+   - Unknown simulator cards must follow the documented default behavior.
+   - Every processor outcome must remain tenant-scoped, idempotent, and
+     replayable.
+
+   Required proof:
+
+   - Contract tests for each deterministic card path.
+   - Demo evidence for approved, decline, and 3DS-required paths.
+   - Regression test proving declined/3DS paths cannot be captured, canceled, or
+     refunded contrary to the documented state machine.
+   - Audit and lineage tests proving safe payloads across processor edge cases.
+
+   Defer:
+
+   - Real network error taxonomy, asynchronous processor callbacks, challenge
+     completion, and acquirer reconciliation until the simulator contract is
+     stable.
 
 Done when:
 
@@ -2653,7 +2962,7 @@ Deliver:
   state.
 - Update service README and architecture docs if implementation changed source
   of truth decisions.
-- Create the next detailed sprint plan for Phase 2:
+- Create the next detailed chapter plan for Phase 2:
   - capture
   - cancel/void
   - refund
@@ -2661,6 +2970,19 @@ Deliver:
   - webhook delivery retry behavior
   - deterministic processor edge cases
 - Run the full backend test suite and commit readiness checklist.
+
+Current completion evidence:
+
+- The clean local database Chapter 13 demo evidence is recorded in
+  `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
+- The Phase 1 closure chapter plan is recorded in the Phase 1 roadmap section
+  above as Chapter 16: Synthetic Scenario Generator V1.
+- The next detailed Phase 2 chapter plan is recorded in the Phase 2 roadmap
+  section above. It covers capture, cancel/void, refund ledgering, webhook
+  delivery retry behavior, and deterministic processor edge cases with
+  invariants, required proof, and deferrals.
+- Chapter 15 was pulled forward and implemented as capture with balanced ledger
+  entries.
 
 Done when:
 
