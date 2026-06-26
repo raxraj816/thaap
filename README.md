@@ -8,9 +8,11 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 13 is complete. Confirm now produces deterministic processor
-authorization outcomes, durable fraud lineage, and safe audit records, with
-ledger side effects still intentionally deferred to their owner chapters:
+Chapter 15 is complete. Confirm now produces deterministic processor
+authorization outcomes, durable fraud lineage, and safe audit records, and an
+approved authorization can be captured with balanced double-entry ledger
+evidence. Before continuing to the next Phase 2 money-movement chapter, Chapter
+16 closes the missing Phase 1 synthetic scenario generator requirement:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -104,11 +106,26 @@ ledger side effects still intentionally deferred to their owner chapters:
   transition, processor rollback, and snapshot rollback paths create the right
   audit records without leaking raw card input, raw PII, API keys, card
   fingerprints, or idempotency hashes.
+- `POST /payment_intents/{id}/capture` now requires a tenant-scoped approved
+  authorization, records a balanced capture ledger group, moves the
+  PaymentIntent to `CAPTURED`, creates `payment_intent.captured` webhook
+  delivery records, and writes a safe capture audit log inside the same
+  idempotent transaction.
+- `GET /ledger/entries` returns tenant-scoped safe ledger rows for the current
+  merchant, ordered newest first, through a bounded read API.
+- Capture contract tests prove approved capture, balanced debit/credit ledger
+  entries, idempotent replay without duplicate ledger/webhook/audit truth,
+  database rejection of orphan or duplicate capture ledger truth, double-capture
+  rejection, invalid declined/3DS states, tenant isolation, and rollback when
+  ledger persistence fails.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
-- Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`
-  while capture/refund are rejected before authorization/capture eligibility.
+- Chapter 14 clean local demo evidence is recorded in
+  `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
+- Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`,
+  capture is rejected before authorization, and refund is rejected before
+  capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 

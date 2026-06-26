@@ -73,6 +73,7 @@ Implemented tenant-scoped endpoints:
 - `POST /payment_intents/{id}/capture`
 - `POST /payment_intents/{id}/cancel`
 - `POST /refunds`
+- `GET /ledger/entries`
 - `POST /webhook_endpoints`
 - `GET /webhook_deliveries`
 - `GET /fraud/decisions`
@@ -148,11 +149,11 @@ Current guards:
   whose amount equals the captured PaymentIntent amount
 - terminal or incompatible states return `409 conflict`
 
-This intentionally makes immediate capture/refund after create invalid. Later
-processor and capture chapters will move PaymentIntents into `REQUIRES_CAPTURE`
-or `CAPTURED` through reviewed side effects instead of test shortcuts. Later
-refund/ledger chapters will replace the full-refund-only V1 guard with durable
-partial-refund accounting.
+This intentionally makes immediate capture/refund after create invalid. Confirm
+with an approved simulator authorization moves a PaymentIntent into
+`REQUIRES_CAPTURE`; the capture endpoint then owns the reviewed side effect
+that moves it to `CAPTURED`. Later refund/ledger chapters will replace the
+full-refund-only V1 guard with durable partial-refund accounting.
 
 ## PaymentIntent Confirm And PaymentAttempt Contract
 
@@ -232,10 +233,9 @@ but the surrounding transaction rolls back or cannot commit.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 
-Capture, ledgering, and processor events remain deferred to the master-plan
-chapters that own those side effects. Chapter 13 deliberately keeps the
-decision stub honest: it records `RULES_NOT_ENABLED` and nullable `modelVersion`
-rather than pretending real rules or model lineage exists.
+Chapter 13 deliberately keeps the decision stub honest: it records
+`RULES_NOT_ENABLED` and nullable `modelVersion` rather than pretending real
+rules or model lineage exists.
 Processor simulator outcomes are stored on `Authorization.simulatorOutcomeCode`
 because they are produced after the fraud decision and represent processor
 truth, not fraud-decision reason truth.
@@ -275,6 +275,46 @@ authorizations set `authorized_amount` to the requested amount; declined and
 3DS-required simulator outcomes set `authorized_amount` to `0` because no funds
 are reserved yet.
 
+## Capture And Ledger Contract
+
+`POST /payment_intents/{id}/capture` is the Chapter 15 money-truth chapter.
+It requires `Idempotency-Key`, loads the PaymentIntent through merchant scope
+with a row lock, requires status `REQUIRES_CAPTURE`, and requires a
+tenant-scoped approved `Authorization` from an authorized PaymentAttempt.
+
+Capture is full-amount only in this chapter. Inside the same idempotent
+transaction, the API:
+
+- writes one balanced ledger transaction group with two append-only entries:
+  debit `CUSTOMER_RECEIVABLE` and credit `MERCHANT_PAYABLE`
+- moves the PaymentIntent to `CAPTURED`
+- creates `payment_intent.captured` webhook delivery records for active
+  endpoints
+- writes a safe `payment_intent.captured` audit log with the authorization ID,
+  ledger transaction group ID, and ledger entry IDs
+
+If ledger persistence, webhook creation, audit persistence, or idempotency
+completion fails, the capture state change rolls back. Idempotent replay of the
+same capture key returns the original response without duplicating ledger
+entries, webhook deliveries, or audit logs. A different idempotency key after
+capture returns `409`.
+
+`GET /ledger/entries` returns only the current merchant's safe ledger fields:
+entry ID, transaction group ID, source type, source ID, account, direction,
+amount, currency, and creation time. It does not expose another merchant's
+ledger rows. The endpoint defaults to 50 rows and rejects limits above 100 so
+merchant financial history cannot accidentally become an unbounded read path.
+
+The V5 schema also protects capture ledger truth at the database layer:
+`ledger_entries.source_id` must reference a same-merchant PaymentIntent for the
+current `PAYMENT_INTENT_CAPTURE` source type, valid capture rows are limited to
+the two Chapter 15 account/direction pairs, and the same capture source cannot
+post the same account row twice.
+
+Refunds still use the earlier full-refund-only lifecycle guard and do not yet
+write refund ledger entries. Fees, disputes, payout settlement, partial
+capture, and partial refunds remain deferred to later ledger chapters.
+
 ## Database Migrations
 
 The API schema is managed by Flyway from `src/main/resources/db/migration`.
@@ -291,8 +331,9 @@ capture method storage, and hot lookup indexes such as
 `(merchant_id, idempotency_key)` and `(merchant_id, status)` for idempotency
 records.
 
-Chapter 11 authorizations are added through a follow-on Flyway migration. Do
-not edit an already-applied migration to add new durable product truth.
+Chapter 11 authorizations are added through a follow-on Flyway migration. V5
+adds append-only `ledger_entries` for capture accounting. Do not edit an
+already-applied migration to add new durable product truth.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally
@@ -309,9 +350,9 @@ operational rollout:
   `thaap.audit.logs.created`, `thaap.feature.snapshot.too_large`, and
   `thaap.feature.snapshot.serialization_errors`
 
-The current V4 migration creates a new table, so it does not index an existing
-large payment table. The production rule still matters because later fraud,
-ledger, and audit migrations will touch hotter tables.
+The current V4 and V5 migrations create new tables, so they do not index an
+existing large payment table. The production rule still matters because later
+refund, dispute, fee, ledger, and audit migrations will touch hotter tables.
 
 Chapters 1-3 local databases were created with temporary Hibernate scaffolding. If
 that local PostgreSQL volume still exists, reset it before first Flyway startup:

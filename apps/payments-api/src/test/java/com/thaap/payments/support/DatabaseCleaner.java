@@ -9,6 +9,7 @@ public class DatabaseCleaner {
     private static final String[] TABLES = {
             "audit_logs",
             "webhook_deliveries",
+            "ledger_entries",
             "authorizations",
             "feature_snapshots",
             "fraud_decisions",

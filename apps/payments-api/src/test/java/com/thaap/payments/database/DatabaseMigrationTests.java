@@ -101,11 +101,19 @@ class DatabaseMigrationTests {
                   AND description = 'add audit logs'
                   AND success = TRUE
                 """, Integer.class);
+        var ledgerSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '5'
+                  AND description = 'add ledger entries'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
         assertThat(fraudLineageSchema).isEqualTo(1);
         assertThat(auditLogSchema).isEqualTo(1);
+        assertThat(ledgerSchema).isEqualTo(1);
     }
 
     @Test
@@ -123,6 +131,7 @@ class DatabaseMigrationTests {
                 "fraud_decisions",
                 "feature_snapshots",
                 "audit_logs",
+                "ledger_entries",
                 "fraud_rules",
                 "review_cases");
 
@@ -155,6 +164,10 @@ class DatabaseMigrationTests {
         assertIndexExists("audit_logs", "idx_audit_logs_merchant_action_created");
         assertIndexExists("audit_logs", "idx_audit_logs_merchant_aggregate");
         assertIndexExists("audit_logs", "idx_audit_logs_request_id");
+        assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_created");
+        assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_group");
+        assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_source");
+        assertIndexExists("ledger_entries", "uk_ledger_entries_capture_account");
         assertIndexExists("fraud_rules", "idx_fraud_rules_merchant_created");
         assertIndexExists("review_cases", "idx_review_cases_merchant_created");
 
@@ -179,6 +192,8 @@ class DatabaseMigrationTests {
         assertThat(columnNames("audit_logs")).contains("merchant_id", "actor_type", "actor_id", "action",
                 "aggregate_type", "aggregate_id", "request_id", "trace_id", "reason", "before_json",
                 "after_json", "created_at");
+        assertThat(columnNames("ledger_entries")).contains("merchant_id", "transaction_group_id", "source_type",
+                "source_id", "account", "direction", "amount", "currency", "created_at");
         assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
         assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",
@@ -240,6 +255,30 @@ class DatabaseMigrationTests {
 
         assertThatThrownBy(() -> webhookDeliveryRepository.saveAndFlush(new WebhookDelivery(
                 merchantB.getId(), endpointA.getId(), "payment_intent.created", UUID.randomUUID())))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void ledgerEntrySourceRequiresSameMerchantPaymentIntentAndUniqueCaptureAccount() {
+        var merchantA = merchantRepository.saveAndFlush(new Merchant("merchant-a", "thaap_test_a"));
+        var merchantB = merchantRepository.saveAndFlush(new Merchant("merchant-b", "thaap_test_b"));
+        var customerA = customerRepository.saveAndFlush(new Customer(merchantA.getId(), "email-hash", null));
+        var paymentIntentA = paymentIntentRepository.saveAndFlush(new PaymentIntent(
+                merchantA.getId(), customerA.getId(), 1200, "USD"));
+
+        insertLedgerEntry(merchantA.getId(), paymentIntentA.getId(), "CUSTOMER_RECEIVABLE", "DEBIT");
+
+        assertThatThrownBy(() -> insertLedgerEntry(merchantA.getId(), UUID.randomUUID(),
+                "MERCHANT_PAYABLE", "CREDIT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertLedgerEntry(merchantB.getId(), paymentIntentA.getId(),
+                "MERCHANT_PAYABLE", "CREDIT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertLedgerEntry(merchantA.getId(), paymentIntentA.getId(),
+                "CUSTOMER_RECEIVABLE", "DEBIT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertLedgerEntry(merchantA.getId(), paymentIntentA.getId(),
+                "MERCHANT_PAYABLE", "DEBIT"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -333,6 +372,24 @@ class DatabaseMigrationTests {
     private void assertIndexExists(String tableName, String indexName) throws SQLException {
         assertThat(indexNames(tableName))
                 .anySatisfy(actual -> assertThat(actual).startsWith(indexName));
+    }
+
+    private void insertLedgerEntry(UUID merchantId, UUID sourceId, String account, String direction) {
+        jdbcTemplate.update("""
+                INSERT INTO ledger_entries (
+                    id,
+                    merchant_id,
+                    transaction_group_id,
+                    source_type,
+                    source_id,
+                    account,
+                    direction,
+                    amount,
+                    currency,
+                    created_at
+                )
+                VALUES (?, ?, ?, 'PAYMENT_INTENT_CAPTURE', ?, ?, ?, 1200, 'USD', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, UUID.randomUUID(), sourceId, account, direction);
     }
 
     private IdempotencyRecord idempotencyRecord(UUID merchantId, String key, String requestHash) {

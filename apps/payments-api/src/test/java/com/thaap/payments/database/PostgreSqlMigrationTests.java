@@ -71,6 +71,14 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("audit_logs", "after_json")).isTrue();
         assertThat(indexExists("audit_logs", "idx_audit_logs_merchant_created")).isTrue();
         assertThat(indexExists("audit_logs", "idx_audit_logs_merchant_aggregate")).isTrue();
+        assertThat(columnExists("ledger_entries", "transaction_group_id")).isTrue();
+        assertThat(columnExists("ledger_entries", "source_type")).isTrue();
+        assertThat(columnExists("ledger_entries", "account")).isTrue();
+        assertThat(columnExists("ledger_entries", "direction")).isTrue();
+        assertThat(indexExists("ledger_entries", "idx_ledger_entries_merchant_created")).isTrue();
+        assertThat(indexExists("ledger_entries", "idx_ledger_entries_merchant_group")).isTrue();
+        assertThat(indexExists("ledger_entries", "idx_ledger_entries_merchant_source")).isTrue();
+        assertThat(indexExists("ledger_entries", "uk_ledger_entries_capture_account")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
