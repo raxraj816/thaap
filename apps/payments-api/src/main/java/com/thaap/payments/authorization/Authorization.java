@@ -15,6 +15,8 @@ import java.util.UUID;
 @Table(name = "authorizations",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_authorizations_merchant_id_id", columnNames = {"merchant_id", "id"}),
+                @UniqueConstraint(name = "uk_authorizations_merchant_id_id_attempt",
+                        columnNames = {"merchant_id", "id", "payment_attempt_id"}),
                 @UniqueConstraint(name = "uk_authorizations_attempt",
                         columnNames = {"merchant_id", "payment_attempt_id"}),
                 @UniqueConstraint(name = "uk_authorizations_processor_reference",

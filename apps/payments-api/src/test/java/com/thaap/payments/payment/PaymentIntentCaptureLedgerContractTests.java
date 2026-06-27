@@ -258,7 +258,8 @@ class PaymentIntentCaptureLedgerContractTests {
                                 {
                                   "customerId": "%s",
                                   "amount": %d,
-                                  "currency": "USD"
+                                  "currency": "USD",
+                                  "captureMethod": "MANUAL"
                                 }
                                 """.formatted(customerId, amount)))
                 .andExpect(status().isCreated())

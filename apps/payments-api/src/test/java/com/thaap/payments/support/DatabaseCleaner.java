@@ -10,6 +10,7 @@ public class DatabaseCleaner {
             "audit_logs",
             "webhook_deliveries",
             "ledger_entries",
+            "authorization_voids",
             "authorizations",
             "feature_snapshots",
             "fraud_decisions",

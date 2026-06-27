@@ -1850,7 +1850,7 @@ Build:
 - AuditLog MVP for capture, cancel/void, refund, ledger, and webhook endpoint
   actions.
 
-Completed chapter:
+Completed chapters:
 
 - Chapter 15 adds full-amount capture from `REQUIRES_CAPTURE` after a
   tenant-scoped approved authorization.
@@ -1862,10 +1862,16 @@ Completed chapter:
   PaymentIntent and blocks duplicate capture account postings.
 - `GET /ledger/entries` exposes safe tenant-scoped ledger rows through a bounded
   read API.
+- Chapter 17 makes `AUTOMATIC` capture part of the approved confirm transaction
+  while preserving the separate capture endpoint for `MANUAL` PaymentIntents.
+- Pre-authorization cancel writes no processor fiction; cancel after an
+  approved manual authorization appends tenant-bound `authorization_voids`
+  evidence and exposes that evidence through the authorization read contract.
+- Cancel state, authorization void, webhook delivery record, audit log, and
+  idempotency completion share one transaction boundary.
 
 Remaining Phase 2 work:
 
-- Cancel/void authorization semantics after processor approval.
 - Refund ledger entries and refund object truth.
 - Fees, payout settlement, disputes, and chargeback ledger groups.
 - Webhook delivery execution/retry behavior beyond delivery records.
@@ -1919,6 +1925,8 @@ Detailed Phase 2 chapter plan:
 
 2. Chapter 17: Cancel/Void Authorization Semantics.
 
+   Status: complete.
+
    Chapter 17 starts by hardening capture-method semantics before refund work:
    `MANUAL` PaymentIntents keep the separate capture call, while `AUTOMATIC`
    PaymentIntents must either capture during approved confirm or move through a
@@ -1970,10 +1978,47 @@ Detailed Phase 2 chapter plan:
    - Rollback test proves a webhook/audit failure does not leave false canceled
      state.
 
-   Defer:
+   Implemented:
 
-   - Real network reversal APIs until a real PSP integration exists.
-   - Partial voids because THAAP has not introduced partial capture yet.
+   - Approved `AUTOMATIC` confirm now writes the balanced capture ledger group,
+     moves the PaymentIntent to `CAPTURED`, and records capture webhook and
+     audit truth inside the confirm idempotency transaction.
+   - Approved `MANUAL` confirm remains in `REQUIRES_CAPTURE`; only manual
+     PaymentIntents may call the public capture endpoint.
+   - Forward-only migration V6 creates append-only `authorization_voids` with
+     composite tenant, authorization, PaymentAttempt, and PaymentIntent lineage
+     constraints plus one-void-per-authorization and one-void-per-intent
+     uniqueness.
+   - V6 converts legacy approved `AUTOMATIC` rows waiting in
+     `REQUIRES_CAPTURE`; forward-only V7 completes the compatibility boundary
+     for every other pre-Chapter-17 non-terminal row that could still progress
+     toward capture. Existing confirms, retries, action flows, processing
+     recovery, and approved payments retain the old explicit-capture behavior,
+     while terminal rows remain untouched as historical truth.
+   - Cancel from `REQUIRES_CONFIRMATION`, retryable decline, or 3DS-required
+     states creates no void evidence. Cancel from `AUTHORIZED` or
+     `REQUIRES_CAPTURE` appends a `RECORDED` / `MERCHANT_CANCELED` void linked
+     to the approved authorization before terminal cancellation.
+   - `GET /payment_attempts/{id}/authorization` now reports safe void status,
+     reason, identifier, and timestamp while preserving the original approved
+     authorization as historical processor truth.
+   - Contract, rollback, migration, and PostgreSQL concurrency tests prove
+     automatic/manual behavior, balanced ledger truth, replay non-duplication,
+     terminal-state rejection, decline and 3DS cancellation, tenant isolation,
+     database lineage constraints, V5-to-V7 compatibility for every open
+     payment state, rollback of automatic capture or cancel when ledger/audit
+     persistence fails, and one coherent winner under concurrent capture and
+     cancel.
+   - `scripts/demo-chapter-17-flow.sh` fails closed unless automatic capture,
+     manual void, and ledger invariants agree, and rejects non-loopback targets
+     until `TD-0001` provides trusted shared-environment traffic origin.
+
+   Scope boundaries:
+
+   - Real network reversal APIs remain outside the V1 simulator scope and begin
+     only if a real PSP integration is selected.
+   - Partial voids have no valid domain boundary until a future partial-capture
+     slice introduces partial authorization/capture accounting.
 
 3. Chapter 18: Refund Object Truth And Refund Ledger Entries.
 

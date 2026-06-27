@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.AuthorizationRepository;
+import com.thaap.payments.authorization.AuthorizationVoidRepository;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
 import com.thaap.payments.fraud.FeatureSnapshotRepository;
@@ -47,6 +48,7 @@ class PaymentIntentControllerConfigurationTests {
                 mock(ConfirmDecisionEngine.class),
                 mock(ProcessorAdapter.class),
                 mock(AuthorizationRepository.class),
+                mock(AuthorizationVoidRepository.class),
                 mock(FraudDecisionRepository.class),
                 mock(FeatureSnapshotRepository.class),
                 mock(AuditLogService.class),

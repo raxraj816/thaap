@@ -144,17 +144,21 @@ on top.
 Current guards:
 
 - `cancel` is allowed from pre-terminal or uncaptured states such as
-  `REQUIRES_CONFIRMATION`, `AUTHORIZED`, and `REQUIRES_CAPTURE`
-- `capture` is only allowed from `REQUIRES_CAPTURE`
+  `REQUIRES_CONFIRMATION`, `REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION`, and
+  `REQUIRES_CAPTURE`
+- approved `AUTOMATIC` confirm captures inside the confirm transaction
+- approved `MANUAL` confirm moves to `REQUIRES_CAPTURE`
+- the public capture endpoint accepts only `MANUAL` PaymentIntents in
+  `REQUIRES_CAPTURE`
 - `refund` is only allowed from `CAPTURED`, and V1 only supports a full refund
   whose amount equals the captured PaymentIntent amount
 - terminal or incompatible states return `409 conflict`
 
-This intentionally makes immediate capture/refund after create invalid. Confirm
-with an approved simulator authorization moves a PaymentIntent into
-`REQUIRES_CAPTURE`; the capture endpoint then owns the reviewed side effect
-that moves it to `CAPTURED`. Later refund/ledger chapters will replace the
-full-refund-only V1 guard with durable partial-refund accounting.
+This intentionally makes immediate capture/refund after create invalid.
+Approved confirm follows the merchant-selected capture method: `AUTOMATIC`
+captures immediately and `MANUAL` waits in `REQUIRES_CAPTURE`. Later
+refund/ledger chapters will replace the full-refund-only V1 guard with durable
+refund objects and reversal accounting.
 
 ## PaymentIntent Confirm And PaymentAttempt Contract
 
@@ -237,7 +241,11 @@ but the surrounding transaction rolls back or cannot commit.
 authorization evidence for the attempt through the same merchant scope. It
 returns processor name/reference, response code, network status, requested and
 authorized amounts, authorization status, verification results, 3DS result, and
-creation time. The merchant-facing contract deliberately omits the internal
+creation time. It also returns processor-neutral authorization-void evidence
+when an approved manual authorization was canceled: `voided`, void ID, status,
+reason, and timestamp. The original authorization remains `APPROVED` because
+the void is a later lifecycle fact, not a rewrite of the issuer decision. The
+merchant-facing contract deliberately omits the internal
 simulator outcome field and uses processor-neutral evidence. It does not expose
 raw payment input, PII, API keys, idempotency state, hashes, card fingerprints,
 or webhook secrets.
@@ -289,7 +297,8 @@ are reserved yet.
 `POST /payment_intents/{id}/capture` is the Chapter 15 money-truth chapter.
 It requires `Idempotency-Key`, loads the PaymentIntent through merchant scope
 with a row lock, requires status `REQUIRES_CAPTURE`, and requires a
-tenant-scoped approved `Authorization` from an authorized PaymentAttempt.
+tenant-scoped approved, non-voided `Authorization` from an authorized
+PaymentAttempt. Only `MANUAL` PaymentIntents can use this endpoint.
 
 Capture is full-amount only in this chapter. Inside the same idempotent
 transaction, the API:
@@ -307,6 +316,34 @@ completion fails, the capture state change rolls back. Idempotent replay of the
 same capture key returns the original response without duplicating ledger
 entries, webhook deliveries, or audit logs. A different idempotency key after
 capture returns `409`.
+
+For `AUTOMATIC` PaymentIntents, the same capture ledger, webhook, audit, and
+state transition runs during approved confirm. Confirm idempotency therefore
+protects authorization and capture as one transaction: a ledger or audit
+failure rolls the PaymentIntent back to `REQUIRES_CONFIRMATION` and removes the
+attempt, fraud lineage, authorization, webhook, ledger, and idempotency
+completion.
+
+## Cancel And Authorization Void Contract
+
+`POST /payment_intents/{id}/cancel` requires `Idempotency-Key` and serializes on
+the merchant-scoped PaymentIntent row.
+
+- Cancel before approval, after a retryable decline, or while 3DS action is
+  required moves the intent to `CANCELED` without inventing void evidence.
+- Cancel from the reserved `AUTHORIZED` state or `REQUIRES_CAPTURE` appends one
+  `authorization_voids` row linked to the same merchant, Authorization,
+  PaymentAttempt, and PaymentIntent.
+- The void uses status `RECORDED` and reason `MERCHANT_CANCELED`. This is local
+  simulator invalidation truth, not a claim that a real card network reversal
+  occurred.
+- Cancel, void evidence, webhook delivery records, audit log, and idempotency
+  completion commit or roll back together.
+- Captured, refunded, already-canceled, or otherwise terminal intents reject
+  cancellation.
+
+V6 composite foreign keys reject cross-object or cross-tenant void lineage, and
+unique constraints allow only one void per authorization and PaymentIntent.
 
 `GET /ledger/entries` returns only the current merchant's safe ledger fields:
 entry ID, transaction group ID, source type, source ID, account, direction,
@@ -341,8 +378,15 @@ capture method storage, and hot lookup indexes such as
 records.
 
 Chapter 11 authorizations are added through a follow-on Flyway migration. V5
-adds append-only `ledger_entries` for capture accounting. Do not edit an
-already-applied migration to add new durable product truth.
+adds append-only `ledger_entries` for capture accounting. V6 adds constrained
+`authorization_voids` and preserves already-approved legacy automatic rows.
+Forward-only V7 completes the compatibility boundary by converting every other
+legacy non-terminal `AUTOMATIC` row that could still progress toward capture to
+`MANUAL`. This preserves the old explicit-capture behavior for existing
+confirms, retries, action flows, recovery, and approved payments instead of
+changing money movement during deployment. Terminal rows remain untouched as
+historical truth. Do not edit an already-applied migration to add new durable
+product truth.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally
@@ -359,9 +403,12 @@ operational rollout:
   `thaap.audit.logs.created`, `thaap.feature.snapshot.too_large`, and
   `thaap.feature.snapshot.serialization_errors`
 
-The current V4 and V5 migrations create new tables, so they do not index an
-existing large payment table. The production rule still matters because later
-refund, dispute, fee, ledger, and audit migrations will touch hotter tables.
+V6 and V7 update legacy `payment_intents` rows, while V6 also adds supporting
+unique constraints to `payment_attempts` and `authorizations`. In a real
+high-volume deployment, split compatibility updates into bounded backfills and
+create supporting unique indexes with an online/concurrent rollout before
+attaching foreign keys. Later refund, dispute, fee, ledger, and audit migrations
+will touch similarly hot tables.
 
 Chapters 1-3 local databases were created with temporary Hibernate scaffolding. If
 that local PostgreSQL volume still exists, reset it before first Flyway startup:

@@ -44,6 +44,21 @@ THAAP_DEMO_CARD=4999990000000002 scripts/demo-confirm-flow.sh
 THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
 ```
 
+Run the Chapter 17 automatic-capture and manual-authorization-void demo:
+
+```bash
+scripts/demo-chapter-17-flow.sh
+```
+
+The script fails unless approved `AUTOMATIC` confirm reaches `CAPTURED` with
+exactly two balanced ledger entries owned by that PaymentIntent, using the
+reviewed account/direction pair, captured amount, currency, and one transaction
+group. Approved `MANUAL` confirm must wait in `REQUIRES_CAPTURE`, and cancel
+must expose `RECORDED` / `MERCHANT_CANCELED` void evidence with zero ledger
+rows for the manual payment. It accepts only loopback API origins so demo
+traffic cannot enter a shared environment without the trusted traffic-origin
+boundary tracked by `TD-0001`.
+
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash

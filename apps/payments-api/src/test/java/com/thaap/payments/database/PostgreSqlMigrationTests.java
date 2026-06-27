@@ -2,10 +2,17 @@ package com.thaap.payments.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Stream;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,6 +49,13 @@ class PostgreSqlMigrationTests {
                 """, Integer.class);
 
         assertThat(applied).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '7'
+                  AND description = 'harden legacy capture method semantics'
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(1);
         assertThat(columnExists("payment_methods", "card_bin")).isTrue();
         assertThat(columnExists("payment_intents", "capture_method")).isTrue();
         assertThat(columnExists("payment_intents", "description")).isTrue();
@@ -56,6 +70,14 @@ class PostgreSqlMigrationTests {
         assertThat(indexExists("authorizations", "uk_authorizations_attempt")).isTrue();
         assertThat(indexExists("authorizations", "uk_authorizations_processor_reference")).isTrue();
         assertThat(indexExists("authorizations", "idx_authorizations_merchant_created")).isTrue();
+        assertThat(columnExists("authorization_voids", "authorization_id")).isTrue();
+        assertThat(columnExists("authorization_voids", "payment_attempt_id")).isTrue();
+        assertThat(columnExists("authorization_voids", "payment_intent_id")).isTrue();
+        assertThat(columnExists("authorization_voids", "status")).isTrue();
+        assertThat(columnExists("authorization_voids", "reason")).isTrue();
+        assertThat(indexExists("authorization_voids", "uk_authorization_voids_authorization")).isTrue();
+        assertThat(indexExists("authorization_voids", "uk_authorization_voids_payment_intent")).isTrue();
+        assertThat(indexExists("authorization_voids", "idx_authorization_voids_merchant_created")).isTrue();
         assertThat(columnExists("fraud_decisions", "payment_attempt_id")).isTrue();
         assertThat(columnExists("fraud_decisions", "risk_score")).isTrue();
         assertThat(columnExists("fraud_decisions", "feature_freshness_status")).isTrue();
@@ -82,6 +104,94 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
+    }
+
+    @Test
+    void chapter17UpgradePreservesLegacyOpenAutomaticPaymentSemanticsOnPostgreSql() {
+        String schema = "chapter17_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        Flyway upgradeFlyway = Flyway.configure()
+                .dataSource(upgradeDataSource)
+                .schemas(schema)
+                .defaultSchema(schema)
+                .locations("classpath:db/migration")
+                .target("5")
+                .load();
+
+        try {
+            upgradeFlyway.migrate();
+            UUID merchantId = UUID.randomUUID();
+            UUID customerId = UUID.randomUUID();
+            String qualifiedMerchants = schema + ".merchants";
+            String qualifiedCustomers = schema + ".customers";
+            String qualifiedPaymentIntents = schema + ".payment_intents";
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s (id, name, status, api_key_prefix, api_key_hash, created_at)
+                    VALUES (?, 'legacy-postgres-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(qualifiedMerchants), merchantId, "legacy-" + schema);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s (id, merchant_id, email_hash, created_at)
+                    VALUES (?, ?, 'legacy-postgres-email-hash', CURRENT_TIMESTAMP)
+                    """.formatted(qualifiedCustomers), customerId, merchantId);
+
+            List<String> openStatuses = List.of(
+                    "REQUIRES_PAYMENT_METHOD",
+                    "REQUIRES_CONFIRMATION",
+                    "REQUIRES_FRAUD_CHECK",
+                    "REQUIRES_ACTION",
+                    "PROCESSING",
+                    "AUTHORIZED",
+                    "REQUIRES_CAPTURE");
+            List<String> terminalStatuses = List.of("CAPTURED", "CANCELED", "REFUNDED", "DISPUTED", "FAILED");
+            Map<String, UUID> paymentIntentIdsByStatus = new LinkedHashMap<>();
+            for (String status : Stream.concat(openStatuses.stream(), terminalStatuses.stream()).toList()) {
+                UUID paymentIntentId = UUID.randomUUID();
+                paymentIntentIdsByStatus.put(status, paymentIntentId);
+                upgradeJdbcTemplate.update("""
+                        INSERT INTO %s (
+                            id, merchant_id, customer_id, amount, currency, capture_method, status,
+                            metadata, created_at, updated_at
+                        )
+                        VALUES (?, ?, ?, 1200, 'USD', 'AUTOMATIC', ?, '{}',
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """.formatted(qualifiedPaymentIntents),
+                        paymentIntentId, merchantId, customerId, status);
+            }
+
+            Flyway.configure()
+                    .dataSource(upgradeDataSource)
+                    .schemas(schema)
+                    .defaultSchema(schema)
+                    .locations("classpath:db/migration")
+                    .target("7")
+                    .load()
+                    .migrate();
+
+            for (String status : openStatuses) {
+                assertThat(captureMethod(upgradeJdbcTemplate, qualifiedPaymentIntents,
+                        paymentIntentIdsByStatus.get(status)))
+                        .as("legacy PostgreSQL open status %s", status)
+                        .isEqualTo("MANUAL");
+            }
+            for (String status : terminalStatuses) {
+                assertThat(captureMethod(upgradeJdbcTemplate, qualifiedPaymentIntents,
+                        paymentIntentIdsByStatus.get(status)))
+                        .as("legacy PostgreSQL terminal status %s", status)
+                        .isEqualTo("AUTOMATIC");
+            }
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    private String captureMethod(JdbcTemplate source, String qualifiedPaymentIntents, UUID paymentIntentId) {
+        return source.queryForObject("""
+                SELECT capture_method
+                FROM %s
+                WHERE id = ?
+                """.formatted(qualifiedPaymentIntents), String.class, paymentIntentId);
     }
 
     private boolean columnExists(String tableName, String columnName) {
