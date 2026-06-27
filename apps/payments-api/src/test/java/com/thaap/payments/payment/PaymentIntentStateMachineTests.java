@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -36,6 +38,19 @@ class PaymentIntentStateMachineTests {
         intent.cancel();
 
         assertThat(intent.getStatus()).isEqualTo(PaymentIntentStatus.CANCELED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentIntentStatus.class, names = {
+            "CAPTURED", "REFUNDED", "DISPUTED", "FAILED", "CANCELED"
+    })
+    void cancelRejectsTerminalPaymentStates(PaymentIntentStatus terminalStatus) {
+        var intent = paymentIntentIn(terminalStatus);
+
+        assertThatThrownBy(intent::cancel)
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("PaymentIntent cannot be canceled from status " + terminalStatus);
+        assertThat(intent.getStatus()).isEqualTo(terminalStatus);
     }
 
     @Test

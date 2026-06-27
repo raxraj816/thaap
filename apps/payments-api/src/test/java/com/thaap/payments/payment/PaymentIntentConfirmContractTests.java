@@ -431,7 +431,8 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
         assertThat(countRows("authorizations")).isZero();
-        assertThat(countRows("audit_logs")).isZero();
+        assertThat(countRows("audit_logs")).isEqualTo(1);
+        assertThat(countAuditLogsByAction("payment_intent.canceled")).isEqualTo(1);
     }
 
     @Test
@@ -576,7 +577,8 @@ class PaymentIntentConfirmContractTests {
                                 {
                                   "customerId": "%s",
                                   "amount": %d,
-                                  "currency": "USD"
+                                  "currency": "USD",
+                                  "captureMethod": "MANUAL"
                                 }
                                 """.formatted(customerId, amount)))
                 .andExpect(status().isCreated())

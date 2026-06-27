@@ -20,11 +20,14 @@ import com.thaap.payments.webhook.WebhookEndpointRepository;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Map;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,12 +111,28 @@ class DatabaseMigrationTests {
                   AND description = 'add ledger entries'
                   AND success = TRUE
                 """, Integer.class);
+        var authorizationVoidSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '6'
+                  AND description = 'add authorization voids'
+                  AND success = TRUE
+                """, Integer.class);
+        var legacyCaptureMethodHardening = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '7'
+                  AND description = 'harden legacy capture method semantics'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
         assertThat(fraudLineageSchema).isEqualTo(1);
         assertThat(auditLogSchema).isEqualTo(1);
         assertThat(ledgerSchema).isEqualTo(1);
+        assertThat(authorizationVoidSchema).isEqualTo(1);
+        assertThat(legacyCaptureMethodHardening).isEqualTo(1);
     }
 
     @Test
@@ -125,6 +144,7 @@ class DatabaseMigrationTests {
                 "payment_intents",
                 "payment_attempts",
                 "authorizations",
+                "authorization_voids",
                 "idempotency_records",
                 "webhook_endpoints",
                 "webhook_deliveries",
@@ -147,6 +167,10 @@ class DatabaseMigrationTests {
         assertIndexExists("authorizations", "uk_authorizations_attempt");
         assertIndexExists("authorizations", "uk_authorizations_processor_reference");
         assertIndexExists("authorizations", "idx_authorizations_merchant_created");
+        assertIndexExists("authorization_voids", "uk_authorization_voids_authorization");
+        assertIndexExists("authorization_voids", "uk_authorization_voids_payment_intent");
+        assertIndexExists("authorization_voids", "idx_authorization_voids_merchant_created");
+        assertIndexExists("authorization_voids", "idx_authorization_voids_attempt");
         assertIndexExists("payment_methods", "idx_payment_methods_merchant_bin");
         assertIndexExists("webhook_endpoints", "idx_webhook_endpoints_merchant_active");
         assertIndexExists("webhook_endpoints", "uk_webhook_endpoints_signing_secret_hash");
@@ -181,6 +205,8 @@ class DatabaseMigrationTests {
                 "processor_reference_id", "processor_response_code", "network_status", "authorized_amount",
                 "requested_amount", "currency", "status", "cvc_check", "avs_line1_check",
                 "avs_postal_code_check", "three_ds_result", "simulator_outcome_code", "created_at");
+        assertThat(columnNames("authorization_voids")).contains("merchant_id", "authorization_id",
+                "payment_attempt_id", "payment_intent_id", "status", "reason", "created_at");
         assertThat(columnNames("fraud_decisions")).contains("payment_attempt_id", "risk_score", "risk_level",
                 "action", "model_version", "ruleset_version", "latency_ms", "decision_started_at",
                 "decision_completed_at", "feature_freshness_status", "max_feature_age_ms", "reason_codes",
@@ -331,6 +357,80 @@ class DatabaseMigrationTests {
         assertThat(legacyDecision.get("reason_codes")).isEqualTo("[\"RULES_NOT_ENABLED\"]");
         assertThat(upgradeJdbcTemplate.queryForObject("SELECT COUNT(*) FROM feature_snapshots", Integer.class))
                 .isZero();
+    }
+
+    @Test
+    void legacyOpenAutomaticRowsPreserveExplicitCaptureBehaviorDuringChapter17Migration() {
+        String databaseName = "legacy_capture_method_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                "jdbc:h2:mem:" + databaseName
+                        + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
+                "sa", "");
+        Flyway.configure()
+                .dataSource(upgradeDataSource)
+                .locations("classpath:db/migration")
+                .target("5")
+                .load()
+                .migrate();
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        upgradeJdbcTemplate.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-merchant', 'ACTIVE', 'thaap_', 'legacy-capture-hash', CURRENT_TIMESTAMP)
+                """, merchantId);
+        upgradeJdbcTemplate.update("""
+                INSERT INTO customers (id, merchant_id, email_hash, created_at)
+                VALUES (?, ?, 'legacy-email-hash', CURRENT_TIMESTAMP)
+                """, customerId, merchantId);
+        List<String> openStatuses = List.of(
+                "REQUIRES_PAYMENT_METHOD",
+                "REQUIRES_CONFIRMATION",
+                "REQUIRES_FRAUD_CHECK",
+                "REQUIRES_ACTION",
+                "PROCESSING",
+                "AUTHORIZED",
+                "REQUIRES_CAPTURE");
+        List<String> terminalStatuses = List.of("CAPTURED", "CANCELED", "REFUNDED", "DISPUTED", "FAILED");
+        Map<String, UUID> paymentIntentIdsByStatus = new LinkedHashMap<>();
+        for (String status : Stream.concat(openStatuses.stream(), terminalStatuses.stream()).toList()) {
+            UUID paymentIntentId = UUID.randomUUID();
+            paymentIntentIdsByStatus.put(status, paymentIntentId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO payment_intents (
+                        id, merchant_id, customer_id, amount, currency, capture_method, status,
+                        metadata, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, 1200, 'USD', 'AUTOMATIC', ?, '{}',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, paymentIntentId, merchantId, customerId, status);
+        }
+
+        Flyway.configure()
+                .dataSource(upgradeDataSource)
+                .locations("classpath:db/migration")
+                .target("7")
+                .load()
+                .migrate();
+
+        for (String status : openStatuses) {
+            assertThat(captureMethod(upgradeJdbcTemplate, paymentIntentIdsByStatus.get(status)))
+                    .as("legacy open status %s", status)
+                    .isEqualTo("MANUAL");
+        }
+        for (String status : terminalStatuses) {
+            assertThat(captureMethod(upgradeJdbcTemplate, paymentIntentIdsByStatus.get(status)))
+                    .as("legacy terminal status %s", status)
+                    .isEqualTo("AUTOMATIC");
+        }
+    }
+
+    private String captureMethod(JdbcTemplate source, UUID paymentIntentId) {
+        return source.queryForObject("""
+                SELECT capture_method
+                FROM payment_intents
+                WHERE id = ?
+                """, String.class, paymentIntentId);
     }
 
     private Set<String> tableNames() throws SQLException {

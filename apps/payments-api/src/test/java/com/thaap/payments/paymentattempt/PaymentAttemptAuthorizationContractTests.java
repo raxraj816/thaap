@@ -82,6 +82,11 @@ class PaymentAttemptAuthorizationContractTests {
         assertThat(response.get("avsLine1Check").asText()).isEqualTo("PASS");
         assertThat(response.get("avsPostalCodeCheck").asText()).isEqualTo("PASS");
         assertThat(response.get("threeDsResult").asText()).isEqualTo("NOT_REQUIRED");
+        assertThat(response.get("voided").asBoolean()).isFalse();
+        assertThat(response.get("authorizationVoidId").isNull()).isTrue();
+        assertThat(response.get("authorizationVoidStatus").isNull()).isTrue();
+        assertThat(response.get("authorizationVoidReason").isNull()).isTrue();
+        assertThat(response.get("voidedAt").isNull()).isTrue();
         assertThat(response.get("createdAt").asText()).isNotBlank();
         assertThat(response.has("simulatorOutcomeCode")).isFalse();
     }

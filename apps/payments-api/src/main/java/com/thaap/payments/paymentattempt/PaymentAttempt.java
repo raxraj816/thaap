@@ -17,6 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Table(name = "payment_attempts",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_payment_attempts_merchant_id_id", columnNames = {"merchant_id", "id"}),
+                @UniqueConstraint(name = "uk_payment_attempts_merchant_id_intent_id",
+                        columnNames = {"merchant_id", "id", "payment_intent_id"}),
                 @UniqueConstraint(name = "uk_payment_attempts_intent_number",
                         columnNames = {"merchant_id", "payment_intent_id", "attempt_number"})
         },

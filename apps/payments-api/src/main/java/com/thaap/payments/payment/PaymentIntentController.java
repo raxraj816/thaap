@@ -6,6 +6,8 @@ import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
+import com.thaap.payments.authorization.AuthorizationVoid;
+import com.thaap.payments.authorization.AuthorizationVoidRepository;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
@@ -80,6 +82,7 @@ public class PaymentIntentController {
     private final ConfirmDecisionEngine confirmDecisionEngine;
     private final ProcessorAdapter processorAdapter;
     private final AuthorizationRepository authorizationRepository;
+    private final AuthorizationVoidRepository authorizationVoidRepository;
     private final FraudDecisionRepository fraudDecisionRepository;
     private final FeatureSnapshotRepository featureSnapshotRepository;
     private final AuditLogService auditLogService;
@@ -92,9 +95,9 @@ public class PaymentIntentController {
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
             IdempotencyService idempotencyService, WebhookDeliveryService webhookDeliveryService,
             ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
-            AuthorizationRepository authorizationRepository, FraudDecisionRepository fraudDecisionRepository,
-            FeatureSnapshotRepository featureSnapshotRepository, AuditLogService auditLogService,
-            LedgerService ledgerService, MeterRegistry meterRegistry,
+            AuthorizationRepository authorizationRepository, AuthorizationVoidRepository authorizationVoidRepository,
+            FraudDecisionRepository fraudDecisionRepository, FeatureSnapshotRepository featureSnapshotRepository,
+            AuditLogService auditLogService, LedgerService ledgerService, MeterRegistry meterRegistry,
             @Value("${thaap.fraud.feature-snapshot.max-json-bytes:16384}") int maxFeatureSnapshotJsonBytes) {
         if (maxFeatureSnapshotJsonBytes <= 0) {
             throw new IllegalArgumentException("thaap.fraud.feature-snapshot.max-json-bytes must be positive");
@@ -108,6 +111,7 @@ public class PaymentIntentController {
         this.confirmDecisionEngine = confirmDecisionEngine;
         this.processorAdapter = processorAdapter;
         this.authorizationRepository = authorizationRepository;
+        this.authorizationVoidRepository = authorizationVoidRepository;
         this.fraudDecisionRepository = fraudDecisionRepository;
         this.featureSnapshotRepository = featureSnapshotRepository;
         this.auditLogService = auditLogService;
@@ -197,6 +201,11 @@ public class PaymentIntentController {
                 authorization);
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
+        if (authorization.getStatus() == AuthorizationStatus.APPROVED
+                && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
+            captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
+                    CaptureTrigger.AUTOMATIC_CONFIRM);
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
     }
 
@@ -339,7 +348,27 @@ public class PaymentIntentController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "PaymentIntent cannot be captured from status " + startingStatus);
         }
+        if (paymentIntent.getCaptureMethod() != CaptureMethod.MANUAL) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Only MANUAL PaymentIntents can use the capture endpoint");
+        }
         Authorization authorization = latestApprovedAuthorization(merchantContext, id);
+        captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
+                CaptureTrigger.MANUAL_API);
+        return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
+    }
+
+    private void captureApprovedPaymentIntent(MerchantContext merchantContext, String requestId,
+            PaymentIntent paymentIntent, Authorization authorization, CaptureTrigger captureTrigger) {
+        PaymentIntentStatus startingStatus = paymentIntent.getStatus();
+        if (startingStatus != PaymentIntentStatus.REQUIRES_CAPTURE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be captured from status " + startingStatus);
+        }
+        if (authorizationVoidRepository.existsByAuthorizationIdAndMerchantId(authorization.getId(),
+                merchantContext.merchantId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Approved authorization has been voided");
+        }
         if (!authorization.getCurrency().equals(paymentIntent.getCurrency())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Approved authorization currency does not match PaymentIntent");
@@ -353,17 +382,38 @@ public class PaymentIntentController {
         paymentIntent.capture();
         webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.captured",
                 paymentIntent.getId());
-        recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult);
-        return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
+        recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult,
+                captureTrigger);
     }
 
     @PostMapping("/{id}/cancel")
     public ResponseEntity<PaymentIntentResponse> cancelPaymentIntent(MerchantContext merchantContext,
             @PathVariable UUID id,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpServletRequest) {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.cancel:" + id,
-                new EmptyMutationRequest(), PaymentIntentResponse.class, () -> mutatePaymentIntent(merchantContext, id,
-                        PaymentIntent::cancel, "payment_intent.canceled"));
+                new EmptyMutationRequest(), PaymentIntentResponse.class,
+                () -> cancelPaymentIntentOnce(merchantContext, id, requestIdFrom(httpServletRequest)));
+    }
+
+    protected ResponseEntity<PaymentIntentResponse> cancelPaymentIntentOnce(MerchantContext merchantContext, UUID id,
+            String requestId) {
+        PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
+        PaymentIntentStatus startingStatus = paymentIntent.getStatus();
+        Authorization authorization = null;
+        AuthorizationVoid authorizationVoid = null;
+        if (startingStatus == PaymentIntentStatus.AUTHORIZED
+                || startingStatus == PaymentIntentStatus.REQUIRES_CAPTURE) {
+            authorization = latestApprovedAuthorization(merchantContext, id);
+            authorizationVoid = authorizationVoidRepository.save(new AuthorizationVoid(merchantContext.merchantId(),
+                    authorization.getId(), authorization.getPaymentAttemptId(), paymentIntent.getId()));
+        }
+        paymentIntent.cancel();
+        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.canceled",
+                paymentIntent.getId());
+        recordCancelAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization,
+                authorizationVoid);
+        return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
     }
 
     private Authorization latestApprovedAuthorization(MerchantContext merchantContext, UUID paymentIntentId) {
@@ -377,7 +427,7 @@ public class PaymentIntentController {
 
     private void recordCaptureAuditLog(MerchantContext merchantContext, String requestId,
             PaymentIntentStatus startingStatus, PaymentIntent paymentIntent, Authorization authorization,
-            LedgerService.CaptureLedgerResult ledgerResult) {
+            LedgerService.CaptureLedgerResult ledgerResult, CaptureTrigger captureTrigger) {
         Map<String, Object> before = new LinkedHashMap<>();
         before.put("paymentIntentId", paymentIntent.getId().toString());
         before.put("status", startingStatus.name());
@@ -388,6 +438,8 @@ public class PaymentIntentController {
         after.put("paymentIntentId", paymentIntent.getId().toString());
         after.put("status", paymentIntent.getStatus().name());
         after.put("captureAmount", authorization.getAuthorizedAmount());
+        after.put("captureMethod", paymentIntent.getCaptureMethod().name());
+        after.put("captureTrigger", captureTrigger.name());
         after.put("currency", authorization.getCurrency());
         after.put("authorizationId", authorization.getId().toString());
         after.put("transactionGroupId", ledgerResult.transactionGroupId().toString());
@@ -400,12 +452,31 @@ public class PaymentIntentController {
                 before, after);
     }
 
-    protected ResponseEntity<PaymentIntentResponse> mutatePaymentIntent(MerchantContext merchantContext, UUID id,
-            java.util.function.Consumer<PaymentIntent> mutation, String eventType) {
-        PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
-        mutation.accept(paymentIntent);
-        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), eventType, paymentIntent.getId());
-        return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
+    private void recordCancelAuditLog(MerchantContext merchantContext, String requestId,
+            PaymentIntentStatus startingStatus, PaymentIntent paymentIntent, Authorization authorization,
+            AuthorizationVoid authorizationVoid) {
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("paymentIntentId", paymentIntent.getId().toString());
+        before.put("status", startingStatus.name());
+        before.put("amount", paymentIntent.getAmount());
+        before.put("currency", paymentIntent.getCurrency());
+        before.put("captureMethod", paymentIntent.getCaptureMethod().name());
+
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("paymentIntentId", paymentIntent.getId().toString());
+        after.put("status", paymentIntent.getStatus().name());
+        after.put("voidRequired", authorizationVoid != null);
+        if (authorization != null && authorizationVoid != null) {
+            after.put("authorizationId", authorization.getId().toString());
+            after.put("authorizationVoidId", authorizationVoid.getId().toString());
+            after.put("authorizationVoidStatus", authorizationVoid.getStatus().name());
+            after.put("authorizationVoidReason", authorizationVoid.getReason().name());
+        }
+        auditLogService.recordMerchantApiAction(merchantContext, requestId, "payment_intent.canceled",
+                "payment_intent", paymentIntent.getId(), authorizationVoid == null
+                        ? "PaymentIntent canceled before approved authorization"
+                        : "PaymentIntent canceled and approved authorization void recorded",
+                before, after);
     }
 
     private PaymentIntent loadPaymentIntent(MerchantContext merchantContext, UUID id) {
@@ -456,5 +527,10 @@ public class PaymentIntentController {
     private record FeatureSnapshotDraft(Map<String, Object> features, Instant computedAt,
             Instant oldestFeatureTimestamp, long maxFeatureAgeMs, FeatureFreshnessStatus freshnessStatus,
             List<String> staleFeatureNames, List<String> missingFeatureNames) {
+    }
+
+    private enum CaptureTrigger {
+        AUTOMATIC_CONFIRM,
+        MANUAL_API
     }
 }

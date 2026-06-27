@@ -8,11 +8,13 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 16 is complete. Confirm now produces deterministic processor
-authorization outcomes, durable fraud lineage, and safe audit records; approved
-authorizations can be captured with balanced double-entry ledger evidence; and
-the remaining Phase 1 synthetic scenario generator now creates repeatable
-payment-risk scenarios through public APIs:
+Chapter 17 is complete. Confirm now produces deterministic processor
+authorization outcomes, durable fraud lineage, and safe audit records;
+`AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
+capture remains an explicit endpoint operation, and approved uncaptured
+authorizations can be canceled only with durable void evidence. The Phase 1
+synthetic scenario generator continues to create repeatable payment-risk
+scenarios through public APIs:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -82,10 +84,11 @@ payment-risk scenarios through public APIs:
 - The deterministic simulator supports approved, issuer decline, insufficient
   funds, suspected fraud decline, CVC failure, AVS line1 failure, AVS postal
   failure, and 3DS-required outcomes from safe stored card metadata.
-- Approved outcomes move the `PaymentAttempt` to `AUTHORIZED` and the
-  `PaymentIntent` to `REQUIRES_CAPTURE`; retryable declines move the attempt to
-  `DECLINED` and the intent to `REQUIRES_PAYMENT_METHOD`; 3DS-required outcomes
-  move the attempt and intent to action-required states.
+- Approved outcomes move the `PaymentAttempt` to `AUTHORIZED`; automatic
+  PaymentIntents become `CAPTURED` with balanced ledger truth, while manual
+  PaymentIntents move to `REQUIRES_CAPTURE`. Retryable declines move the attempt
+  to `DECLINED` and the intent to `REQUIRES_PAYMENT_METHOD`; 3DS-required
+  outcomes move the attempt and intent to action-required states.
 - `GET /payment_attempts/{id}` fetches attempts through merchant scope.
 - `GET /payment_attempts/{id}/authorization` returns tenant-scoped safe
   processor authorization evidence for a payment attempt, including processor
@@ -122,6 +125,18 @@ payment-risk scenarios through public APIs:
   database rejection of orphan or duplicate capture ledger truth, double-capture
   rejection, invalid declined/3DS states, tenant isolation, and rollback when
   ledger persistence fails.
+- Approved `AUTOMATIC` confirm records balanced capture ledger entries, capture
+  webhook delivery records, and a safe capture audit log in the same idempotent
+  transaction; approved `MANUAL` confirm remains in `REQUIRES_CAPTURE`.
+- `POST /payment_intents/{id}/cancel` distinguishes cancellation without an
+  approved authorization from voiding an approved manual authorization.
+  Post-authorization cancel appends tenant-bound `authorization_voids` evidence,
+  creates safe cancel audit/webhook truth, and prevents later capture.
+- Authorization reads expose processor-neutral void evidence without rewriting
+  the original authorization decision or leaking simulator/card secrets.
+- Chapter 17 tests prove automatic/manual capture semantics, cancel/void
+  idempotency, decline/3DS rules, terminal-state rejection, tenant and database
+  lineage constraints, and rollback of false capture/cancel truth.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
@@ -132,9 +147,9 @@ payment-risk scenarios through public APIs:
   artifact under `build/reports/`.
 - Chapter 14 clean local demo evidence is recorded in
   `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
-- Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`,
-  capture is rejected before authorization, and refund is rejected before
-  capture eligibility.
+- Lifecycle contract tests prove cancel is allowed from uncaptured states,
+  capture is rejected before authorization or after cancellation, and refund is
+  rejected before capture eligibility.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 
@@ -227,6 +242,12 @@ Chapter 13 demo:
 scripts/demo-confirm-flow.sh
 THAAP_DEMO_CARD=4999990000000002 scripts/demo-confirm-flow.sh
 THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
+```
+
+Chapter 17 automatic-capture and authorization-void demo:
+
+```bash
+scripts/demo-chapter-17-flow.sh
 ```
 
 Chapter 13 learning verification:
