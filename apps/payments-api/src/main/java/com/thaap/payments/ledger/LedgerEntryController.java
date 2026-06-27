@@ -40,12 +40,13 @@ public class LedgerEntryController {
     }
 
     public record LedgerEntryResponse(UUID id, UUID transactionGroupId, LedgerSourceType sourceType, UUID sourceId,
-            LedgerAccount account, LedgerDirection direction, long amount, String currency, Instant createdAt) {
+            UUID paymentIntentId, UUID refundId, LedgerAccount account, LedgerDirection direction, long amount,
+            String currency, Instant createdAt) {
         static LedgerEntryResponse from(LedgerEntry ledgerEntry) {
             return new LedgerEntryResponse(ledgerEntry.getId(), ledgerEntry.getTransactionGroupId(),
-                    ledgerEntry.getSourceType(), ledgerEntry.getSourceId(), ledgerEntry.getAccount(),
-                    ledgerEntry.getDirection(), ledgerEntry.getAmount(), ledgerEntry.getCurrency(),
-                    ledgerEntry.getCreatedAt());
+                    ledgerEntry.getSourceType(), ledgerEntry.getSourceId(), ledgerEntry.getPaymentIntentId(),
+                    ledgerEntry.getRefundId(), ledgerEntry.getAccount(), ledgerEntry.getDirection(),
+                    ledgerEntry.getAmount(), ledgerEntry.getCurrency(), ledgerEntry.getCreatedAt());
         }
     }
 }

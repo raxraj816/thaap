@@ -14,13 +14,17 @@ import java.util.UUID;
 @Entity
 @Table(name = "ledger_entries",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_ledger_entries_capture_account",
+                @UniqueConstraint(name = "uk_ledger_entries_source_account",
                         columnNames = {"merchant_id", "source_type", "source_id", "account"})
         },
         indexes = {
                 @Index(name = "idx_ledger_entries_merchant_created", columnList = "merchant_id,created_at,id"),
                 @Index(name = "idx_ledger_entries_merchant_group", columnList = "merchant_id,transaction_group_id"),
-                @Index(name = "idx_ledger_entries_merchant_source", columnList = "merchant_id,source_type,source_id")
+                @Index(name = "idx_ledger_entries_merchant_source", columnList = "merchant_id,source_type,source_id"),
+                @Index(name = "idx_ledger_entries_merchant_payment_intent",
+                        columnList = "merchant_id,payment_intent_id,created_at,id"),
+                @Index(name = "idx_ledger_entries_merchant_refund",
+                        columnList = "merchant_id,refund_id,created_at,id")
         })
 public class LedgerEntry {
 
@@ -39,6 +43,12 @@ public class LedgerEntry {
 
     @Column(name = "source_id", nullable = false)
     private UUID sourceId;
+
+    @Column(name = "payment_intent_id", nullable = false)
+    private UUID paymentIntentId;
+
+    @Column(name = "refund_id")
+    private UUID refundId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 64)
@@ -61,12 +71,15 @@ public class LedgerEntry {
     }
 
     public LedgerEntry(UUID merchantId, UUID transactionGroupId, LedgerSourceType sourceType, UUID sourceId,
-            LedgerAccount account, LedgerDirection direction, long amount, String currency) {
+            UUID paymentIntentId, UUID refundId, LedgerAccount account, LedgerDirection direction, long amount,
+            String currency) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.transactionGroupId = transactionGroupId;
         this.sourceType = sourceType;
         this.sourceId = sourceId;
+        this.paymentIntentId = paymentIntentId;
+        this.refundId = refundId;
         this.account = account;
         this.direction = direction;
         this.amount = amount;
@@ -92,6 +105,14 @@ public class LedgerEntry {
 
     public UUID getSourceId() {
         return sourceId;
+    }
+
+    public UUID getPaymentIntentId() {
+        return paymentIntentId;
+    }
+
+    public UUID getRefundId() {
+        return refundId;
     }
 
     public LedgerAccount getAccount() {

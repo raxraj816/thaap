@@ -74,6 +74,7 @@ Implemented tenant-scoped endpoints:
 - `POST /payment_intents/{id}/capture`
 - `POST /payment_intents/{id}/cancel`
 - `POST /refunds`
+- `GET /refunds/{id}`
 - `GET /ledger/entries`
 - `POST /webhook_endpoints`
 - `GET /webhook_deliveries`
@@ -346,20 +347,40 @@ V6 composite foreign keys reject cross-object or cross-tenant void lineage, and
 unique constraints allow only one void per authorization and PaymentIntent.
 
 `GET /ledger/entries` returns only the current merchant's safe ledger fields:
-entry ID, transaction group ID, source type, source ID, account, direction,
-amount, currency, and creation time. It does not expose another merchant's
-ledger rows. The endpoint defaults to 50 rows and rejects limits above 100 so
-merchant financial history cannot accidentally become an unbounded read path.
+entry ID, transaction group ID, source type, source ID, PaymentIntent ID,
+optional Refund ID, account, direction, amount, currency, and creation time. It
+does not expose another merchant's ledger rows. The endpoint defaults to 50
+rows and rejects limits above 100 so merchant financial history cannot
+accidentally become an unbounded read path.
 
-The V5 schema also protects capture ledger truth at the database layer:
-`ledger_entries.source_id` must reference a same-merchant PaymentIntent for the
-current `PAYMENT_INTENT_CAPTURE` source type, valid capture rows are limited to
-the two Chapter 15 account/direction pairs, and the same capture source cannot
-post the same account row twice.
+The ledger schema protects source truth at the database layer. Capture rows
+retain the PaymentIntent as their source and use debit `CUSTOMER_RECEIVABLE` /
+credit `MERCHANT_PAYABLE`. Refund rows use the durable Refund as their source,
+retain the original PaymentIntent ID, and exactly reverse those postings with
+debit `MERCHANT_PAYABLE` / credit `CUSTOMER_RECEIVABLE`. Composite foreign keys
+prevent a Refund from being attached to another payment's ledger rows.
 
-Refunds still use the earlier full-refund-only lifecycle guard and do not yet
-write refund ledger entries. Fees, disputes, payout settlement, partial
-capture, and partial refunds remain deferred to later ledger chapters.
+## Durable Full Refund Contract
+
+`POST /refunds` requires `Idempotency-Key`, `paymentIntentId`, and the full
+captured amount. The operation locks the merchant-scoped PaymentIntent and
+requires all three claims before money truth changes:
+
+- PaymentIntent status is `CAPTURED`
+- a matching approved Authorization exists
+- exactly two balanced capture-ledger rows match amount and currency
+
+The transaction persists a `RECORDED` Refund linked to the same PaymentIntent,
+PaymentAttempt, and Authorization; writes two balanced reversal entries; moves
+the PaymentIntent to `REFUNDED`; creates `refund.created` webhook delivery
+records using the Refund ID; writes a safe Refund audit log; and completes
+idempotency. Any failure rolls all of those writes back.
+
+`GET /refunds/{id}` is tenant-scoped and returns the durable Refund lineage.
+`RECORDED` means the local simulator has recorded the reversal; it does not
+claim a card network or acquirer completed an external refund. Partial refunds,
+refund reasons, approval workflows, fee reversal, and external refund calls
+remain deferred.
 
 ## Database Migrations
 
@@ -385,8 +406,13 @@ legacy non-terminal `AUTOMATIC` row that could still progress toward capture to
 `MANUAL`. This preserves the old explicit-capture behavior for existing
 confirms, retries, action flows, recovery, and approved payments instead of
 changing money movement during deployment. Terminal rows remain untouched as
-historical truth. Do not edit an already-applied migration to add new durable
-product truth.
+historical truth. V8 adds durable Refund lineage and refund ledger source
+constraints. It backfills explicit PaymentIntent lineage onto capture rows and
+fails fast when pre-V8 `REFUNDED` rows exist because their random response ID,
+authorization lineage, and accounting evidence cannot be reconstructed
+honestly. This local-only environment must be reset or explicitly remediated
+before retrying that upgrade. Do not edit an already-applied migration to add
+new durable product truth.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally

@@ -5,12 +5,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.thaap.payments.customer.Customer;
 import com.thaap.payments.customer.CustomerRepository;
+import com.thaap.payments.authorization.Authorization;
+import com.thaap.payments.authorization.AuthorizationRepository;
+import com.thaap.payments.authorization.AuthorizationStatus;
+import com.thaap.payments.authorization.NetworkStatus;
+import com.thaap.payments.authorization.ThreeDsResult;
+import com.thaap.payments.authorization.VerificationResult;
 import com.thaap.payments.idempotency.IdempotencyRecord;
 import com.thaap.payments.idempotency.IdempotencyRepository;
 import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.payment.PaymentIntent;
 import com.thaap.payments.payment.PaymentIntentRepository;
+import com.thaap.payments.payment.Refund;
+import com.thaap.payments.payment.RefundRepository;
+import com.thaap.payments.paymentattempt.PaymentAttempt;
+import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
+import com.thaap.payments.paymentmethod.CardFunding;
+import com.thaap.payments.paymentmethod.PaymentMethod;
+import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.webhook.WebhookDelivery;
@@ -37,6 +50,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.ActiveProfiles;
 
 @ActiveProfiles("test")
@@ -60,6 +74,18 @@ class DatabaseMigrationTests {
 
     @Autowired
     private PaymentIntentRepository paymentIntentRepository;
+
+    @Autowired
+    private PaymentMethodRepository paymentMethodRepository;
+
+    @Autowired
+    private PaymentAttemptRepository paymentAttemptRepository;
+
+    @Autowired
+    private AuthorizationRepository authorizationRepository;
+
+    @Autowired
+    private RefundRepository refundRepository;
 
     @Autowired
     private IdempotencyRepository idempotencyRepository;
@@ -125,6 +151,13 @@ class DatabaseMigrationTests {
                   AND description = 'harden legacy capture method semantics'
                   AND success = TRUE
                 """, Integer.class);
+        var refundLedgerSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '8'
+                  AND description = 'add refunds and refund ledger lineage'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
@@ -133,6 +166,7 @@ class DatabaseMigrationTests {
         assertThat(ledgerSchema).isEqualTo(1);
         assertThat(authorizationVoidSchema).isEqualTo(1);
         assertThat(legacyCaptureMethodHardening).isEqualTo(1);
+        assertThat(refundLedgerSchema).isEqualTo(1);
     }
 
     @Test
@@ -152,6 +186,7 @@ class DatabaseMigrationTests {
                 "feature_snapshots",
                 "audit_logs",
                 "ledger_entries",
+                "refunds",
                 "fraud_rules",
                 "review_cases");
 
@@ -191,7 +226,14 @@ class DatabaseMigrationTests {
         assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_created");
         assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_group");
         assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_source");
-        assertIndexExists("ledger_entries", "uk_ledger_entries_capture_account");
+        assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_payment_intent");
+        assertIndexExists("ledger_entries", "idx_ledger_entries_merchant_refund");
+        assertIndexExists("ledger_entries", "uk_ledger_entries_source_account");
+        assertIndexExists("refunds", "uk_refunds_merchant_id_id");
+        assertIndexExists("refunds", "uk_refunds_merchant_id_id_payment_intent");
+        assertIndexExists("refunds", "uk_refunds_payment_intent");
+        assertIndexExists("refunds", "idx_refunds_merchant_created");
+        assertIndexExists("refunds", "idx_refunds_attempt");
         assertIndexExists("fraud_rules", "idx_fraud_rules_merchant_created");
         assertIndexExists("review_cases", "idx_review_cases_merchant_created");
 
@@ -219,7 +261,10 @@ class DatabaseMigrationTests {
                 "aggregate_type", "aggregate_id", "request_id", "trace_id", "reason", "before_json",
                 "after_json", "created_at");
         assertThat(columnNames("ledger_entries")).contains("merchant_id", "transaction_group_id", "source_type",
-                "source_id", "account", "direction", "amount", "currency", "created_at");
+                "source_id", "payment_intent_id", "refund_id", "account", "direction", "amount", "currency",
+                "created_at");
+        assertThat(columnNames("refunds")).contains("merchant_id", "payment_intent_id", "payment_attempt_id",
+                "authorization_id", "amount", "currency", "status", "created_at");
         assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
         assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",
@@ -305,6 +350,48 @@ class DatabaseMigrationTests {
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> insertLedgerEntry(merchantA.getId(), paymentIntentA.getId(),
                 "MERCHANT_PAYABLE", "DEBIT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void refundAndRefundLedgerConstraintsEnforceTenantAndObjectLineage() {
+        Merchant merchantA = merchantRepository.saveAndFlush(new Merchant("merchant-a", "thaap_refund_a"));
+        Merchant merchantB = merchantRepository.saveAndFlush(new Merchant("merchant-b", "thaap_refund_b"));
+        Customer customerA = customerRepository.saveAndFlush(new Customer(merchantA.getId(), "refund-email-a", null));
+        Customer customerB = customerRepository.saveAndFlush(new Customer(merchantB.getId(), "refund-email-b", null));
+        PaymentIntent paymentIntentA = paymentIntentRepository.saveAndFlush(new PaymentIntent(
+                merchantA.getId(), customerA.getId(), 1200, "USD"));
+        PaymentIntent otherPaymentIntentA = paymentIntentRepository.saveAndFlush(new PaymentIntent(
+                merchantA.getId(), customerA.getId(), 1200, "USD"));
+        PaymentIntent paymentIntentB = paymentIntentRepository.saveAndFlush(new PaymentIntent(
+                merchantB.getId(), customerB.getId(), 1200, "USD"));
+        PaymentMethod paymentMethodA = paymentMethodRepository.saveAndFlush(new PaymentMethod(
+                merchantA.getId(), customerA.getId(), "tok_a", "fingerprint-a", "499999", "0001",
+                CardFunding.CREDIT, "US"));
+        PaymentAttempt paymentAttemptA = paymentAttemptRepository.saveAndFlush(new PaymentAttempt(
+                merchantA.getId(), paymentIntentA.getId(), paymentMethodA.getId(), "refund-attempt-a", 1));
+        Authorization authorizationA = authorizationRepository.saveAndFlush(approvedAuthorization(
+                merchantA.getId(), paymentAttemptA.getId(), "refund-auth-a"));
+        Refund refundA = refundRepository.saveAndFlush(new Refund(merchantA.getId(), paymentIntentA.getId(),
+                paymentAttemptA.getId(), authorizationA.getId(), 1200, "USD"));
+
+        assertThatThrownBy(() -> refundRepository.saveAndFlush(new Refund(merchantA.getId(), paymentIntentA.getId(),
+                paymentAttemptA.getId(), authorizationA.getId(), 1200, "USD")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> refundRepository.saveAndFlush(new Refund(merchantA.getId(),
+                otherPaymentIntentA.getId(), paymentAttemptA.getId(), authorizationA.getId(), 1200, "USD")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> refundRepository.saveAndFlush(new Refund(merchantB.getId(), paymentIntentB.getId(),
+                paymentAttemptA.getId(), authorizationA.getId(), 1200, "USD")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        insertRefundLedgerEntry(merchantA.getId(), paymentIntentA.getId(), refundA.getId(),
+                "MERCHANT_PAYABLE", "DEBIT");
+        assertThatThrownBy(() -> insertRefundLedgerEntry(merchantA.getId(), paymentIntentA.getId(), refundA.getId(),
+                "CUSTOMER_RECEIVABLE", "DEBIT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertRefundLedgerEntry(merchantA.getId(), otherPaymentIntentA.getId(),
+                refundA.getId(), "CUSTOMER_RECEIVABLE", "CREDIT"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -425,6 +512,51 @@ class DatabaseMigrationTests {
         }
     }
 
+    @Test
+    void chapter18MigrationBackfillsCaptureLedgerLineageWithoutInventingRefundTruth() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("chapter18_capture_backfill");
+        migrate(upgrade.dataSource(), "7");
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        insertUpgradeMerchantCustomerAndPaymentIntent(upgrade.jdbcTemplate(), merchantId, customerId,
+                paymentIntentId, "CAPTURED");
+        insertLegacyCaptureLedgerEntry(upgrade.jdbcTemplate(), merchantId, paymentIntentId,
+                "CUSTOMER_RECEIVABLE", "DEBIT");
+        insertLegacyCaptureLedgerEntry(upgrade.jdbcTemplate(), merchantId, paymentIntentId,
+                "MERCHANT_PAYABLE", "CREDIT");
+
+        migrate(upgrade.dataSource(), "8");
+
+        List<Map<String, Object>> entries = upgrade.jdbcTemplate().queryForList("""
+                SELECT source_id, payment_intent_id, refund_id
+                FROM ledger_entries
+                ORDER BY account
+                """);
+        assertThat(entries).hasSize(2);
+        assertThat(entries).allSatisfy(entry -> {
+            assertThat(entry.get("source_id")).isEqualTo(paymentIntentId);
+            assertThat(entry.get("payment_intent_id")).isEqualTo(paymentIntentId);
+            assertThat(entry.get("refund_id")).isNull();
+        });
+        assertThat(upgrade.jdbcTemplate().queryForObject("SELECT COUNT(*) FROM refunds", Integer.class)).isZero();
+    }
+
+    @Test
+    void chapter18MigrationRejectsLegacyRefundedPaymentIntents() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("chapter18_legacy_refund_guard");
+        migrate(upgrade.dataSource(), "7");
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        insertUpgradeMerchantCustomerAndPaymentIntent(upgrade.jdbcTemplate(), merchantId, customerId,
+                paymentIntentId, "REFUNDED");
+
+        assertThatThrownBy(() -> migrate(upgrade.dataSource(), "8"))
+                .hasMessageContaining("V8__add_refunds_and_refund_ledger_lineage.sql")
+                .hasStackTraceContaining("ck_chapter18_no_legacy_refunded_payment_intents");
+    }
+
     private String captureMethod(JdbcTemplate source, UUID paymentIntentId) {
         return source.queryForObject("""
                 SELECT capture_method
@@ -482,18 +614,91 @@ class DatabaseMigrationTests {
                     transaction_group_id,
                     source_type,
                     source_id,
+                    payment_intent_id,
+                    refund_id,
                     account,
                     direction,
                     amount,
                     currency,
                     created_at
                 )
+                VALUES (?, ?, ?, 'PAYMENT_INTENT_CAPTURE', ?, ?, NULL, ?, ?, 1200, 'USD', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, UUID.randomUUID(), sourceId, sourceId, account, direction);
+    }
+
+    private void insertRefundLedgerEntry(UUID merchantId, UUID paymentIntentId, UUID refundId, String account,
+            String direction) {
+        jdbcTemplate.update("""
+                INSERT INTO ledger_entries (
+                    id, merchant_id, transaction_group_id, source_type, source_id, payment_intent_id, refund_id,
+                    account, direction, amount, currency, created_at
+                )
+                VALUES (?, ?, ?, 'REFUND', ?, ?, ?, ?, ?, 1200, 'USD', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, UUID.randomUUID(), refundId, paymentIntentId, refundId,
+                account, direction);
+    }
+
+    private Authorization approvedAuthorization(UUID merchantId, UUID paymentAttemptId, String reference) {
+        return new Authorization(merchantId, paymentAttemptId, "simulator", reference, "APPROVED",
+                NetworkStatus.APPROVED, 1200, 1200, "USD", AuthorizationStatus.APPROVED,
+                VerificationResult.PASS, VerificationResult.PASS, VerificationResult.PASS,
+                ThreeDsResult.NOT_REQUIRED, "APPROVED");
+    }
+
+    private UpgradeDatabase createUpgradeDatabase(String prefix) {
+        String databaseName = prefix + "_" + UUID.randomUUID().toString().replace("-", "");
+        SingleConnectionDataSource upgradeDataSource = new SingleConnectionDataSource(
+                "jdbc:h2:mem:" + databaseName
+                        + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
+                "sa", "", true);
+        return new UpgradeDatabase(upgradeDataSource, new JdbcTemplate(upgradeDataSource));
+    }
+
+    private void migrate(DataSource upgradeDataSource, String target) {
+        Flyway.configure()
+                .dataSource(upgradeDataSource)
+                .locations("classpath:db/migration")
+                .target(target)
+                .load()
+                .migrate();
+    }
+
+    private void insertUpgradeMerchantCustomerAndPaymentIntent(JdbcTemplate source, UUID merchantId,
+            UUID customerId, UUID paymentIntentId, String status) {
+        source.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'upgrade-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "upgrade-hash-" + paymentIntentId);
+        source.update("""
+                INSERT INTO customers (id, merchant_id, email_hash, created_at)
+                VALUES (?, ?, 'upgrade-email-hash', CURRENT_TIMESTAMP)
+                """, customerId, merchantId);
+        source.update("""
+                INSERT INTO payment_intents (
+                    id, merchant_id, customer_id, amount, currency, capture_method, status,
+                    metadata, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 1200, 'USD', 'AUTOMATIC', ?, '{}',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, paymentIntentId, merchantId, customerId, status);
+    }
+
+    private void insertLegacyCaptureLedgerEntry(JdbcTemplate source, UUID merchantId, UUID paymentIntentId,
+            String account, String direction) {
+        source.update("""
+                INSERT INTO ledger_entries (
+                    id, merchant_id, transaction_group_id, source_type, source_id,
+                    account, direction, amount, currency, created_at
+                )
                 VALUES (?, ?, ?, 'PAYMENT_INTENT_CAPTURE', ?, ?, ?, 1200, 'USD', CURRENT_TIMESTAMP)
-                """, UUID.randomUUID(), merchantId, UUID.randomUUID(), sourceId, account, direction);
+                """, UUID.randomUUID(), merchantId, paymentIntentId, paymentIntentId, account, direction);
     }
 
     private IdempotencyRecord idempotencyRecord(UUID merchantId, String key, String requestHash) {
         return new IdempotencyRecord(merchantId, key, "test.operation", requestHash,
                 Instant.now().plus(1, ChronoUnit.DAYS));
+    }
+
+    private record UpgradeDatabase(DataSource dataSource, JdbcTemplate jdbcTemplate) {
     }
 }

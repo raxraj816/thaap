@@ -59,6 +59,18 @@ rows for the manual payment. It accepts only loopback API origins so demo
 traffic cannot enter a shared environment without the trusted traffic-origin
 boundary tracked by `TD-0001`.
 
+Run the Chapter 18 durable full-refund and ledger-reversal demo:
+
+```bash
+scripts/demo-chapter-18-refund-flow.sh
+```
+
+The script accepts only a loopback API origin. It proves automatic capture,
+durable Refund retrieval and idempotent replay, `RECORDED` simulator-local
+status, exactly reversed account directions, balanced capture/refund
+transaction groups, PaymentIntent/Refund ledger lineage, and exactly one
+`refund.created` delivery whose resource is the Refund.
+
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash

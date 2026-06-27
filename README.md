@@ -8,11 +8,13 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 17 is complete. Confirm now produces deterministic processor
+Chapter 18 is complete. Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
 capture remains an explicit endpoint operation, and approved uncaptured
-authorizations can be canceled only with durable void evidence. The Phase 1
+authorizations can be canceled only with durable void evidence. Captured
+payments can now be fully refunded through a durable Refund object with exact
+ledger reversal, safe audit/webhook truth, and tenant-scoped retrieval. The Phase 1
 synthetic scenario generator continues to create repeatable payment-risk
 scenarios through public APIs:
 
@@ -137,6 +139,17 @@ scenarios through public APIs:
 - Chapter 17 tests prove automatic/manual capture semantics, cancel/void
   idempotency, decline/3DS rules, terminal-state rejection, tenant and database
   lineage constraints, and rollback of false capture/cancel truth.
+- `POST /refunds` now requires a captured PaymentIntent with matching approved
+  authorization and complete capture-ledger evidence, persists a tenant-scoped
+  `RECORDED` Refund, exactly reverses capture accounting, moves the intent to
+  `REFUNDED`, and commits webhook, audit, and idempotency truth atomically.
+- `GET /refunds/{id}` returns only the authenticated merchant's durable Refund
+  lineage. Ledger reads expose both original PaymentIntent lineage and optional
+  Refund lineage without weakening capture source identity.
+- Chapter 18 tests prove automatic/manual full refund, idempotent replay,
+  partial/over/double-refund rejection, invalid lifecycle states, tenant and
+  database lineage, migration compatibility, rollback on ledger/webhook/audit
+  failure, and one coherent winner under a real PostgreSQL refund race.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
@@ -148,8 +161,8 @@ scenarios through public APIs:
 - Chapter 14 clean local demo evidence is recorded in
   `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
 - Lifecycle contract tests prove cancel is allowed from uncaptured states,
-  capture is rejected before authorization or after cancellation, and refund is
-  rejected before capture eligibility.
+  capture is rejected before authorization or after cancellation, and refund
+  requires capture state plus authorization and ledger evidence.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
 
@@ -228,7 +241,8 @@ curl http://localhost:8080/actuator/health/readiness
 ```
 
 If an older local PostgreSQL volume was created before Flyway became the schema
-owner, reset it before normal local startup:
+owner, or contains a pre-V8 thin `REFUNDED` PaymentIntent without reconstructable
+Refund/ledger lineage, reset it before normal local startup:
 
 ```bash
 docker compose -f infra/docker/compose.yml down --volumes
@@ -248,6 +262,12 @@ Chapter 17 automatic-capture and authorization-void demo:
 
 ```bash
 scripts/demo-chapter-17-flow.sh
+```
+
+Chapter 18 durable-refund and exact ledger-reversal demo:
+
+```bash
+scripts/demo-chapter-18-refund-flow.sh
 ```
 
 Chapter 13 learning verification:
