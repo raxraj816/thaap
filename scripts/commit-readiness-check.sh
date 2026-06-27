@@ -38,6 +38,7 @@ required_files=(
   "apps/payments-api/README.md"
   "docs/IMPLEMENTATION_MASTER_PLAN.md"
   "docs/COMMIT_READINESS_CHECKLIST.md"
+  "docs/TECHNICAL_DEBT_REGISTER.md"
 )
 
 for file in "${required_files[@]}"; do
@@ -58,6 +59,10 @@ if rg -n "Chapter 2 is complete|Chapter 3 is complete" README.md >/dev/null; the
 else
   echo "OK README.md does not advertise stale Chapter 2/Chapter 3 status."
 fi
+
+echo
+echo "Checking canonical technical and implementation debt..."
+scripts/technical-debt-check.py
 
 echo
 if [[ "$deep_dive_required" == true ]]; then
@@ -84,12 +89,12 @@ echo "- Observability and failure-mode review: logs, metrics, comments, debuggab
 echo "- Test evidence review: riskiest invariant, rollback path, tenant boundary, privacy boundary, idempotency behavior."
 echo "- Stripe/Mastercard reviewer pass: first likely objection is fixed, tested, documented, or explicitly deferred."
 echo "- Cheap-fix pull-forward: valid low-cost review comments are fixed before handoff."
-echo "- Deferral discipline: every true deferral names reason, owner slice/chapter, and unblock evidence."
+echo "- Deferral discipline: every true deferral has a TD-NNNN ID, reason, owner phase/slice, DRI, trigger, done criteria, and closure evidence."
 echo
 echo "Review disposition format:"
 echo "- Fixed now: implemented and covered by tests/docs where relevant."
 echo "- Accepted risk: acceptable for this simulator/product slice, with reason recorded."
-echo "- Deferred: blocked by missing invariant/boundary/lineage/owner slice, with unblock evidence."
+echo "- Deferred: registered under TD-NNNN and blocked by a named missing invariant/boundary/lineage, with exact owner and trigger."
 echo "- Rejected as not applicable: conflicts with current product truth, simulator scope, or architecture direction."
 
 if [[ "$run_tests" == true ]]; then
@@ -105,5 +110,6 @@ echo "- Check master plan if scope, sequencing, or invariants changed."
 echo "- Check runtime smoke test evidence if local startup behavior changed."
 echo "- Check that unrelated files are not mixed into the commit."
 echo "- Include adversarial-review status, cheap fixes, true deferrals, and proof in the final handoff."
+echo "- Name every new, changed, or resolved TD-NNNN entry in the final handoff."
 
 exit "$missing"

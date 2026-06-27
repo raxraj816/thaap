@@ -146,6 +146,35 @@ Every deferral must name:
 When a slice finishes early and tests are green, pull forward the next safest
 vertical step instead of stopping at a narrow horizontal milestone.
 
+## Permanent Debt Registry
+
+Do not rely on chat history, agent memory, daily notes, or roadmap prose as the
+only record of technical or implementation debt.
+
+`docs/TECHNICAL_DEBT_REGISTER.md` is the canonical debt source of truth. Any
+technical, implementation, security, data/ML, or operational debt that is
+accepted or deferred must, in the same change:
+
+1. Receive the next immutable `TD-NNNN` identifier.
+2. Record status, type, priority, introduction date, originating chapter,
+   exact risk/invariant, deferral reason, resolution phase/slice, primary DRI,
+   supporting owners, trigger/deadline, done criteria, resolution evidence, and
+   last-review date.
+3. Be referenced by ID in both the originating chapter and destination owner
+   slice in `docs/IMPLEMENTATION_MASTER_PLAN.md`.
+4. Be referenced in the current daily note and weekly review when relevant.
+5. Pass `scripts/technical-debt-check.py` and
+   `scripts/commit-readiness-check.sh`.
+
+Vague owners or targets such as "later," "future chapter," or "TBD" are not
+valid. “Accepted risk” is a review disposition, not a debt status; registered
+debt uses `OPEN`, `IN_PROGRESS`, or `RESOLVED`. `P0` work cannot be deferred.
+IDs must never be deleted or reused.
+Resolved debt stays in the register with concrete implementation, test, schema,
+or operational evidence. Every non-resolved debt must be reviewed at least once
+every 35 days; the automated gate rejects stale entries. A debt that exists only
+in conversation is considered undocumented and blocks completion.
+
 ## Aggressive Product Execution
 
 The timeline is intentionally aggressive. Move quickly by prioritizing the

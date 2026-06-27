@@ -10,6 +10,10 @@ Use this before saying a change is ready to commit.
 - Service README checked when a service changed.
 - `docs/IMPLEMENTATION_MASTER_PLAN.md` checked when scope, sequencing,
   invariants, or roadmap changed.
+- `docs/TECHNICAL_DEBT_REGISTER.md` updated for every accepted or deferred
+  technical, implementation, security, data/ML, or operational debt.
+- `scripts/technical-debt-check.py` passes with no missing fields, vague owners,
+  vague resolution targets, stale reviews, or dangling debt references.
 - Daily learning note exists for non-trivial implementation days.
 - Deep dive exists for non-trivial implementation days.
 - Relevant tests were run, or the reason they could not be run is recorded.
@@ -29,7 +33,8 @@ Before committing, answer:
 7. Would this diff make sense to a reviewer without our chat context?
 8. What would a Stripe/Mastercard-style reviewer object to first?
 9. Were cheap, valid review comments fixed before handoff?
-10. Are true deferrals labeled with owner slice and unblock evidence?
+10. Does every true deferral have a registered `TD-NNNN` ID, exact owner slice,
+    DRI, trigger/deadline, done criteria, and master-plan references?
 
 ## Senior Staff Adversarial Review Gate
 
@@ -60,7 +65,8 @@ while the implementation context is still fresh.
 - **Cheap-fix pull-forward:** Fix valid low-cost comments before handoff instead
   of leaving obvious review work for someone else.
 - **Deferral discipline:** Every true deferral names the exact reason, owner
-  chapter or implementation slice, and evidence that would unblock it.
+  chapter or implementation slice, and evidence that would unblock it; every
+  accepted debt is registered under an immutable `TD-NNNN` ID.
 
 Classify review items with this disposition:
 
