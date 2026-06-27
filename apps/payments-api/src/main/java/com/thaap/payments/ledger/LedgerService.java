@@ -16,12 +16,7 @@ public class LedgerService {
     }
 
     public CaptureLedgerResult recordCapture(UUID merchantId, UUID paymentIntentId, long amount, String currency) {
-        if (amount <= 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Capture amount must be positive");
-        }
-        if (currency == null || currency.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Capture currency is required");
-        }
+        requirePositiveAmountAndCurrency(amount, currency, "Capture");
         List<LedgerEntry> existingEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(merchantId,
                 LedgerSourceType.PAYMENT_INTENT_CAPTURE, paymentIntentId);
         if (!existingEntries.isEmpty()) {
@@ -32,14 +27,81 @@ public class LedgerService {
         UUID transactionGroupId = UUID.randomUUID();
         List<LedgerEntry> entries = List.of(
                 new LedgerEntry(merchantId, transactionGroupId, LedgerSourceType.PAYMENT_INTENT_CAPTURE,
-                        paymentIntentId, LedgerAccount.CUSTOMER_RECEIVABLE, LedgerDirection.DEBIT, amount,
-                        currency.toUpperCase()),
+                        paymentIntentId, paymentIntentId, null, LedgerAccount.CUSTOMER_RECEIVABLE,
+                        LedgerDirection.DEBIT, amount, currency.toUpperCase()),
                 new LedgerEntry(merchantId, transactionGroupId, LedgerSourceType.PAYMENT_INTENT_CAPTURE,
-                        paymentIntentId, LedgerAccount.MERCHANT_PAYABLE, LedgerDirection.CREDIT, amount,
-                        currency.toUpperCase()));
+                        paymentIntentId, paymentIntentId, null, LedgerAccount.MERCHANT_PAYABLE,
+                        LedgerDirection.CREDIT, amount, currency.toUpperCase()));
         requireBalanced(entries);
         List<LedgerEntry> savedEntries = ledgerEntryRepository.saveAll(entries);
         return new CaptureLedgerResult(transactionGroupId, savedEntries);
+    }
+
+    public RefundLedgerResult recordRefund(UUID merchantId, UUID paymentIntentId, UUID refundId, long amount,
+            String currency) {
+        requirePositiveAmountAndCurrency(amount, currency, "Refund");
+        List<LedgerEntry> existingRefundEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(
+                merchantId, LedgerSourceType.REFUND, refundId);
+        if (!existingRefundEntries.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Refund ledger entries already exist for Refund");
+        }
+
+        List<LedgerEntry> captureEntries = ledgerEntryRepository.findByMerchantIdAndPaymentIntentIdAndSourceType(
+                merchantId, paymentIntentId, LedgerSourceType.PAYMENT_INTENT_CAPTURE);
+        UUID captureTransactionGroupId = requireValidCaptureLedger(captureEntries, amount, currency);
+
+        UUID refundTransactionGroupId = UUID.randomUUID();
+        List<LedgerEntry> refundEntries = List.of(
+                new LedgerEntry(merchantId, refundTransactionGroupId, LedgerSourceType.REFUND, refundId,
+                        paymentIntentId, refundId, LedgerAccount.MERCHANT_PAYABLE, LedgerDirection.DEBIT, amount,
+                        currency.toUpperCase()),
+                new LedgerEntry(merchantId, refundTransactionGroupId, LedgerSourceType.REFUND, refundId,
+                        paymentIntentId, refundId, LedgerAccount.CUSTOMER_RECEIVABLE, LedgerDirection.CREDIT, amount,
+                        currency.toUpperCase()));
+        requireBalanced(refundEntries);
+        List<LedgerEntry> savedEntries = ledgerEntryRepository.saveAll(refundEntries);
+        return new RefundLedgerResult(captureTransactionGroupId, refundTransactionGroupId, savedEntries);
+    }
+
+    private void requirePositiveAmountAndCurrency(long amount, String currency, String operation) {
+        if (amount <= 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, operation + " amount must be positive");
+        }
+        if (currency == null || currency.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, operation + " currency is required");
+        }
+    }
+
+    private UUID requireValidCaptureLedger(List<LedgerEntry> entries, long amount, String currency) {
+        if (entries.size() != 2) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent does not have complete capture ledger evidence");
+        }
+        requireBalanced(entries);
+        UUID transactionGroupId = entries.get(0).getTransactionGroupId();
+        String normalizedCurrency = currency.toUpperCase();
+        boolean customerReceivableDebit = false;
+        boolean merchantPayableCredit = false;
+        for (LedgerEntry entry : entries) {
+            if (entry.getAmount() != amount || !entry.getCurrency().equals(normalizedCurrency)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Capture ledger amount or currency does not match Refund");
+            }
+            if (entry.getAccount() == LedgerAccount.CUSTOMER_RECEIVABLE
+                    && entry.getDirection() == LedgerDirection.DEBIT) {
+                customerReceivableDebit = true;
+            }
+            if (entry.getAccount() == LedgerAccount.MERCHANT_PAYABLE
+                    && entry.getDirection() == LedgerDirection.CREDIT) {
+                merchantPayableCredit = true;
+            }
+        }
+        if (!customerReceivableDebit || !merchantPayableCredit) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent capture ledger postings are incomplete");
+        }
+        return transactionGroupId;
     }
 
     private void requireBalanced(List<LedgerEntry> entries) {
@@ -76,5 +138,9 @@ public class LedgerService {
     }
 
     public record CaptureLedgerResult(UUID transactionGroupId, List<LedgerEntry> entries) {
+    }
+
+    public record RefundLedgerResult(UUID captureTransactionGroupId, UUID transactionGroupId,
+            List<LedgerEntry> entries) {
     }
 }

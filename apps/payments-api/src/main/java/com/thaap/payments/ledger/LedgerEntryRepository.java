@@ -11,4 +11,7 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
 
     List<LedgerEntry> findByMerchantIdAndSourceTypeAndSourceId(UUID merchantId, LedgerSourceType sourceType,
             UUID sourceId);
+
+    List<LedgerEntry> findByMerchantIdAndPaymentIntentIdAndSourceType(UUID merchantId, UUID paymentIntentId,
+            LedgerSourceType sourceType);
 }

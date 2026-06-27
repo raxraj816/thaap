@@ -356,6 +356,7 @@ Model prediction logs
 ### 4.2 Money Movement And Dispute APIs
 
 - `POST /refunds`
+- `GET /refunds/{id}`
 - `POST /chargebacks`
 - `GET /ledger/entries`
 
@@ -522,10 +523,12 @@ PaymentIntent statuses:
 `Refund`
 
 - `id`
-- `captureId`
+- `merchantId`
+- `paymentIntentId`
+- `paymentAttemptId`
+- `authorizationId`
 - `amount`
 - `currency`
-- `reason`
 - `status`
 - `createdAt`
 
@@ -1869,10 +1872,17 @@ Completed chapters:
   evidence and exposes that evidence through the authorization read contract.
 - Cancel state, authorization void, webhook delivery record, audit log, and
   idempotency completion share one transaction boundary.
+- Chapter 18 replaces the thin refund response with a tenant-scoped durable
+  Refund linked to the winning PaymentIntent, PaymentAttempt, and Authorization.
+- Full refund exactly reverses the capture postings with debit
+  `MERCHANT_PAYABLE` and credit `CUSTOMER_RECEIVABLE`; Refund state, ledger,
+  `refund.created` delivery records, audit log, and idempotency completion share
+  one transaction boundary.
+- `GET /refunds/{id}` and extended ledger reads expose safe tenant-scoped
+  payment/refund lineage.
 
 Remaining Phase 2 work:
 
-- Refund ledger entries and refund object truth.
 - Fees, payout settlement, disputes, and chargeback ledger groups.
 - Webhook delivery execution/retry behavior beyond delivery records.
 
@@ -2022,13 +2032,14 @@ Detailed Phase 2 chapter plan:
 
 3. Chapter 18: Refund Object Truth And Refund Ledger Entries.
 
+   Status: complete.
+
    Build:
 
    - Replace the current refund state guard with a real refund mutation path.
    - Create durable refund truth for a full captured PaymentIntent refund.
    - Add refund ledger group entries that reverse capture accounting.
-   - Emit `refund.created` and/or `payment_intent.refunded` webhook delivery
-     records.
+   - Emit canonical `refund.created` webhook delivery records.
    - Write safe refund audit logs with payment, refund, authorization, and ledger
      references.
 
@@ -2055,10 +2066,79 @@ Detailed Phase 2 chapter plan:
    - Tenant isolation tests for refund mutation and refund/ledger reads.
    - Rollback test proving ledger persistence failure leaves no refunded state.
 
-   Defer:
+   Deferred capability ownership:
 
-   - Partial refunds, refund reasons taxonomy, refund review approval, fee
-     reversal, dispute offsets, and external acquirer refund calls.
+   - Partial refunds and the separate Capture object are owned by the
+     **Partial Money Accounting** Payments Core slice below. Chapter 18 cannot
+     support them without replacing one-refund-per-PaymentIntent truth with
+     explicit capture allocation and cumulative refundable-balance accounting.
+     Start the slice when the product accepts a partial capture or refund. It is
+     unblocked only when durable Capture lineage, multiple Refunds, atomic
+     cumulative amount guards, and PostgreSQL concurrency tests prove that
+     capture and refund totals cannot exceed the authorized/captured amounts.
+   - Fee reversal is also owned by **Partial Money Accounting**. There is no fee
+     ledger truth to reverse in Chapter 18. Start it when THAAP introduces a fee
+     schedule or fee ledger postings; completion evidence must prove full and
+     proportional fee treatment, rounding policy, balanced entries, and
+     refund/dispute interaction.
+   - Refund reason taxonomy and review-triggered refund approval are owned by
+     the Phase 4 **Refund Operations And Review Actions** slice, with Risk
+     Operations as product DRI and Payments Core as technical DRI. Start it when
+     ManualReviewCase can initiate payment actions. Completion evidence must
+     prove a constrained/versioned reason contract, authorization policy,
+     tenant isolation, idempotency, safe audit evidence, and that review
+     outcomes append labels without rewriting the original FraudDecision.
+   - Refund/dispute offsets are owned by the Phase 4 **Dispute Offset
+     Accounting** slice, with Payments Core as technical DRI and Risk Operations
+     as workflow DRI. Start it with chargeback ledger implementation. Completion
+     evidence must prove event-order handling, no customer over-credit or
+     merchant double-debit, balanced ledger groups, and concurrent
+     refund-versus-dispute behavior.
+   - External acquirer refund calls are owned by the post-V1 **Real PSP Refund
+     Execution** slice, with Payments Core as technical DRI and
+     Security/Compliance as supporting owners. Start only after a PSP is
+     selected and its hosted/tokenized payment, authentication, callback, and
+     reconciliation contracts are approved. Completion evidence must prove
+     provider idempotency, asynchronous requested/pending/succeeded/failed
+     states, retry and callback races, provider-reference lineage,
+     reconciliation, and that local `RECORDED` truth is never presented as
+     network success.
+
+   Implemented:
+
+   - `POST /refunds` preserves the existing full-amount request contract and
+     returns a durable `RECORDED` Refund with PaymentIntent, PaymentAttempt, and
+     Authorization lineage.
+   - `GET /refunds/{id}` retrieves the Refund only inside the authenticated
+     merchant boundary.
+   - Refund requires `CAPTURED` state, matching approved authorization truth,
+     and a complete balanced capture ledger group before writing reversal
+     entries.
+   - Refund ledger rows use the Refund as their source, retain the original
+     PaymentIntent ID, and exactly reverse capture with debit
+     `MERCHANT_PAYABLE` and credit `CUSTOMER_RECEIVABLE`.
+   - V8 backfills PaymentIntent lineage on capture rows, adds composite Refund
+     and ledger constraints, and rejects legacy `REFUNDED` rows whose missing
+     identifiers and accounting evidence cannot be reconstructed honestly.
+   - Refund, PaymentIntent state, ledger entries, `refund.created` delivery
+     records, safe audit evidence, and idempotency completion commit or roll
+     back together.
+
+   Proof:
+
+   - H2 and PostgreSQL migration tests prove clean V8 application, capture
+     lineage backfill, Hibernate validation, and fail-fast legacy refund
+     rejection.
+   - Contract tests prove automatic/manual refunds, durable reads, exact
+     reversal postings, idempotent replay, invalid-state and amount rejection,
+     tenant isolation, and immutable fraud lineage.
+   - Injected ledger, webhook, and audit failures prove complete rollback.
+   - A PostgreSQL race proves two distinct refund requests produce exactly one
+     `201` winner, one `409` loser, one Refund, and one balanced reversal group.
+
+   No Chapter 18 debt was accepted. `RECORDED` is intentionally simulator-local
+   truth; real acquirer refund execution remains outside V1 rather than being
+   represented as a successful network claim.
 
 4. Chapter 19: Webhook Delivery Execution And Retry Behavior.
 
@@ -2136,6 +2216,19 @@ Detailed Phase 2 chapter plan:
      completion, and acquirer reconciliation until the simulator contract is
      stable.
 
+Deferred Phase 2 destination slices, not accepted Chapter 18 debt:
+
+- **Partial Money Accounting** — Payments Core owns the durable Capture model,
+  partial capture allocation, multiple-refund aggregate, refundable-balance
+  locking, and fee-reversal ledger policy. Its entry trigger and required proof
+  are recorded in Chapter 18; it is not dependency-ready while V1 promises only
+  one full capture and one full refund with no fee postings.
+- **Real PSP Refund Execution** — Payments Core owns processor orchestration and
+  reconciliation; Security/Compliance owns tokenization, credential, card-data,
+  and provider-control review. Its entry trigger and required proof are recorded
+  in Chapter 18; it remains outside V1 because THAAP currently simulates rather
+  than moves money.
+
 Done when:
 
 - Authorized payment can be captured.
@@ -2187,6 +2280,18 @@ Build:
 - Chargeback ingestion.
 - DisputeEvidencePacket MVP.
 - Fraud labels from review and chargeback outcomes.
+- **Refund Operations And Review Actions** owner slice:
+  - Product DRI: **Risk Operations**.
+  - Technical DRI: **Payments Core**.
+  - Add the constrained refund-reason contract, review authorization policy,
+    and audited/idempotent review-to-refund action defined by Chapter 18's
+    deferral proof.
+- **Dispute Offset Accounting** owner slice:
+  - Technical DRI: **Payments Core**.
+  - Workflow DRI: **Risk Operations**.
+  - Define ordered refund/chargeback accounting and prove that overlapping or
+    concurrent outcomes cannot over-credit the customer or double-debit the
+    merchant, as required by Chapter 18's deferral proof.
 - Post-authorization risk signal ingestion for simulated early fraud warnings,
   refund recommendations, friendly-fraud indicators, and dispute-prevention
   signals.

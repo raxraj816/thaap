@@ -149,7 +149,7 @@ class PaymentIntentLifecycleContractTests {
     }
 
     @Test
-    void fullRefundIsAllowedForCapturedIntent() throws Exception {
+    void capturedStateWithoutAuthorizationAndLedgerEvidenceCannotBeRefunded() throws Exception {
         var merchant = createMerchant("merchant-a");
         var customerId = createCustomer(merchant, "buyer-a@example.com");
         var paymentIntent = createPaymentIntent(merchant, customerId, "refund-captured", 4500);
@@ -165,16 +165,15 @@ class PaymentIntentLifecycleContractTests {
                                   "amount": 4500
                                 }
                                 """.formatted(paymentIntent)))
-                .andExpect(status().isCreated())
+                .andExpect(status().isConflict())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
         var json = objectMapper.readTree(response);
 
-        assertThat(json.get("paymentIntentId").asText()).isEqualTo(paymentIntent.toString());
-        assertThat(json.get("amount").asLong()).isEqualTo(4500);
-        assertThat(json.get("currency").asText()).isEqualTo("USD");
-        assertThat(statusFor(paymentIntent)).isEqualTo("REFUNDED");
+        assertThat(json.get("message").asText())
+                .isEqualTo("PaymentIntent does not have approved authorization evidence for Refund");
+        assertThat(statusFor(paymentIntent)).isEqualTo("CAPTURED");
     }
 
     @Test

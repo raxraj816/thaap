@@ -369,20 +369,27 @@ Captured payments require refund, not cancel.
 ```text
 POST /refunds
   -> require idempotency key
-  -> validate capture exists
-  -> validate refundable amount
+  -> lock tenant-scoped PaymentIntent
+  -> validate approved authorization and balanced capture ledger evidence
+  -> validate full refundable amount
   -> create Refund
-  -> write balanced ledger entries
-  -> update PaymentIntent to REFUNDED if fully refunded
+  -> write exact balanced capture-reversal ledger entries
+  -> update PaymentIntent to REFUNDED
   -> emit refund.created
   -> create webhook deliveries
   -> return Refund
+
+GET /refunds/{id}
+  -> scope by authenticated merchant
+  -> return durable Refund lineage
 ```
 
 Invalid:
 
 - refund before capture
 - refund canceled payment
+- refund when capture ledger evidence is missing or inconsistent
+- partial, over, or second refund
 - refund failed payment
 - over-refund
 - duplicate refund on retry
@@ -518,11 +525,8 @@ Credit FEE_REVENUE
 Refund:
 
 ```text
-Debit  REFUND_LIABILITY
-Credit CUSTOMER_RECEIVABLE
-
 Debit  MERCHANT_PAYABLE
-Credit REFUND_LIABILITY
+Credit CUSTOMER_RECEIVABLE
 ```
 
 Chargeback:

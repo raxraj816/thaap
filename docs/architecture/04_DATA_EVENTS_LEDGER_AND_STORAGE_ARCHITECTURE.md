@@ -323,15 +323,17 @@ The exact accounting model may evolve. The invariant cannot.
 
 ### 5.5 Refund Ledger Pattern
 
-Illustrative refund entries:
+Chapter 18 full-refund entries exactly reverse the capture accounts:
 
 ```text
-Debit  REFUND_LIABILITY
-Credit CUSTOMER_RECEIVABLE
-
 Debit  MERCHANT_PAYABLE
-Credit REFUND_LIABILITY
+Credit CUSTOMER_RECEIVABLE
 ```
+
+The Refund is the ledger source and every row also retains the original
+PaymentIntent ID. A future asynchronous acquirer integration may introduce a
+refund-liability clearing account, but the synchronous V1 simulator must not
+claim that intermediate state exists.
 
 ### 5.6 Chargeback Ledger Pattern
 
