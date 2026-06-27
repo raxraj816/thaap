@@ -70,6 +70,7 @@ Implemented tenant-scoped endpoints:
 - `POST /payment_intents/{id}/confirm`
 - `GET /payment_intents/{id}`
 - `GET /payment_attempts/{id}`
+- `GET /payment_attempts/{id}/authorization`
 - `POST /payment_intents/{id}/capture`
 - `POST /payment_intents/{id}/cancel`
 - `POST /refunds`
@@ -232,6 +233,14 @@ counts as created only after commit, and counts as failed if it was registered
 but the surrounding transaction rolls back or cannot commit.
 
 `GET /payment_attempts/{id}` fetches attempts through merchant scope.
+`GET /payment_attempts/{id}/authorization` fetches safe processor
+authorization evidence for the attempt through the same merchant scope. It
+returns processor name/reference, response code, network status, requested and
+authorized amounts, authorization status, verification results, 3DS result, and
+creation time. The merchant-facing contract deliberately omits the internal
+simulator outcome field and uses processor-neutral evidence. It does not expose
+raw payment input, PII, API keys, idempotency state, hashes, card fingerprints,
+or webhook secrets.
 
 Chapter 13 deliberately keeps the decision stub honest: it records
 `RULES_NOT_ENABLED` and nullable `modelVersion` rather than pretending real

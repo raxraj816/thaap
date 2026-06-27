@@ -8,11 +8,11 @@ The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_
 
 ## Current Status
 
-Chapter 15 is complete. Confirm now produces deterministic processor
-authorization outcomes, durable fraud lineage, and safe audit records, and an
-approved authorization can be captured with balanced double-entry ledger
-evidence. Before continuing to the next Phase 2 money-movement chapter, Chapter
-16 closes the missing Phase 1 synthetic scenario generator requirement:
+Chapter 16 is complete. Confirm now produces deterministic processor
+authorization outcomes, durable fraud lineage, and safe audit records; approved
+authorizations can be captured with balanced double-entry ledger evidence; and
+the remaining Phase 1 synthetic scenario generator now creates repeatable
+payment-risk scenarios through public APIs:
 
 - Monorepo structure is in place.
 - Documentation entry points are in place.
@@ -87,6 +87,10 @@ evidence. Before continuing to the next Phase 2 money-movement chapter, Chapter
   `DECLINED` and the intent to `REQUIRES_PAYMENT_METHOD`; 3DS-required outcomes
   move the attempt and intent to action-required states.
 - `GET /payment_attempts/{id}` fetches attempts through merchant scope.
+- `GET /payment_attempts/{id}/authorization` returns tenant-scoped safe
+  processor authorization evidence for a payment attempt, including processor
+  response code, verification results, network status, and amount fields without
+  exposing raw payment input or tenant secrets.
 - Chapter 11 contract tests prove successful authorization, deterministic
   processor declines, verification failures, 3DS-required behavior, idempotent
   confirm replay, changed-body conflict, invalid status rejection,
@@ -121,6 +125,11 @@ evidence. Before continuing to the next Phase 2 money-movement chapter, Chapter
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
+- `scripts/generate-synthetic-scenarios.py` creates deterministic approved,
+  retryable-decline, and basic card-testing scenario families through the public
+  API against loopback targets only. It fails closed on unexpected ledger,
+  authorization, or fraud-lineage truth and writes a sanitized, atomic summary
+  artifact under `build/reports/`.
 - Chapter 14 clean local demo evidence is recorded in
   `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
 - Lifecycle contract tests prove cancel is allowed from `REQUIRES_CONFIRMATION`,
@@ -175,6 +184,7 @@ See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the full glossary.
 ## Documentation Map
 
 - [Master plan](docs/IMPLEMENTATION_MASTER_PLAN.md)
+- [Technical and implementation debt register](docs/TECHNICAL_DEBT_REGISTER.md)
 - [Product vision](docs/VISION.md)
 - [Architecture overview](docs/ARCHITECTURE.md)
 - [Architecture diagram](docs/diagrams/day-1-system-context.mmd)

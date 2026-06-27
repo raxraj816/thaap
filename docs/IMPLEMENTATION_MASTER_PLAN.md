@@ -1730,13 +1730,15 @@ Current completion state:
   and basic state transitions are implemented and covered by contract tests.
 - Chapter 15 capture with balanced ledger entries has already been pulled forward
   and implemented in the current worktree.
-- Phase 1 is not complete until the synthetic data generator v1 requirement is
-  implemented. This is a Phase 1 closure chapter before additional Phase 2
-  chapters continue.
+- Chapter 16 synthetic scenario generation is implemented. Phase 1 is now closed
+  for the original payment-core requirements while Phase 2 money-movement
+  hardening continues.
 
 Phase 1 closure chapter:
 
 1. Chapter 16: Synthetic Scenario Generator V1.
+
+   Status: complete.
 
    Build:
 
@@ -1790,6 +1792,48 @@ Phase 1 closure chapter:
      later fraud/ML chapters.
    - Direct database seeding unless a future data-pipeline chapter needs it;
      Chapter 16 should prove the public payment core loop first.
+
+   Implemented:
+
+   - Supporting API `GET /payment_attempts/{id}/authorization` exposes
+     tenant-scoped safe processor authorization evidence needed by scenario
+     summaries; the Chapter 16 product deliverable remains the generator and its
+     evidence artifact.
+   - `scripts/generate-synthetic-scenarios.py` creates approved,
+     retryable-decline, and basic card-testing scenario families through public
+     APIs only and rejects non-loopback targets.
+   - The generator writes sanitized JSON summaries under
+     `build/reports/synthetic-scenarios/` by default and includes tenant
+     isolation and sensitive-data scan results.
+   - Collision-resistant run IDs are persisted in PaymentIntent metadata, and
+     summary files are written atomically.
+   - Generator success requires exact PaymentIntent, PaymentAttempt,
+     Authorization, processor-response, FraudDecision, FeatureSnapshot, and
+     zero-ledger truth for the configured scenarios.
+   - The admin bootstrap token is read from the environment rather than command
+     arguments, and synthetic customer phones are deterministic valid E.164
+     values.
+
+   Explicit deferral:
+
+   - `[TD-0001]` Authoritative server-side `synthetic_origin` classification is owned by
+     **Phase 4.5: Product-Grade Risk Operations**, implementation slice
+     **Developer Scenario Runner And Traffic-Origin Governance**. The primary
+     technical DRI is **Payments Core** for the trusted schema/API boundary;
+     **Risk Operations** owns scenario-runner policy and analytics exclusion
+     requirements. The current payment schema has no trusted origin boundary,
+     and merchant metadata cannot become an authorization or training-data
+     trust signal. Resolution is required before Phase 4.5 enables a shared
+     non-local scenario runner; the same field must be available before Phase 7
+     builds training/evaluation datasets.
+   - `[TD-0002]` Resumable interrupted runs are owned by **Phase 7: ML Baseline**,
+     implementation slice **Synthetic Generator V2 Run Orchestration**. The
+     primary technical DRI is **ML/Data Platform**, with Payments Core
+     responsible for preserving idempotent public mutation APIs. The current
+     local run is bounded and carries a collision-resistant run ID, but THAAP
+     has no durable generator-run state, cleanup API, or safe resume protocol.
+     Resolution is required before Phase 7 introduces scheduled generation,
+     dataset-scale volume, automatic retry, or long-running generator jobs.
 
 ### Phase 2: Processor, Capture, Refund, Ledger, Webhooks
 
@@ -2133,6 +2177,16 @@ Build:
 - Dispute evidence workflow with simulated reason-code deadlines and outcomes.
 - Developer/API console with test-card catalog, idempotency examples, webhook
   signing examples, and scenario runner.
+- **Developer Scenario Runner And Traffic-Origin Governance** owner slice
+  (`TD-0001`):
+  - Primary technical DRI: **Payments Core**.
+  - Product/consumer DRI: **Risk Operations**.
+  - Add a server-assigned, tenant-scoped traffic-origin classification that
+    distinguishes live, simulator/test, and synthetic scenario traffic.
+  - Only an authenticated scenario-runner/test-mode boundary may assign
+    synthetic origin; merchant-supplied metadata is never authoritative.
+  - Propagate origin through PaymentIntent, PaymentAttempt, FraudDecision,
+    FeatureSnapshot, events, analytics projections, and later dataset joins.
 
 Done when:
 
@@ -2143,6 +2197,10 @@ Done when:
   review SLA, and dispute outcome.
 - Developer documentation is good enough for a new merchant integration to run
   the simulator without reading source code.
+- A shared scenario runner cannot create unclassified synthetic traffic, and
+  merchant traffic cannot self-declare a trusted synthetic origin.
+- Risk metrics, analyst filters, and downstream dataset builders can include or
+  exclude synthetic traffic using server-assigned lineage.
 
 ### Phase 5: Events And Analytics
 
@@ -2194,6 +2252,16 @@ Done when:
 Build:
 
 - Synthetic data generator v2 with richer fraud patterns and labels.
+- **Synthetic Generator V2 Run Orchestration** owner slice (`TD-0002`):
+  - Primary technical DRI: **ML/Data Platform**.
+  - Payments Core dependency owner: **Payments Core**, for idempotent public
+    mutation APIs and trusted traffic-origin propagation.
+  - Add durable `GeneratorRun` state, scenario/step checkpoints, terminal
+    success/failure status, and safe failure diagnostics.
+  - Resume with stable per-step idempotency keys, or clean up explicitly when a
+    scenario family cannot be resumed without creating false payment truth.
+  - Support bounded retry and concurrency without duplicating merchants,
+    PaymentIntents, PaymentAttempts, FraudDecisions, or labels.
 - Exploratory data analysis report.
 - Data quality report for labels, imbalance, missingness, leakage risks, and segment coverage.
 - Training dataset builder.
@@ -2215,6 +2283,10 @@ Done when:
 - Evaluation avoids future leakage.
 - Candidate model has model card, dataset card, segment report, replay report,
   and rollback target.
+- An interrupted generator run can resume or terminate with an explicit cleanup
+  disposition, and retries do not duplicate payment, fraud, or label truth.
+- Every generated training/evaluation row carries the trusted traffic origin
+  introduced by the Phase 4.5 owner slice.
 
 ### Phase 8: Analytics, Simulation, Graph
 

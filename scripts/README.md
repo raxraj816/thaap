@@ -44,6 +44,33 @@ THAAP_DEMO_CARD=4999990000000002 scripts/demo-confirm-flow.sh
 THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
 ```
 
+Generate Chapter 16 synthetic payment-risk scenarios through the public API:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+scripts/generate-synthetic-scenarios.py --seed chapter-16-demo
+```
+
+Useful options:
+
+```bash
+scripts/generate-synthetic-scenarios.py \
+  --seed chapter-16-demo \
+  --base-url http://localhost:8080 \
+  --output build/reports/synthetic-scenarios/chapter-16-demo-summary.json
+```
+
+The generator creates approved, retryable-decline, and basic card-testing
+scenario families using merchant-facing APIs only. It reads the bootstrap token
+directly from `THAAP_ADMIN_BOOTSTRAP_TOKEN`, accepts only loopback API targets,
+and refuses to run against a shared or production endpoint. Its JSON summary
+includes safe IDs, final statuses, fraud decision IDs, actual processor response
+codes, tenant-isolation checks, and a sensitive-data scan. It fails if an
+uncaptured scenario creates ledger truth, if authorization/fraud lineage drifts,
+or if sensitive output is detected. It intentionally omits raw card numbers,
+CVV, buyer email, buyer phone, API keys, idempotency keys, hashes, and card
+fingerprints.
+
 ## Learning Workflow
 
 Create today's learning note, and optionally the deep dive:
@@ -70,6 +97,21 @@ Check that the weekly architecture review and growth-tracking artifacts exist:
 ```bash
 scripts/learning-week-check.sh
 ```
+
+## Technical And Implementation Debt
+
+Validate the canonical debt register and its implementation-roadmap references:
+
+```bash
+scripts/technical-debt-check.py
+python3 -m unittest scripts/technical_debt_check_tests.py
+```
+
+Every accepted or deferred technical, implementation, security, data/ML, or
+operational debt must receive an immutable `TD-NNNN` ID in
+`docs/TECHNICAL_DEBT_REGISTER.md`. The commit-readiness gate runs this check
+automatically and rejects open entries that have not been reviewed within 35
+days.
 
 ## Technical Blog Workflow
 
