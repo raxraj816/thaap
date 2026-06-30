@@ -80,7 +80,9 @@ Use:
 ```bash
 scripts/learning-day-start.sh --deep-dive
 scripts/learning-day-check.sh --deep-dive-required
-scripts/commit-readiness-check.sh --deep-dive-required
+scripts/commit-readiness-check.sh --deep-dive-required \
+  --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
+  --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
 ## Git Workflow
@@ -229,6 +231,83 @@ When choosing the next action, ask:
 
 If the dependency exists and the invariant can be protected, pull the work
 forward. Only defer when building now would create false product truth.
+
+## Invariant-Proof Completion Gate
+
+For every non-trivial chapter or implementation slice, create and maintain
+`docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md` using
+`docs/INVARIANT_PROOF_REVIEW_PROCESS.md`.
+
+The matrix must be drafted before implementation from the frozen product
+promises and failure sequences, not reconstructed only from the code or tests
+that happen to exist. It must cover payment/fraud, tenant isolation,
+security/privacy, transaction/concurrency, data/ML lineage, API/product,
+observability, and operations/resilience.
+
+A green suite is necessary but never sufficient for completion:
+
+- concurrency claims require deterministic forced interleavings, lock-order
+  evidence, and production-database postconditions; simultaneous thread start
+  alone is not proof
+- custom protocol claims require authenticated/unauthenticated field analysis,
+  exact-byte and representation-boundary tests, persistence-precision tests,
+  and executable reference-client or fixture validation
+- documentation, fixtures, scripts, migrations, configuration, and demo paths
+  are reviewed as product/security code
+- completion requires a plan-to-implementation-to-proof traceability pass and a
+  separate hostile failure-sequence pass
+- every matrix entry must be `PASS`; every real deferral must be registered
+  under `TD-NNNN`
+
+Run `scripts/invariant-proof-check.py` and pass the current matrix through
+`scripts/commit-readiness-check.sh --invariant-matrix=...` before marking a
+chapter complete. Non-trivial readiness must fail if the current matrix is not
+named. If scope changes, reopen the matrix before changing code.
+
+## Quality Closure Operating System
+
+The invariant matrix is necessary, but it is not the whole completion claim.
+For every non-trivial chapter or implementation slice:
+
+1. Freeze the observable merchant, analyst, operator, payment, fraud, and data
+   promises before implementation. Record the matrix provenance honestly as
+   `PRE_IMPLEMENTATION`. A retroactive recovery matrix may not masquerade as
+   pre-implementation work.
+2. Build the failure inventory before implementation from rollback, duplicate,
+   stale-worker, network-ambiguity, tenant-substitution, secret-compromise,
+   malformed-protocol, migration, dependency, and operator-error sequences.
+3. Prove each claim at its real enforcement boundary. A mock cannot certify a
+   PostgreSQL concurrency claim, a unit test cannot certify a migration, and a
+   parser test cannot certify a hostile socket exchange.
+4. Prefer mature infrastructure for HTTP, cryptography, queues, scheduling,
+   concurrency, and protocol handling. Proprietary infrastructure requires an
+   accepted ADR that states why a mature component is insufficient and
+   includes a boundary table for identity, authenticated bytes, limits,
+   timeout, retry, persistence, and operational behavior.
+5. Apply severity-based closure:
+   - `P0` and `P1` findings must be fixed and proven.
+   - `P2` findings that affect a frozen promise must be fixed and proven.
+   - a genuine future-scale `P2` may be deferred only through a valid
+     `TD-NNNN` entry with DRI, trigger/deadline, and done criteria.
+   - speculative polish is rejected from the chapter rather than disguised as
+     debt.
+6. Maintain `docs/ESCAPED_REVIEW_REGISTER.md`. A defect found after an earlier
+   review or completion claim receives an immutable `ER-NNNN` ID and one root
+   cause: `MISSING_PROMISE`, `MISSING_FAILURE_SEQUENCE`, `WEAK_PROOF`,
+   `IMPLEMENTATION_DEFECT`, or `DOCUMENTATION_OVERCLAIM`. Its resolution must
+   include both product evidence and a process correction.
+7. Create `docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md`. It must reconcile frozen
+   promises, hostile sequences, enforcement boundaries, exact tests, migration
+   evidence, demo evidence, operational signals, known debt, custom
+   infrastructure, escaped-review findings, source-of-truth status, and an
+   explicit merge recommendation.
+
+For non-trivial completion, run `scripts/escaped-review-check.py` and pass both
+the current matrix and closure dossier to `scripts/commit-readiness-check.sh`.
+The gate must reject contradictory Chapter status, unresolved blocking
+severity, missing provenance, or a dossier that recommends anything other than
+merge. Structural scripts certify repository completeness only; semantic truth
+still requires the traceability pass and the temporally separate hostile pass.
 
 ## Non-Negotiable Habit
 

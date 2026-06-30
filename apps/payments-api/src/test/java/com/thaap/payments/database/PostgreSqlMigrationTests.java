@@ -57,6 +57,13 @@ class PostgreSqlMigrationTests {
                   AND description = 'add refunds and refund ledger lineage'
                   AND success = TRUE
                 """, Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '9'
+                  AND description = 'harden webhook delivery execution'
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(1);
         assertThat(columnExists("payment_methods", "card_bin")).isTrue();
         assertThat(columnExists("payment_intents", "capture_method")).isTrue();
         assertThat(columnExists("payment_intents", "description")).isTrue();
@@ -113,6 +120,11 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
+        assertThat(columnExists("webhook_deliveries", "webhook_event_id")).isTrue();
+        assertThat(columnExists("webhook_deliveries", "claim_token")).isTrue();
+        assertThat(columnExists("webhook_events", "payload_sha256")).isTrue();
+        assertThat(columnExists("webhook_delivery_attempts", "attempt_number")).isTrue();
+        assertThat(columnExists("webhook_endpoints", "operational_status")).isTrue();
     }
 
     @Test
@@ -250,6 +262,158 @@ class PostgreSqlMigrationTests {
             assertThatThrownBy(() -> migrateSchema(upgradeDataSource, schema, "8"))
                     .hasMessageContaining("V8__add_refunds_and_refund_ledger_lineage.sql")
                     .hasStackTraceContaining("ck_chapter18_no_legacy_refunded_payment_intents");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void chapter19UpgradeBackfillsLegacyWebhookTruthOnPostgreSql() {
+        String schema = "chapter19_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "8");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID endpointId = UUID.randomUUID();
+            UUID deliveryId = UUID.randomUUID();
+            UUID scheduledDeliveryId = UUID.randomUUID();
+            UUID succeededDeliveryId = UUID.randomUUID();
+            UUID failedDeliveryId = UUID.randomUUID();
+            UUID resourceId = UUID.randomUUID();
+            java.time.Instant scheduledAt = java.time.Instant.parse("2026-06-29T12:30:00Z");
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    )
+                    VALUES (?, 'legacy-webhook', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "legacy-webhook-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints (
+                        id, merchant_id, url, active, signing_secret_prefix,
+                        signing_secret_hash, created_at
+                    )
+                    VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?,
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), endpointId, merchantId, "legacy-secret-" + endpointId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, event_type, resource_id,
+                        status, attempt_count, created_at
+                    )
+                    VALUES (?, ?, ?, 'refund.created', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                    """.formatted(schema), deliveryId, merchantId, endpointId, resourceId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, event_type, resource_id,
+                        status, attempt_count, next_attempt_at, created_at
+                    )
+                    VALUES (?, ?, ?, 'refund.created', ?, 'PENDING', 1, ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), scheduledDeliveryId, merchantId, endpointId, resourceId,
+                    java.sql.Timestamp.from(scheduledAt));
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, event_type, resource_id,
+                        status, attempt_count, next_attempt_at, delivered_at, created_at
+                    )
+                    VALUES (?, ?, ?, 'refund.created', ?, 'SUCCEEDED', 1,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """.formatted(schema), succeededDeliveryId, merchantId, endpointId, resourceId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, event_type, resource_id,
+                        status, attempt_count, next_attempt_at, delivered_at, last_error, created_at
+                    )
+                    VALUES (?, ?, ?, 'refund.created', ?, 'FAILED', 2,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'legacy timeout', CURRENT_TIMESTAMP)
+                    """.formatted(schema), failedDeliveryId, merchantId, endpointId, resourceId);
+
+            migrateSchema(upgradeDataSource, schema, "9");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT operational_status
+                    FROM %s.webhook_endpoints
+                    WHERE id = ?
+                    """.formatted(schema), String.class, endpointId))
+                    .isEqualTo("REQUIRES_SECRET_ROTATION");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT webhook_event_id
+                    FROM %s.webhook_deliveries
+                    WHERE id = ?
+                    """.formatted(schema), UUID.class, deliveryId)).isEqualTo(deliveryId);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM %s.webhook_delivery_attempts
+                    """.formatted(schema), Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ?
+                    """.formatted(schema), Integer.class, endpointId)).isEqualTo(5);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT status
+                    FROM %s.webhook_deliveries
+                    WHERE id = ?
+                    """.formatted(schema), String.class, scheduledDeliveryId))
+                    .isEqualTo("RETRY_SCHEDULED");
+            java.time.Instant migratedScheduledAt = upgradeJdbcTemplate.queryForObject("""
+                    SELECT next_attempt_at
+                    FROM %s.webhook_deliveries
+                    WHERE id = ?
+                    """.formatted(schema),
+                    (resultSet, rowNumber) -> resultSet.getTimestamp(1).toInstant(),
+                    scheduledDeliveryId);
+            assertThat(migratedScheduledAt).isEqualTo(scheduledAt);
+            Map<String, Object> succeeded = upgradeJdbcTemplate.queryForMap("""
+                    SELECT status, next_attempt_at, delivered_at
+                    FROM %s.webhook_deliveries
+                    WHERE id = ?
+                    """.formatted(schema), succeededDeliveryId);
+            assertThat(succeeded.get("status")).isEqualTo("SUCCEEDED");
+            assertThat(succeeded.get("next_attempt_at")).isNull();
+            assertThat(succeeded.get("delivered_at")).isNotNull();
+            Map<String, Object> failed = upgradeJdbcTemplate.queryForMap("""
+                    SELECT status, next_attempt_at, delivered_at, last_error_code
+                    FROM %s.webhook_deliveries
+                    WHERE id = ?
+                    """.formatted(schema), failedDeliveryId);
+            assertThat(failed)
+                    .containsEntry("status", "EXHAUSTED")
+                    .containsEntry("last_error_code", "LEGACY_FAILURE");
+            assertThat(failed.get("next_attempt_at")).isNull();
+            assertThat(failed.get("delivered_at")).isNull();
+
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_delivery_attempts (
+                        id, merchant_id, webhook_delivery_id, attempt_number, outcome,
+                        http_request_sent, started_at
+                    )
+                    VALUES (?, ?, ?, 1, 'IN_PROGRESS', NULL, CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID(), merchantId, deliveryId))
+                    .hasMessageContaining("ck_webhook_delivery_attempts_dispatch_truth");
+
+            UUID attemptId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_delivery_attempts (
+                        id, merchant_id, webhook_delivery_id, attempt_number, outcome,
+                        http_request_sent, started_at
+                    )
+                    VALUES (?, ?, ?, 1, 'IN_PROGRESS', FALSE, CURRENT_TIMESTAMP)
+                    """.formatted(schema), attemptId, merchantId, deliveryId);
+            upgradeJdbcTemplate.update("""
+                    UPDATE %s.webhook_delivery_attempts
+                    SET dispatch_started_at = CURRENT_TIMESTAMP,
+                        http_request_sent = NULL
+                    WHERE id = ?
+                    """.formatted(schema), attemptId);
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.webhook_delivery_attempts
+                    SET http_request_sent = FALSE
+                    WHERE id = ?
+                    """.formatted(schema), attemptId))
+                    .hasMessageContaining("ck_webhook_delivery_attempts_dispatch_truth");
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }

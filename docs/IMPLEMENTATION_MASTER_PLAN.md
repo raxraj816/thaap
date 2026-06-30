@@ -363,7 +363,11 @@ Model prediction logs
 ### 4.3 Webhook APIs
 
 - `POST /webhook_endpoints`
+- `POST /webhook_endpoints/{id}/rotate_secret`
+- `POST /webhook_endpoints/{id}/disable`
 - `GET /webhook_deliveries`
+- `GET /webhook_deliveries/{id}`
+- `GET /webhook_deliveries/{id}/attempts`
 
 ### 4.4 Fraud And Review APIs
 
@@ -2142,41 +2146,528 @@ Detailed Phase 2 chapter plan:
 
 4. Chapter 19: Webhook Delivery Execution And Retry Behavior.
 
+   Status: complete after the 2026-06-30 hostile protocol, DNS-classification,
+   and forced-interleaving recovery pass.
+
+   Completion evidence:
+
+   - Forward-only V9 passes clean and V8-to-V9 migration proof on H2 and real
+     PostgreSQL, including immutable envelope backfill and honest legacy-secret
+     rotation state.
+   - Contract/security tests prove exact payload/hash/signature behavior,
+     encrypted-secret authentication, target isolation, retries, exhaustion,
+     lease recovery, stale finalization, disable races, bounded tenant reads,
+     safe audit/metrics, and unchanged payment truth.
+   - Staff adversarial hardening proves explicit global-address classification,
+     a wall-clock slow-response deadline, bounded DNS resolution,
+     just-in-time one-attempt claiming, recoverable unexpected runtime
+     failures, versioned key-encryption-key rollover, cursor traversal, bulk
+     disable, event/delivery lineage, tri-state attempt evidence, bounded HTTP
+     status parsing, disabled expired in-flight recovery, and
+     claimed-but-not-dispatch-started disable.
+   - Follow-up hardening proves all-zero encryption keys fail closed and
+     resolver deadline/capacity failures retry as known no-send infrastructure
+     failures instead of terminal unsafe-target decisions.
+   - The final DNS taxonomy also proves unknown host, empty address answers,
+     and unexpected resolver failures remain retryable known-no-send outcomes;
+     only explicit URL/allowlist/address-policy denial is terminal.
+   - A final callback acknowledgement is accepted only after the bounded final
+     HTTP response head is structurally complete. A truncated `204` status line
+     and oversized final headers are post-send transport failures, not false
+     success.
+   - Real PostgreSQL races prove one claim/attempt winner, monotonic endpoint
+     disable against concurrent secret rotation, no stranded queued delivery
+     when event creation races disable, and no stranded expired in-flight
+     delivery after endpoint disable.
+     Rotation/disable and routing/disable now force both orderings and verify
+     the competing backend is waiting on the expected PostgreSQL lock before
+     releasing the owning transaction.
+   - A forced PostgreSQL interleaving proves retry finalization acquires the
+     endpoint shared lock before the delivery row and cannot recreate
+     retry-scheduled work behind concurrent disable.
+   - Protocol-boundary proof covers authenticated payload identity versus
+     advisory headers, domain Host authority when DNS selects IPv6, IPv6
+     literals, and payload/database timestamp precision.
+   - Signed webhook payloads are now produced through Jackson JSON encoding in
+     both the runtime envelope factory and V9 legacy backfill path, eliminating
+     manual JSON concatenation before merchant-verifiable signatures are
+     computed.
+   - The Chapter 19 invariant-proof matrix traces 19 payment/fraud, tenant,
+     security, concurrency, data/ML, API/product, observability, and operations
+     claims through hostile failure sequences to implementation and proof.
+   - The matrix honestly records `RETROACTIVE_RECOVERY`; Chapter 19 is the
+     documented process-recovery case, not a precedent for retroactive future
+     matrices. The closure dossier reconciles promises, hostile sequences,
+     enforcement, exact proof, migrations, demo, operations, debt, custom
+     infrastructure, escaped findings, and source-of-truth status.
+   - `ER-0001` through `ER-0005` record the findings that escaped earlier
+     Chapter 19 reviews, their root-cause categories, resolution evidence, and
+     the process corrections. ADR-0009 bounds the justified custom socket
+     transport and establishes mature infrastructure as the default.
+   - The complete backend suite passes: 203 tests, zero failures, zero skipped.
+     The repository Python suite passes 36 tests, including callback-fixture,
+     provenance, escaped-review, severity, closure, and source-contradiction
+     negative cases. Commit readiness passes with the Chapter 19 invariant
+     matrix and closure dossier named explicitly.
+   - The loopback public-API demo starts against a fresh PostgreSQL 16 schema
+     migrated through V9 and verifies a signed `503` then `204`, one stable
+     event/payload across two attempts, and unchanged PaymentIntent and ledger
+     truth.
+
+   First-principles model:
+
+   - A `WebhookEvent` is the immutable fact THAAP is notifying a merchant about.
+   - A `WebhookDelivery` is one event routed to one merchant endpoint.
+   - A `WebhookDeliveryAttempt` is one append-only record of a claimed
+     transmission attempt for one delivery. It can end before HTTP when secret
+     or target policy fails closed.
+   - Payment, fraud, authorization, capture, cancel, refund, ledger, and audit
+     truth commits before external HTTP begins. A webhook failure never rewrites
+     or rolls back the originating domain fact.
+   - Delivery is **at least once**, not exactly once. A worker can send an HTTP
+     request and crash before recording the response, so lease recovery may send
+     the same event again. After verifying the exact-body signature, merchants
+     deduplicate using the stable `id` inside the signed payload and reject a
+     disagreeing `THAAP-Event-Id` header.
+
+   Scope decisions:
+
+   - Chapter 19 executes the delivery records already created by payment
+     mutations and replaces their thin mutable description with an immutable
+     webhook event envelope plus endpoint-specific delivery state.
+   - The event envelope is stored transactionally with its originating payment
+     mutation. It is not the general Phase 5 domain outbox and does not publish
+     Kafka events.
+   - Create one webhook event only when at least one active, subscribed endpoint
+     matches. All matching endpoint deliveries share that event; no-endpoint
+     mutations do not create orphan webhook event rows.
+   - Payload V1 contains safe identifiers and event metadata only. It does not
+     reconstruct a mutable PaymentIntent, PaymentAttempt, Authorization, Refund,
+     or ledger object when a retry occurs.
+   - A bounded Spring scheduler is only an adapter. A deterministic
+     `processDueDeliveries(now, batchSize)` application boundary owns claim,
+     send, and finalization behavior and can be exercised without wall-clock
+     sleeps.
+   - Delivery execution is safe by default: local/test profiles may call only
+     loopback callback servers; non-local execution remains disabled unless an
+     explicit HTTPS hostname allowlist and secret-encryption key are configured.
+     Local/test HTTP is simulator-only plaintext loopback behavior: webhook
+     payloads and signature headers are not exposed to a network hop outside
+     the host, and this mode must not be used for shared non-local merchant
+     delivery.
+
+   V1 event and signature contract:
+
+   - Persist the exact UTF-8 JSON payload bytes before creating delivery rows.
+     Runtime and migration payload construction must use a JSON serializer, not
+     string concatenation, because those exact bytes are the merchant signature
+     contract.
+   - The payload fields are:
+     - `id`: stable webhook event UUID
+     - `type`: canonical event type
+     - `createdAt`: immutable UTC event time
+     - `apiVersion`: `v1`
+     - `merchantId`: owning merchant UUID
+     - `data.object.id`: safe resource UUID
+     - `data.object.type`: constrained resource type
+   - Canonical Chapter 19 event types are `payment_intent.created`,
+     `payment_attempt.created`, `payment_intent.captured`,
+     `payment_intent.canceled`, and `refund.created`.
+   - Send `Content-Type: application/json`, `User-Agent: THAAP-Webhook/1.0`,
+     `THAAP-Event-Id`, `THAAP-Delivery-Id`, and `THAAP-Signature`.
+     `THAAP-Event-Id` is correlation metadata and must equal the signed
+     payload's `id`; it is not independently authenticated by the HMAC.
+   - `THAAP-Signature` has the form
+     `t=<unix-seconds>,v1=<lowercase-hex-hmac-sha256>`.
+   - The signed input is the exact UTF-8 byte sequence
+     `<unix-seconds>.<persisted-payload>`. Retries keep the payload and event ID
+     stable but use a fresh attempt timestamp and signature.
+   - Merchant verification documentation and the callback fixture require a
+     bounded timestamp tolerance and constant-time MAC comparison before JSON
+     processing, then UUID validation and header agreement before
+     deduplicating on the signed payload `id`.
+
+   Chapter 19A: Durable event, delivery, and attempt schema.
+
    Build:
 
-   - Add a delivery executor that claims due `PENDING` or retryable deliveries.
-   - Sign outgoing payloads with stored webhook signing secrets.
-   - Record attempt count, last attempt time, next attempt time, final success,
-     and safe failure reason.
-   - Add deterministic retry/backoff behavior for local tests.
-   - Add operational counters for attempts, successes, failures, exhausted
-     retries, and delivery latency.
+   - Add append-only `webhook_events` with `id`, `merchant_id`, `event_type`,
+     `resource_id`, `resource_type`, `api_version`, exact canonical payload,
+     payload SHA-256, `occurred_at`, and `created_at`.
+   - Link every `webhook_deliveries` row to a same-merchant `webhook_event`.
+     Retain endpoint, aggregate status, attempt count, next attempt, last
+     attempt, delivered time, safe last error code, lease token, and lease
+     expiry.
+   - Add append-only `webhook_delivery_attempts` with merchant, delivery,
+     attempt number, start/end timestamps, outcome, optional HTTP response
+     status, durable dispatch-start time, tri-state HTTP-send evidence, safe
+     error code, and latency. `false` means pre-dispatch known not sent, `true`
+     means the request write completed, and `null` means post-dispatch truth is
+     not yet or is no longer knowable. The database permits `null` only for an
+     in-progress post-dispatch attempt or `OUTCOME_UNKNOWN`. Do not store
+     response bodies, response headers, request headers, signatures, secrets,
+     or URLs.
+   - Add `webhook_endpoint_event_subscriptions`. Missing `enabledEvents` on the
+     create request means all currently supported event types for backward
+     compatibility; an explicit list must be non-empty and is validated against
+     the canonical event catalog. V9 gives legacy endpoints all currently
+     supported subscriptions.
+   - Replace the endpoint `active` boolean with explicit `ACTIVE`, `DISABLED`,
+     and `REQUIRES_SECRET_ROTATION` operational states.
+   - Use delivery states `PENDING`, `DELIVERING`, `RETRY_SCHEDULED`,
+     `SUCCEEDED`, and `EXHAUSTED`. Attempt failure is evidence on an attempt;
+     ambiguous delivery-level `FAILED` is removed.
+   - Add forward-only V9 migration and H2/PostgreSQL compatibility proof.
+     Existing delivery rows receive safe immutable envelopes from their stored
+     event type, resource ID, merchant ID, delivery creation time, and a
+     deterministic resource-type mapping. A legacy `PENDING` row with a
+     non-null `next_attempt_at` becomes `RETRY_SCHEDULED`; legacy terminal rows
+     are normalized before V9 constraints are installed.
+   - Existing endpoints have only irreversible signing-secret hashes. V9 must
+     mark them `REQUIRES_SECRET_ROTATION` and prevent delivery rather than
+     pretending their original secret is available. Their queued deliveries
+     remain ineligible but intact; successful rotation activates the endpoint
+     and makes those deliveries due under the newly revealed secret.
+
+   Database invariants:
+
+   - A delivery event and endpoint must belong to the delivery merchant.
+   - Delivery event type and resource ID must equal the linked immutable event;
+     the composite foreign key prevents API/payload lineage disagreement.
+   - `(webhook_event_id, webhook_endpoint_id)` is unique, so one event has at
+     most one delivery per endpoint.
+   - Attempt merchant and delivery merchant must match.
+   - `(delivery_id, attempt_number)` is unique and attempt numbers are positive.
+   - Successful deliveries have `delivered_at`, no next attempt, and at least
+     one successful attempt.
+   - Exhausted deliveries have no next attempt and cannot be claimed.
+   - Retry-scheduled deliveries have a non-null next-attempt time.
+   - Delivering rows have a claim token and lease expiry.
+   - The persisted event payload hash must match the exact payload bytes used for
+     signing and sending.
+   - Event time is canonicalized to database microsecond precision before the
+     payload, hash, event timestamps, and delivery timestamps are constructed.
+
+   Chapter 19B: Signing-secret and outbound-network security.
+
+   Build:
+
+   - Preserve signing-secret prefix and SHA-256 hash for display and
+     verification, but also encrypt the raw high-entropy signing secret with
+     AES-256-GCM under a separately configured webhook key-encryption key.
+   - Store encrypted secret material, nonce/authentication data, and key version;
+     never log or return them. The raw signing secret remains reveal-once at
+     endpoint creation or rotation.
+   - Support a versioned decryption keyring during key-encryption-key rollover.
+     Startup fails if an active endpoint references an unavailable version.
+     Delivery access locks the endpoint and lazily re-encrypts old ciphertext
+     under the current key without changing the merchant signing secret.
+     Key parsing rejects absent execution keys through startup validation and
+     rejects the known-bad all-zero 256-bit key before any endpoint secret is
+     encrypted.
+   - Add tenant-scoped secret rotation for `REQUIRES_SECRET_ROTATION` and active
+     endpoints. Rotation replaces the signing key atomically, returns the new
+     raw value once, and writes a safe audit log without secret material.
+     Rotation and disable serialize on the endpoint row; rotating a `DISABLED`
+     endpoint returns conflict rather than implicitly undoing the kill switch.
+   - Add a tenant-scoped endpoint disable action as an operational kill switch.
+     Disabled endpoints receive no new deliveries or claims; unclaimed queued
+     deliveries become terminal `EXHAUSTED` with safe reason
+     `ENDPOINT_DISABLED`. A claimed attempt that has not yet durably marked
+     dispatch-started is stopped at `prepareForDispatch`, exhausted with
+     known no-send evidence, and never emits HTTP after the merchant kill
+     switch wins. An attempt already marked dispatch-started may finish, but it
+     cannot schedule another retry. Queued rows are exhausted with one
+     tenant-scoped bulk update rather than an unbounded entity load. Originating
+     event transactions hold a shared endpoint lock while routing deliveries,
+     so disable cannot miss a delivery inserted just after that bulk update.
+     Dispatch preparation and retry finalization take the same endpoint shared
+     lock before the delivery row lock, so disable cannot commit between
+     endpoint-state validation and either starting HTTP or scheduling another
+     attempt. Lease recovery still selects expired `DELIVERING` rows after
+     disable, closes their attempt evidence, and exhausts them without creating
+     replacement attempts.
+   - Fail startup when execution is enabled without a valid encryption key.
+     Database access alone must not be enough to forge merchant signatures.
+   - Add `WebhookTargetPolicy`: reject URL user-info and fragments; disable
+     redirects; require HTTPS outside local/test; require an explicit hostname
+     allowlist outside local/test; resolve and reject unspecified, private,
+     link-local, multicast, metadata-service, IPv6 unique-local, CGNAT,
+     documentation, benchmark, and reserved addresses; allow HTTP only for
+     loopback callback servers in local/test. Use explicit byte/CIDR
+     classification rather than incomplete platform convenience predicates.
+     Local/test HTTP is accepted only for loopback simulator fixtures; the
+     signature header and payload are visible on plaintext loopback and are not
+     an acceptable shared-environment transport.
+   - The HTTP transport must use the address approved by target policy for that
+     attempt while retaining the original hostname for TLS verification; it
+     must not perform an unchecked second DNS resolution after policy approval.
+     DNS resolution uses an application deadline plus a bounded worker pool and
+     bounded queue so non-interruptible platform resolution cannot consume
+     unbounded scheduler or memory resources. Resolver deadline, interruption,
+     and capacity failures are classified as retryable no-send infrastructure
+     failures, not terminal target-policy violations.
+   - Use a bounded connect timeout plus a wall-clock request deadline spanning
+     TLS negotiation, request write, and response-status parsing; discard
+     response bodies. Accept only three-digit statuses in `100..599`, consume a
+     bounded number of informational responses, and persist only the final
+     response status plus a constrained safe error code.
+   - Build payloads from a strict allowlist. Raw PAN, CVV, buyer email, buyer
+     phone, API keys, signing secrets, internal card fingerprints, idempotency
+     keys/hashes, processor secrets, and unrestricted merchant metadata are
+     forbidden.
+
+   Chapter 19C: Claim, send, lease recovery, and retry.
+
+   Build:
+
+   - Claim due `PENDING`, due `RETRY_SCHEDULED`, or lease-expired `DELIVERING`
+     rows in a short PostgreSQL transaction using ordered bounded selection and
+     `FOR UPDATE SKIP LOCKED`.
+     Endpoint eligibility is evaluated through an `EXISTS` predicate so the
+     top-level lock applies only to delivery rows; the claim query must not
+     accidentally take endpoint write locks in an order that conflicts with the
+     endpoint-first disable/finalization protocol.
+   - Claiming creates the next append-only attempt, assigns an unguessable claim
+     token, moves the delivery to `DELIVERING`, and sets a lease expiry.
+     Immediately before HTTP, dispatch preparation durably marks the attempt and
+     renews the claim under the delivery lock. Recovering an expired pre-dispatch
+     lease records a known-no-send failure; only an expired attempt that crossed
+     the durable dispatch boundary closes as `OUTCOME_UNKNOWN`. A disabled
+     endpoint does not hide an expired in-flight row from recovery.
+   - Commit the claim before HTTP. Never hold a database lock or payment
+     transaction open while performing network I/O.
+   - Claim one delivery immediately before dispatch. The scheduler batch is a
+     maximum number of sequential claim/send/finalize cycles, not a set of
+     leases waiting behind earlier network calls. Startup requires the lease to
+     exceed connect timeout plus request deadline.
+   - After secret loading and DNS policy validation, renew the matching claim
+     under a delivery row lock immediately before HTTP. A worker whose token
+     became stale during preparation must not send. Finalization also locks the
+     delivery row before checking token/attempt identity, preventing a
+     check-then-write race with lease recovery.
+   - Finalize in a new transaction only when delivery ID, attempt number, and
+     claim token still match. Finalization and lease recovery mutate attempt
+     rows through explicit `FOR UPDATE` repository reads after the delivery row
+     lock is owned, making the delivery-owned attempt-mutation invariant visible
+     at both row boundaries. A stale worker cannot overwrite a newer attempt.
+   - Endpoint disabled, signing-secret unavailable/tampered, and target-policy
+     rejection are non-retryable safe failures and move the delivery directly
+     to `EXHAUSTED`. They never perform HTTP.
+   - An unclassified runtime/infrastructure failure must not invent terminal
+     delivery truth. Leave the claim for lease recovery unless the failure is a
+     specifically classified terminal or retryable outcome.
+   - Treat any `2xx` response as success. Network errors, timeouts, `3xx`, `4xx`,
+     and `5xx` responses use the same deterministic retry schedule in V1;
+     redirects are never followed and `Retry-After` is not honored in V1.
+   - Attempt 1 is immediate. Failed attempts schedule attempt 2 after 1 minute,
+     attempt 3 after 5 minutes, attempt 4 after 30 minutes, and attempt 5 after
+     2 hours. Failure of attempt 5 moves the delivery to `EXHAUSTED`.
+   - Inject `Clock`, retry policy, HTTP transport, batch size, and lease duration
+     so tests do not sleep and production settings are bounded.
+   - Scheduler overlap, multiple application instances, and lease recovery may
+     never create two active claims for the same attempt number. Lease recovery
+     may make a duplicate HTTP call, but it creates a new attempt number and
+     preserves the same stable event ID. An expired fifth-attempt post-dispatch
+     lease closes as `OUTCOME_UNKNOWN` and exhausts rather than creating attempt
+     six; a pre-dispatch fifth lease records terminal known-no-send evidence.
+
+   Chapter 19D: Merchant operations and observability.
+
+   Build:
+
+   - Extend `POST /webhook_endpoints` with optional `enabledEvents`; creation
+     persists endpoint, subscriptions, encrypted secret, and safe audit evidence
+     atomically while returning the raw signing secret once.
+   - Add `POST /webhook_endpoints/{id}/rotate_secret` and
+     `POST /webhook_endpoints/{id}/disable`. Rotation returns a new secret once;
+     if that response is lost, the merchant rotates again rather than relying on
+     THAAP to reproduce a previously revealed secret. Product-grade endpoint
+     creation idempotency is deferred under `TD-0005`.
+   - Replace unbounded `GET /webhook_deliveries` with a bounded, deterministic
+     page ordered by newest creation time and stable ID. Traverse older pages
+     with the paired `beforeCreatedAt` and `beforeId` cursor.
+   - Add tenant-scoped `GET /webhook_deliveries/{id}` and bounded
+     `GET /webhook_deliveries/{id}/attempts` with only safe event, delivery,
+     attempt, response-status, timing, and error-code fields.
+   - Keep encrypted keys, hashes, payload internals, URLs, claim tokens, and
+     response bodies out of delivery/attempt responses.
+   - Audit endpoint create, secret rotation, and disable actions with actor,
+     merchant, endpoint ID, request ID, safe before/after state, and no secret.
+   - Emit bounded-cardinality Micrometer metrics:
+     - `thaap.webhook.attempts` by event type and outcome
+     - `thaap.webhook.delivery.terminal` by event type and terminal status
+     - `thaap.webhook.attempt.duration`
+     - `thaap.webhook.delivery.latency`
+     - `thaap.webhook.queue.age`
+     - `thaap.webhook.due`
+     Attempt and terminal metrics include lease-recovered `OUTCOME_UNKNOWN`,
+     fifth-lease exhaustion, and bulk-disable exhaustion. `due` is the actual
+     claimable backlog remaining after a poll, not the poll's processed count.
+   - Never use merchant ID, endpoint ID, delivery ID, URL, raw error text, or
+     resource ID as a metric tag.
+   - Add structured logs with event, delivery, attempt, bounded outcome, and
+     latency fields; never log payloads, URLs, signatures, or secrets.
+
+   Chapter 19E: Demo and merchant integration evidence.
+
+   Build:
+
+   - Add a local loopback callback fixture that verifies the exact body and
+     signature and can deterministically return success or configured failures.
+   - Add a repeatable demo covering event creation, first failure, scheduled
+     retry, eventual success, attempt history, and unchanged payment/ledger
+     truth.
+   - Document merchant-side signature verification, duplicate-event handling,
+     retry behavior, timeout expectations, and one-time secret handling.
 
    Invariants:
 
    - Creating a delivery record is not the same as delivering the webhook.
    - One delivery attempt must be claimed by only one worker at a time.
-   - Retry must not create duplicate delivery truth for the same delivery row.
+   - Retry appends attempt evidence; it does not create a new event or delivery.
+   - Event payload bytes, event ID, event type, resource identity, merchant, and
+     API version are immutable across retries.
+   - Delivery is at least once, and merchant duplicate handling is part of the
+     public integration contract.
    - Delivery payloads must not expose raw PAN, CVV, API keys, card fingerprints,
      idempotency hashes, email, or phone.
    - Webhook execution must not roll back already committed payment truth.
    - Failed webhook delivery must be observable and retryable without changing
      payment, fraud, or ledger state.
+   - Merchant A cannot route, claim, inspect, rotate, disable, or verify Merchant
+     B's endpoint, event, delivery, attempt, or signing secret.
+   - A database-only compromise must not reveal a usable webhook signing key.
+   - Untrusted callback URLs cannot reach local services, cloud metadata, or
+     private network ranges outside the explicit local loopback policy.
+   - Endpoint create/rotation/disable state and its safe audit evidence commit or
+     roll back together; secret plaintext never enters audit or idempotency
+     storage.
 
    Required proof:
 
-   - Successful delivery moves a row to `SUCCEEDED`.
-   - Transient failure increments attempt count and schedules retry.
-   - Exhausted retries move a row to terminal `FAILED`.
-   - Duplicate worker claim/concurrency test.
-   - Signature verification test using the stored signing secret boundary.
-   - Payload redaction test.
-   - Tenant-scoped listing still hides other merchants' deliveries.
+   - Clean and V8-to-V9 H2/PostgreSQL migration tests, including honest handling
+     of legacy endpoint secrets, immediate/scheduled pending rows, terminal
+     delivery representations, and delivery payload backfill.
+   - Event-envelope determinism and payload-hash tests.
+   - HMAC signature verification against the exact transmitted bytes, plus
+     tampered body, tampered timestamp, wrong endpoint secret, and retry
+     signature tests. The executable callback fixture must reject a validly
+     signed body paired with a different `THAAP-Event-Id`.
+   - Encryption round-trip, wrong-key, ciphertext-tampering, reveal-once,
+     rotation, startup-fail-closed, and log/response secret-scan tests.
+   - Successful callback moves one delivery to `SUCCEEDED` with one successful
+     attempt and leaves originating payment, fraud, and ledger truth unchanged.
+   - Failure schedules the exact retry time; attempt five exhaustion produces
+     terminal `EXHAUSTED` truth.
+   - Real PostgreSQL duplicate-worker race proves one claim and one attempt
+     number winner.
+   - Executor-order proof shows claim 2 does not occur until attempt 1 has
+     completed its send/finalization path; no leased row waits inside a batch.
+   - Pre-send stale-claim proof shows a worker that loses ownership during
+     preparation performs no HTTP and writes no terminal outcome.
+   - Pre-dispatch disable proof shows a worker that already has signing
+     material still performs no HTTP when the merchant disables the endpoint
+     before `dispatch_started_at` is persisted; the claim closes as terminal
+     known no-send.
+   - Pre-dispatch and post-dispatch crash/lease-expiry tests prove truthful
+     tri-state send evidence, create one new numbered attempt, preserve event
+     identity, and reject stale-worker finalization.
+   - Disable-after-dispatch crash proof shows an expired in-flight attempt
+     closes as unknown and the delivery exhausts without becoming stranded or
+     creating a replacement attempt.
+   - PostgreSQL disabled-expired-recovery proof exercises the same claim SQL on
+     the production database and verifies no replacement attempt is created.
+   - Callback timeout, malformed numeric status, informational response, and
+     every final HTTP status class follow the documented policy. A final status
+     line without the terminating response-head boundary and a final header
+     section beyond the parser bound fail as post-send transport errors.
+   - Redirect, user-info, private/link-local/metadata target, non-allowlisted
+     hostname, and non-HTTPS non-local tests fail before outbound HTTP.
+   - Slow-trickle response proof exceeds the per-read timeout pattern but is
+     still terminated by the total wall-clock request deadline.
+   - A non-returning DNS lookup hits the application deadline; resolver thread
+     and queue saturation reject additional work without unbounded growth.
+   - Resolver deadline/capacity failure finalization records retryable
+     `http_request_sent=false` evidence and never calls HTTP or terminal
+     `TARGET_NOT_ALLOWED`.
+   - Unknown host, empty DNS answers, and unexpected resolver failures follow
+     the same retryable known-no-send boundary; explicit prohibited-address
+     results remain terminal target policy.
+   - All-zero 256-bit encryption-key configuration fails before encrypting any
+     merchant signing secret.
+   - Payload and persistence scans reject PAN, CVV, buyer PII, API keys, signing
+     secrets, card fingerprints, idempotency material, and unrestricted metadata.
+   - Event-subscription filtering creates only matching endpoint deliveries.
+   - Disable-versus-delivery race proves no new claim or retry starts after
+     disable while an already claimed attempt records one coherent outcome.
+   - Real PostgreSQL endpoint tests force both rotation/disable and
+     routing/disable orderings, observe the competing backend waiting on the
+     expected lock, and prove rotation cannot reactivate a disabled endpoint or
+     event creation leave a pending delivery behind disable.
+   - A forced PostgreSQL interleaving proves retry finalization holds the
+     endpoint shared lock before waiting for the delivery lock, so concurrent
+     disable leaves no retry-scheduled or claimable work.
+   - Protocol-boundary tests prove normal hostnames are not bracketed merely
+     because DNS selected IPv6, IPv6 literals retain brackets, and event
+     timestamps are canonicalized before payload hashing and database writes.
+   - Tenant-isolation tests cover endpoint rotation/disable, event, delivery,
+     attempt, and bounded listing/detail APIs.
+   - Audit and metric tests prove safe bounded fields/tags, recovery and bulk
+     terminal counts, true due-backlog semantics, and latency-bearing logs.
+   - The local failure-to-retry-to-success demo verifies the receiver signature
+     and proves payment/ledger state does not change.
 
    Defer:
 
-   - Kafka/outbox, dead-letter queues, endpoint rate limits, and merchant-facing
-     replay controls until local delivery semantics are proven.
+   - General domain outbox and Kafka publication remain owned by **Phase 5:
+     Events And Analytics**. They start when cross-process consumers are
+     introduced and complete only when domain state and outbox commit
+     atomically, publication is retryable, and consumer replay is safe.
+   - Merchant-triggered replay, dead-letter queue operations, endpoint
+     verification handshakes, overlapping old/new signing-secret windows
+     (`TD-0003`), per-merchant/per-endpoint delivery fairness controls
+     (`TD-0004`), and endpoint creation idempotency (`TD-0005`) are owned by
+     **Phase 4.5: Product-Grade Risk Operations**, implementation slice
+     **Developer/API Console Webhook Operations**. Start that slice before
+     shared non-local merchant onboarding; prove authorization, tenant
+     isolation, auditability, replay deduplication, verification,
+     rotation-window expiry, bounded rate behavior, and safe endpoint-creation
+     retry semantics.
+   - High-scale distributed queueing and managed egress proxy infrastructure are
+     owned by **Phase 9: Agents, Hardening, Scale**, implementation slice
+     **Webhook Worker Scaling And Egress Hardening**. Start when measured queue
+     age or delivery volume exceeds the bounded database-worker target, or
+     before multi-region execution; prove partition-safe claiming, backpressure,
+     regional failover, controlled egress, and unchanged at-least-once
+     semantics.
+   - Response-body retention is intentionally excluded from V1 because merchant
+     bodies are untrusted, potentially sensitive, and unnecessary for delivery
+     truth. Reconsider only in the Phase 4.5 webhook-operations slice with
+     strict truncation, retention, redaction, and access-control proof.
+
+   Debt disposition:
+
+   - `TD-0003` captures the bounded Chapter 19 secret-rotation semantics gap:
+     an already-claimed worker can sign with a secret loaded before a concurrent
+     rotation commits. The current local/test V1 wedge remains safe, but shared
+     non-local onboarding must implement and prove old/new signing-secret
+     overlap windows before treating rotation as a merchant operations playbook.
+   - `TD-0004` captures shared-environment webhook delivery fairness and rate
+     controls. Chapter 19 bounds total local worker behavior, but external
+     merchant onboarding needs proof that one noisy tenant or endpoint cannot
+     starve others.
+   - `TD-0005` captures endpoint creation idempotency. Chapter 19 lets merchants
+     disable duplicate endpoints, but public/shared onboarding needs a safe
+     retry contract that avoids accidental duplicate active endpoints without
+     leaking or replaying one-time secret material incorrectly.
+   - No DNS-rebinding or endpoint-disable debt is accepted by this plan. Target
+     policy validates every resolved address and the transport connects to the
+     prevalidated address; endpoint disable is proven at the pre-dispatch
+     no-bytes boundary. Any implementation that weakens secret recoverability,
+     target-network isolation, immutable payload truth, claim exclusivity, or
+     payment/webhook transaction separation must be fixed in Chapter 19 rather
+     than registered for later.
 
 5. Chapter 20: Deterministic Processor Edge Cases And Replayable Demo
    evidence.
@@ -2327,6 +2818,20 @@ Build:
 - Dispute evidence workflow with simulated reason-code deadlines and outcomes.
 - Developer/API console with test-card catalog, idempotency examples, webhook
   signing examples, and scenario runner.
+- **Developer/API Console Webhook Operations** owner slice:
+  - Product DRI: **Developer Experience**.
+  - Technical DRI: **Payments Core**.
+  - Add merchant-triggered delivery replay, dead-letter inspection, endpoint
+    verification handshakes, overlapping old/new signing-secret rotation
+    windows (`TD-0003`), per-merchant/per-endpoint delivery fairness controls
+    (`TD-0004`), and endpoint creation idempotency (`TD-0005`).
+  - Start before shared non-local merchant onboarding, after Chapter 19 proves
+    immutable event envelopes, at-least-once delivery, tenant isolation,
+    signing, retry, and safe attempt evidence.
+  - Completion evidence must prove replay authorization and deduplication,
+    verification ownership, rotation-window expiry, auditability, bounded rate
+    behavior, safe endpoint-creation retries, and that operational actions never
+    mutate payment or fraud truth.
 - **Developer Scenario Runner And Traffic-Origin Governance** owner slice
   (`TD-0001`):
   - Primary technical DRI: **Payments Core**.
@@ -2474,6 +2979,14 @@ Build:
 - API versioning and compatibility checks.
 - Security runbooks for credential leakage, card-testing spikes, dispute spikes,
   model regression, and merchant risk spikes.
+- **Webhook Worker Scaling And Egress Hardening** owner slice:
+  - Technical DRI: **Payments Core / Platform**.
+  - Replace or partition the bounded database worker only when measured queue
+    age or delivery volume requires it, and introduce managed egress controls
+    before multi-region webhook execution.
+  - Completion evidence must prove partition-safe claims, backpressure,
+    regional failover, controlled outbound destinations, and preservation of
+    Chapter 19 event identity, signature, attempt, and at-least-once semantics.
 
 Done when:
 

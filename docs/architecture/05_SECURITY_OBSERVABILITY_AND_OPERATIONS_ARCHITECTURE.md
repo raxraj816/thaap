@@ -278,22 +278,67 @@ Controls:
 
 ## 6. Webhook Security
 
-Webhook requirements:
+Chapter 19 webhook controls:
 
-- signing-secret simulation
-- event payload signing
-- delivery attempt tracking
-- retry metadata
-- response status capture
+- sign exact immutable payload bytes with timestamped HMAC-SHA256
+- encrypt the raw per-endpoint signing secret with AES-256-GCM under a separate,
+  versioned key-encryption key
+- retain prior key versions in an explicit decryption keyring during rollover,
+  fail startup when active ciphertext is unreadable, and lazily re-encrypt old
+  ciphertext under the current key while holding the endpoint row lock
+- retain prefix/hash only for safe display and verification; never use the hash
+  as the signing key
+- reveal a raw signing secret only at endpoint creation or rotation
+- require endpoint rotation when legacy rows have only irreversible hashes
+- serialize rotation/disable with an endpoint write lock, reject rotation of a
+  disabled endpoint, and use shared routing locks so disable cannot miss a
+  concurrently created delivery
+- build payloads from a strict safe-field allowlist through JSON serialization,
+  not string concatenation, because the exact bytes become the merchant
+  signature contract
+- execute HTTP after the originating payment transaction commits
+- claim one attempt immediately before dispatch with a bounded lease and append
+  delivery-attempt evidence
+- bound DNS with an application deadline, fixed resolver capacity, and bounded
+  queue while retaining approved-address pinning; classify timeout, saturation,
+  interruption, unknown host, empty answers, and resolver infrastructure
+  failures as retryable known-no-send outcomes, reserving terminal target denial
+  for URL policy and prohibited resolved addresses
+- disable redirects, bound connect time, enforce a wall-clock request deadline
+  across TLS/write/read, validate final HTTP status grammar/range, require a
+  complete bounded final response head, and discard response bodies
+- durably distinguish pre-dispatch known-no-send state from in-flight,
+  partial-write, and lease-recovered post-dispatch uncertainty
+- allow only loopback HTTP in local/test; this is simulator-only plaintext
+  loopback behavior for callback fixtures, not an acceptable shared-environment
+  transport for merchant webhook payloads and signature headers
+- require HTTPS and an explicit hostname allowlist when non-local execution is
+  enabled
+- reject URL user-info/fragments and non-public resolved targets, including
+  private, link-local, multicast, unspecified, metadata-service, IPv6
+  unique-local, CGNAT, benchmark, documentation, and reserved addresses
+- keep merchant, endpoint, delivery, resource, URL, and raw error values out of
+  metric tags
+- recover expired in-flight rows even after endpoint disable, count
+  recovered-unknown and terminal lease/disable outcomes, report actual due
+  backlog, and include bounded latency in finalization logs
 
-Later production-shaped controls:
+Later shared-environment controls:
 
-- timestamped signatures
-- replay window validation
-- secret rotation
 - endpoint verification
+- overlapping old/new secret rotation windows (`TD-0003`)
+- merchant-triggered replay controls
+- controlled egress proxy infrastructure
+- endpoint-specific rate controls
 
-Do not include sensitive card data in webhook payloads.
+Do not include raw PAN, CVV, buyer email/phone, API keys, signing secrets, card
+fingerprints, idempotency material, processor secrets, or unrestricted merchant
+metadata in webhook payloads, persistence, responses, logs, or metrics.
+
+Webhook delivery is at least once. Merchants verify the exact-body signature,
+then parse the signed payload `id`, require the `THAAP-Event-Id` convenience
+header to agree, and deduplicate on the authenticated body value. THAAP must
+not advertise exactly-once receipt.
 
 ## 7. Fraud And Rule Security
 

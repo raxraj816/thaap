@@ -71,6 +71,26 @@ status, exactly reversed account directions, balanced capture/refund
 transaction groups, PaymentIntent/Refund ledger lineage, and exactly one
 `refund.created` delivery whose resource is the Refund.
 
+Run the Chapter 19 signed webhook failure/retry/success demo:
+
+```bash
+export THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export THAAP_WEBHOOK_EXECUTION_ENABLED=true
+scripts/payments-api-run.sh
+# In another terminal:
+scripts/demo-chapter-19-webhook-flow.sh
+```
+
+The demo accepts only a loopback API origin and starts a loopback callback
+fixture. The endpoint secret is written to a mode-restricted temporary file and
+removed on exit. The fixture strictly verifies timestamped HMAC signatures,
+derives the deduplication ID from the signed payload, rejects a disagreeing
+`THAAP-Event-Id` header, returns `503` once and then `204`, and writes only
+sanitized event/delivery IDs,
+payload hashes, response statuses, and verification results under
+`build/reports/webhook-delivery/`. The script waits for the deterministic
+one-minute retry and proves two attempts share one immutable event.
+
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash
@@ -170,9 +190,27 @@ scripts/blog-public-check.sh docs/blog/drafts/YYYY-WNN-short-slug.md
 Run the commit-readiness gate before saying a change is ready to commit:
 
 ```bash
-scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests \
+  --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
+  --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
 The readiness gate prints the Senior Staff adversarial review lenses. Use that
 output to classify reviewer-style findings as fixed now, accepted risk,
 deferred, or rejected as not applicable before handoff.
+
+The non-trivial gate also runs:
+
+```bash
+scripts/invariant-proof-check.py docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md
+scripts/escaped-review-check.py
+scripts/chapter-closure-check.py \
+  docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
+  docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
+```
+
+These scripts enforce honest matrix provenance, immutable `ER-NNNN` findings,
+blocking severity, custom-infrastructure ADR evidence, and agreement between the
+closure dossier, root README, and implementation master plan. They validate the
+shape and consistency of the evidence; the traceability and hostile passes
+remain semantic engineering reviews.

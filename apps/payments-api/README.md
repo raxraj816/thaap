@@ -77,7 +77,11 @@ Implemented tenant-scoped endpoints:
 - `GET /refunds/{id}`
 - `GET /ledger/entries`
 - `POST /webhook_endpoints`
+- `POST /webhook_endpoints/{id}/rotate_secret`
+- `POST /webhook_endpoints/{id}/disable`
 - `GET /webhook_deliveries`
+- `GET /webhook_deliveries/{id}`
+- `GET /webhook_deliveries/{id}/attempts`
 - `GET /fraud/decisions`
 - `GET /rules`
 - `GET /reviews`
@@ -85,6 +89,120 @@ Implemented tenant-scoped endpoints:
 Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
+
+## Webhook Delivery Contract
+
+Chapter 19 uses three durable records: an immutable `WebhookEvent`, one
+endpoint-specific `WebhookDelivery`, and append-only numbered
+`WebhookDeliveryAttempt` evidence. Payment state and its event/delivery rows
+commit before external HTTP. The worker claims in a short transaction, sends
+outside database transactions, then finalizes only the matching claim token.
+Delivery is at least once. After signature verification, merchants must parse
+the signed payload `id`, require it to equal `THAAP-Event-Id`, and deduplicate
+on that authenticated payload value. The header is correlation metadata; it is
+not independently covered by the HMAC.
+Delivery listing uses a stable newest-first cursor. Pass the last row's
+`createdAt` and `id` back as `beforeCreatedAt` and `beforeId` to read the next
+page; both cursor fields are required together.
+
+Endpoint creation accepts optional `enabledEvents`. If omitted, all currently
+supported event types are subscribed. Creation and rotation reveal a
+`whsec_...` signing secret once. THAAP stores only its prefix/hash plus an
+AES-256-GCM ciphertext protected by the separately configured encryption key.
+If a reveal response is lost, rotate again. Rotation is accepted only for
+`ACTIVE` or `REQUIRES_SECRET_ROTATION` endpoints. A `DISABLED` endpoint returns
+`409 Conflict`; Chapter 19 has no implicit re-enable action.
+
+Every callback includes:
+
+```text
+Content-Type: application/json
+User-Agent: THAAP-Webhook/1.0
+THAAP-Event-Id: <stable-event-uuid>
+THAAP-Delivery-Id: <delivery-uuid>
+THAAP-Signature: t=<unix-seconds>,v1=<lowercase-hex-hmac-sha256>
+```
+
+Verify over the exact received bytes:
+
+```text
+signed_input = ascii(timestamp) + "." + raw_request_body
+expected = HMAC-SHA256(endpoint_secret, signed_input)
+```
+
+Reject stale timestamps (five minutes is the local fixture tolerance), parse
+the signature header strictly, and compare MACs in constant time before JSON
+processing. Only then parse the signed body, validate its `id` as a UUID,
+constant-time compare its exact value with `THAAP-Event-Id`, and record the
+body `id` transactionally with merchant side effects so a lease-recovery
+duplicate is harmless.
+
+Attempt 1 is immediate. Failed attempts schedule attempt 2 after 1 minute,
+attempt 3 after 5 minutes, attempt 4 after 30 minutes, and attempt 5 after 2
+hours; attempt 5 failure exhausts the delivery. Every `2xx` succeeds. Network
+errors, timeouts, and `3xx`/`4xx`/`5xx` responses retry; redirects are never
+followed and response bodies are discarded. Numeric statuses outside
+`100..599` are malformed transport failures. Bounded informational `1xx`
+responses are consumed and only a final status with a complete, bounded HTTP
+response head determines delivery truth. A status line without the terminating
+empty line is a post-send transport failure, not an acknowledgement.
+
+Attempt reads expose `dispatchStartedAt` and a nullable `httpRequestSent`.
+`false` means the attempt has not crossed the durable dispatch boundary, `true`
+means the transport completed its request write, and `null` means the attempt
+crossed that boundary but THAAP cannot yet or can no longer determine the
+network outcome. That state covers an in-flight request, a partial socket write,
+and crash/lease recovery.
+
+Local execution is disabled by default. Generate a 32-byte key and enable it:
+
+```bash
+export THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export THAAP_WEBHOOK_SECRET_KEY_VERSION="v1"
+export THAAP_WEBHOOK_EXECUTION_ENABLED=true
+```
+
+For key-encryption-key rotation, configure the new key/version for encryption
+and retain prior keys as comma-separated `version=base64` entries in
+`THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS`. Startup fails if an active endpoint uses
+an unavailable version. The first delivery under an old version decrypts it
+under a row lock and re-encrypts the same merchant signing secret with the
+current key, so rotation does not strand or exhaust deliveries.
+
+Rotation and disable take a write lock on the endpoint row. Payment mutations
+take a compatible shared lock while selecting active subscriptions and writing
+their event/delivery rows. Therefore disable either waits for an already
+selected delivery and exhausts it, or wins first and prevents that delivery
+from being created. Concurrent rotation can never undo disable.
+
+Local/test execution accepts loopback HTTP callbacks. Outside local/test,
+callbacks require HTTPS, a non-empty comma-separated
+`THAAP_WEBHOOK_ALLOWED_HOSTS`, and public resolved addresses. User-info,
+fragments, redirects, private/link-local/multicast/metadata targets, IPv6
+unique-local ranges, CGNAT, documentation/benchmark/reserved ranges, and
+unchecked DNS re-resolution are rejected. DNS runs through a bounded resolver
+pool with a configured resolution deadline and bounded queue, so a
+non-returning platform resolver cannot stall the scheduler or grow work without
+limit. URL/scheme/allowlist violations and prohibited resolved addresses are
+terminal target-policy decisions. Resolver timeout, saturation, interruption,
+unknown host, empty address answers, and resolver infrastructure failures are
+retryable known-no-send outcomes. The request timeout is a wall-clock deadline
+across TLS, write, and response parsing. The claim lease must exceed connect
+plus request timeout.
+Workers claim one delivery immediately before dispatch rather than leasing a
+waiting batch. These settings are bounded through the `THAAP_WEBHOOK_*`
+configuration in `application.yml`.
+`thaap.webhook.due` measures the remaining claimable backlog after each poll;
+attempt and terminal counters include lease-recovered `OUTCOME_UNKNOWN` and
+disable/exhaustion paths. Finalization logs include bounded `latencyMs` without
+payload, URL, signature, or secret material.
+
+Run the signed failure-to-retry-to-success demonstration after starting the API
+with execution enabled:
+
+```bash
+scripts/demo-chapter-19-webhook-flow.sh
+```
 
 Chapter 5 contract tests also cover merchant admin setup, including bootstrap-token
 gating, one-time API key reveal, persisted prefix/hash behavior, validation
@@ -413,6 +531,21 @@ authorization lineage, and accounting evidence cannot be reconstructed
 honestly. This local-only environment must be reset or explicitly remediated
 before retrying that upgrade. Do not edit an already-applied migration to add
 new durable product truth.
+
+V9 adds immutable webhook events, endpoint subscriptions, append-only delivery
+attempts, lease/claim state, encrypted-secret columns, safe terminal errors, and
+same-tenant composite constraints. Existing endpoint hashes cannot recover the
+original HMAC key, so V9 marks those endpoints `REQUIRES_SECRET_ROTATION`
+instead of inventing a usable secret. Existing delivery rows receive a
+deterministic immutable envelope and become claimable only after their endpoint
+is safely rotated. Legacy `PENDING` rows with `next_attempt_at` are translated
+to `RETRY_SCHEDULED`; legacy success and failure rows have terminal timestamps
+normalized before V9 constraints are installed.
+Because Chapter 19's V9 was exercised locally while still uncommitted, a local
+volume that contains an earlier draft V9 may have the same Flyway version but an
+older table shape. Hibernate validation intentionally rejects that false schema.
+Preserve any needed data separately, then reset the local-only volume; do not
+repair it by editing the finalized migration after merge.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally

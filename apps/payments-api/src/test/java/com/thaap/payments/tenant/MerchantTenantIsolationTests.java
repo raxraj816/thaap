@@ -13,6 +13,7 @@ import com.thaap.payments.review.ReviewCaseRepository;
 import com.thaap.payments.rules.FraudRule;
 import com.thaap.payments.rules.FraudRuleRepository;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.webhook.WebhookEventType;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -246,8 +247,8 @@ class MerchantTenantIsolationTests {
     void webhookDeliveriesAreVisibleOnlyToOwningMerchant() throws Exception {
         var merchantA = createMerchant("merchant-a");
         var merchantB = createMerchant("merchant-b");
-        createWebhookEndpoint(merchantA, "https://merchant-a.example/webhooks");
-        createWebhookEndpoint(merchantB, "https://merchant-b.example/webhooks");
+        UUID endpointA = createWebhookEndpoint(merchantA, "https://merchant-a.example/webhooks");
+        UUID endpointB = createWebhookEndpoint(merchantB, "https://merchant-b.example/webhooks");
 
         var customerA = createCustomer(merchantA, "buyer-a@example.com");
         createPaymentIntent(merchantA, customerA, "a-create", 1200);
@@ -263,6 +264,79 @@ class MerchantTenantIsolationTests {
         assertThat(merchantADeliveries.get(0).get("deliveredAt").isNull()).isTrue();
         assertThat(merchantADeliveries.get(0).get("lastError").isNull()).isTrue();
         assertThat(merchantBDeliveries).isEmpty();
+
+        UUID deliveryA = UUID.fromString(merchantADeliveries.get(0).get("id").asText());
+        String detail = mockMvc.perform(get("/webhook_deliveries/{id}", deliveryA)
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(detail)
+                .doesNotContain("payload", "signingSecret", "claimToken", "leaseExpiresAt",
+                        "merchant-a.example");
+        mockMvc.perform(get("/webhook_deliveries").param("limit", "101")
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/webhook_deliveries/{id}/attempts", deliveryA).param("limit", "101")
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/webhook_deliveries/{id}", deliveryA)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/webhook_deliveries/{id}/attempts", deliveryA)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/webhook_endpoints/{id}/rotate_secret", endpointA)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/webhook_endpoints/{id}/disable", endpointB)
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isNotFound());
+        String disabledEndpoint = mockMvc.perform(post("/webhook_endpoints/{id}/disable", endpointB)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode disabledEndpointJson = objectMapper.readTree(disabledEndpoint);
+        assertThat(disabledEndpointJson.get("operationalStatus").asText()).isEqualTo("DISABLED");
+        assertThat(disabledEndpointJson.get("enabledEvents")).hasSize(WebhookEventType.values().length);
+        assertThat(disabledEndpointJson.get("signingSecret").isNull()).isTrue();
+        mockMvc.perform(post("/webhook_endpoints/{id}/rotate_secret", endpointB)
+                        .header(API_KEY, merchantB.apiKey()))
+                .andExpect(status().isConflict());
+
+        createPaymentIntent(merchantA, customerA, "a-create-2", 1300);
+        createPaymentIntent(merchantA, customerA, "a-create-3", 1400);
+        String firstPageBody = mockMvc.perform(get("/webhook_deliveries")
+                        .param("limit", "2")
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode firstPage = objectMapper.readTree(firstPageBody);
+        JsonNode cursor = firstPage.get(1);
+        String secondPageBody = mockMvc.perform(get("/webhook_deliveries")
+                        .param("limit", "2")
+                        .param("beforeCreatedAt", cursor.get("createdAt").asText())
+                        .param("beforeId", cursor.get("id").asText())
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode secondPage = objectMapper.readTree(secondPageBody);
+        assertThat(firstPage).hasSize(2);
+        assertThat(secondPage).hasSize(1);
+        assertThat(secondPage.get(0).get("id").asText())
+                .isNotEqualTo(firstPage.get(0).get("id").asText())
+                .isNotEqualTo(firstPage.get(1).get("id").asText());
+        mockMvc.perform(get("/webhook_deliveries")
+                        .param("beforeId", cursor.get("id").asText())
+                        .header(API_KEY, merchantA.apiKey()))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -394,7 +468,7 @@ class MerchantTenantIsolationTests {
         return objectMapper.readTree(response);
     }
 
-    private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
+    private UUID createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         var response = mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
                         .contentType(APPLICATION_JSON)
@@ -410,6 +484,7 @@ class MerchantTenantIsolationTests {
         var json = objectMapper.readTree(response);
         assertThat(json.get("signingSecret").asText()).startsWith("whsec_");
         assertThat(json.get("signingSecret").asText()).startsWith(json.get("signingSecretPrefix").asText());
+        return UUID.fromString(json.get("id").asText());
     }
 
     private JsonNode getArray(String path, MerchantAccess merchant) throws Exception {

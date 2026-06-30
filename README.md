@@ -5,10 +5,14 @@ Threat Hunting & Adaptive Analytics for Payments.
 THAAP is a production-shaped payment processing and fraud intelligence simulator. It exists to build payment and fraud primitives end to end: merchant onboarding, customer and payment method creation, PaymentIntent and PaymentAttempt lifecycle, processor simulation, idempotency, webhooks, ledgering, fraud rules, manual review, synthetic data, ML scoring, graph intelligence, and later GenAI-assisted offline investigation.
 
 The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md).
+Chapter completion is governed by
+[the invariant-proof process](docs/INVARIANT_PROOF_REVIEW_PROCESS.md),
+[the escaped-review register](docs/ESCAPED_REVIEW_REGISTER.md), and a
+chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 
 ## Current Status
 
-Chapter 18 is complete. Confirm now produces deterministic processor
+Chapter 19 is complete. Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
 capture remains an explicit endpoint operation, and approved uncaptured
@@ -150,6 +154,26 @@ scenarios through public APIs:
   partial/over/double-refund rejection, invalid lifecycle states, tenant and
   database lineage, migration compatibility, rollback on ledger/webhook/audit
   failure, and one coherent winner under a real PostgreSQL refund race.
+- Chapter 19 turns webhook records into an executable at-least-once delivery
+  system: immutable event envelopes, endpoint-specific delivery state,
+  append-only attempts, AES-256-GCM-protected signing keys, exact-byte HMAC
+  signatures, explicit-CIDR SSRF-safe target validation, wall-clock request
+  deadlines, complete bounded response-head acknowledgement, exhaustive
+  retryable DNS-failure classification, just-in-time lease recovery,
+  deterministic retries, versioned key rollover, cursor-bounded tenant APIs,
+  safe metrics, and bulk queued-delivery exhaustion during endpoint disable.
+  Endpoint state transitions and event routing use compatible database locks;
+  forced PostgreSQL orderings prove rotation cannot reactivate a disabled
+  endpoint and concurrent event creation or retry finalization cannot strand
+  claimable work after disable. Timestamp canonicalization matches database
+  precision, Host authority remains correct across IPv4/IPv6 resolution, and
+  merchant guidance deduplicates only the signed payload event ID.
+- V9 honestly migrates legacy endpoints to `REQUIRES_SECRET_ROTATION`, backfills
+  legacy delivery envelopes, and enforces same-tenant event/delivery/attempt
+  lineage in both H2 and PostgreSQL.
+- `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
+  once, retries with the same event and payload, succeeds, and leaves payment
+  truth unchanged.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
@@ -165,6 +189,9 @@ scenarios through public APIs:
   requires capture state plus authorization and ledger evidence.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
+- Non-trivial chapters now require a checked invariant-proof matrix with forced
+  PostgreSQL interleavings, protocol-boundary evidence, plan traceability, and a
+  separate hostile review before completion.
 
 ## Repository Layout
 
@@ -241,8 +268,9 @@ curl http://localhost:8080/actuator/health/readiness
 ```
 
 If an older local PostgreSQL volume was created before Flyway became the schema
-owner, or contains a pre-V8 thin `REFUNDED` PaymentIntent without reconstructable
-Refund/ledger lineage, reset it before normal local startup:
+owner, contains a pre-V8 thin `REFUNDED` PaymentIntent without reconstructable
+Refund/ledger lineage, or ran an earlier uncommitted draft of V9 while Chapter
+19 was still being developed, reset it before normal local startup:
 
 ```bash
 docker compose -f infra/docker/compose.yml down --volumes
