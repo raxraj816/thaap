@@ -27,29 +27,30 @@ public class WebhookDeliveryFinalizationService {
         this.finalizationTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    public boolean succeed(WebhookDeliveryClaim claim, Instant completedAt, int responseStatus) {
-        Boolean finalized = finalizationTransaction.execute(status -> {
+    public WebhookDeliveryFinalizationResult succeed(
+            WebhookDeliveryClaim claim, Instant completedAt, int responseStatus) {
+        return finalizationTransaction.execute(status -> {
             ClaimState state = loadCurrentClaim(claim);
             if (state == null) {
-                return false;
+                return WebhookDeliveryFinalizationResult.stale();
             }
             state.attempt().succeed(completedAt, responseStatus);
             state.delivery().succeed(claim.claimToken(), completedAt);
-            return true;
+            return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
-        return Boolean.TRUE.equals(finalized);
     }
 
-    public boolean failRetryably(WebhookDeliveryClaim claim, Instant completedAt, Boolean requestSent,
+    public WebhookDeliveryFinalizationResult failRetryably(
+            WebhookDeliveryClaim claim, Instant completedAt, Boolean requestSent,
             Integer responseStatus, WebhookDeliveryErrorCode errorCode) {
-        Boolean finalized = finalizationTransaction.execute(status -> {
+        return finalizationTransaction.execute(status -> {
             WebhookEndpoint endpoint = endpointRepository.findByIdAndMerchantIdForShare(
                             claim.endpointId(), claim.merchantId())
                     .orElseThrow(() -> new IllegalStateException(
                             "Webhook endpoint disappeared during finalization"));
             ClaimState state = loadCurrentClaim(claim);
             if (state == null) {
-                return false;
+                return WebhookDeliveryFinalizationResult.stale();
             }
             if (requestSent == null) {
                 state.attempt().markOutcomeUnknown(completedAt, errorCode);
@@ -73,23 +74,22 @@ public class WebhookDeliveryFinalizationService {
                 state.delivery().scheduleRetry(claim.claimToken(),
                         completedAt.plus(retryPolicy.delayBeforeNextAttempt(claim.attemptNumber())), errorCode);
             }
-            return true;
+            return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
-        return Boolean.TRUE.equals(finalized);
     }
 
-    public boolean failTerminally(WebhookDeliveryClaim claim, Instant completedAt,
+    public WebhookDeliveryFinalizationResult failTerminally(
+            WebhookDeliveryClaim claim, Instant completedAt,
             WebhookDeliveryErrorCode errorCode) {
-        Boolean finalized = finalizationTransaction.execute(status -> {
+        return finalizationTransaction.execute(status -> {
             ClaimState state = loadCurrentClaim(claim);
             if (state == null) {
-                return false;
+                return WebhookDeliveryFinalizationResult.stale();
             }
             state.attempt().failTerminally(completedAt, false, null, errorCode);
             state.delivery().exhaust(claim.claimToken(), errorCode);
-            return true;
+            return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
-        return Boolean.TRUE.equals(finalized);
     }
 
     private ClaimState loadCurrentClaim(WebhookDeliveryClaim claim) {

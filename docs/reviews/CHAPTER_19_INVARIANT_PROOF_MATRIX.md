@@ -16,9 +16,9 @@
 - Lens: PAYMENT_FRAUD
 - Invariant: Webhook execution and retry never rewrite or roll back committed payment, fraud, authorization, refund, ledger, audit, or idempotency truth.
 - Failure sequence: A callback returns failure, retries, and later succeeds after the originating payment transaction has committed.
-- Implementation: WebhookDeliveryService persists event routing inside the domain transaction while WebhookDeliveryExecutor claims, sends, and finalizes only after that transaction.
-- Proof: WebhookDeliveryExecutionContractTests.signedFailureRetrySuccessPreservesOneEventAndPaymentTruth and payment rollback contract tests.
-- Adversarial evidence: A real callback returns 503 then 204 while the test reconciles stable PaymentIntent and ledger state across both attempts.
+- Implementation: WebhookDeliveryService.createDeliveriesInCurrentTransaction uses MANDATORY propagation so event routing can only join an existing domain transaction, while WebhookDeliveryExecutor claims, sends, and finalizes only after that transaction.
+- Proof: WebhookDeliveryExecutionContractTests.routingRequiresExistingDomainTransaction, signedFailureRetrySuccessPreservesOneEventAndPaymentTruth, and payment rollback contract tests.
+- Adversarial evidence: A direct out-of-transaction routing call fails before event or delivery persistence; a real callback then returns 503 followed by 204 while the retry test reconciles stable PaymentIntent and ledger state across both attempts.
 - Status: PASS
 
 ## C19-TEN-001
@@ -65,10 +65,10 @@
 
 - Lens: SECURITY_PRIVACY
 - Invariant: Signed webhook event payloads are serialized through a JSON encoder with explicit mapper behavior and a bounded byte representation, not assembled through string concatenation, so future event/resource values cannot malform, inject, or oversized-write merchant-verifiable JSON.
-- Failure sequence: A future webhook event type or legacy backfill value contains a quote, backslash, or control character; manual payload assembly emits malformed JSON or injected fields; or a future payload expansion exceeds the signed fixture/database operating boundary and THAAP signs bytes a merchant cannot safely parse, store, or verify.
-- Implementation: JacksonConfiguration registers only the Java time module required by THAAP APIs; WebhookEventEnvelopeFactory and V9__harden_webhook_delivery_execution construct typed envelope records and serialize them with Jackson before computing payload SHA-256; runtime payload creation rejects serialized bodies larger than 64 KiB measured as UTF-8 bytes before hash/persist/sign.
-- Proof: JacksonConfigurationTests.objectMapperUsesExplicitJavaTimeModuleWithStableIsoInstants, WebhookSecurityAndRetryTests.eventEnvelopeUsesOnlyCanonicalAllowlistedFieldsAndMatchingHash, WebhookSecurityAndRetryTests.eventEnvelopeRejectsPayloadLargerThanSignedFixtureBoundary, and DatabaseMigrationTests.chapter19MigrationBackfillsImmutableEventsAndRequiresLegacySecretRotation parse the exact signed/stored payload bytes as JSON, verify the SHA-256 matches those bytes, and prove oversized UTF-8 payloads fail closed.
-- Adversarial evidence: Runtime and legacy backfill paths no longer splice string values into JSON syntax; the tests would fail if payload bytes were malformed, reordered outside the public contract, hashed differently from the persisted body, serialized with unstable Java-time behavior, or allowed past the 64 KiB signed-body boundary.
+- Failure sequence: A future webhook event type or legacy backfill value contains a quote, backslash, or control character; manual payload assembly emits malformed JSON or injected fields; or an oversized persisted body with a matching hash bypasses creation-time validation and reaches signing or socket connection.
+- Implementation: JacksonConfiguration registers only the Java time module required by THAAP APIs; WebhookEventEnvelopeFactory and V9__harden_webhook_delivery_execution construct typed envelope records and serialize them with Jackson before computing payload SHA-256; creation, executor integrity validation, and socket transport independently reject serialized bodies larger than 64 KiB measured as UTF-8.
+- Proof: JacksonConfigurationTests.objectMapperUsesExplicitJavaTimeModuleWithStableIsoInstants; WebhookSecurityAndRetryTests event-envelope, creation-size, and socketTransportRejectsOversizedPayloadBeforeConnecting tests; WebhookDeliveryExecutorUnitTests.oversizedPersistedPayloadFailsTerminallyBeforeSecretOrHttp; and the H2/PostgreSQL migration tests.
+- Adversarial evidence: Runtime and legacy backfill paths no longer splice string values into JSON syntax; a payload whose hash is internally consistent but whose byte length exceeds the contract is terminal before secret access and independently rejected by direct transport before connection.
 - Status: PASS
 
 ## C19-CON-001
@@ -105,10 +105,10 @@
 
 - Lens: DATA_ML_LINEAGE
 - Invariant: Event identity, resource lineage, payload bytes, hash, and timestamp remain immutable and database-representable across retries and migration.
-- Failure sequence: Nanosecond application time is serialized while TIMESTAMP(6) truncates persisted time; migration invents a recoverable legacy secret or mismatched event lineage; or a V8 `PENDING` row with a non-null `next_attempt_at` reaches the V9 retry-time constraint without being translated to `RETRY_SCHEDULED`.
-- Implementation: WebhookEventEnvelopeFactory normalizes to microseconds before serialization and persistence; V9 uses composite lineage constraints, honest REQUIRES_SECRET_ROTATION backfill, and explicit normalization of every legacy delivery-state representation before installing V9 constraints.
-- Proof: WebhookSecurityAndRetryTests.eventEnvelopeNormalizesTimestampToDatabasePrecisionBeforeSigning plus H2 and PostgreSQL Chapter 19 upgrade tests covering immediate pending, scheduled pending, succeeded, and failed legacy delivery representations.
-- Adversarial evidence: A nanosecond input produces one canonical microsecond timestamp in payload and columns; a schema-valid V8 scheduled row migrates without constraint failure or changed retry time; legacy migration preserves truth without fabricating key material.
+- Failure sequence: Nanosecond application time is serialized while TIMESTAMP(6) truncates persisted time; migration invents a recoverable legacy secret or sibling lineage; a V8 row claims retry/success/failure without attempt evidence; or an inactive legacy endpoint leaves a PENDING row permanently unclaimable.
+- Implementation: WebhookEventEnvelopeFactory normalizes to microseconds before serialization and persistence; because V8 stored no event identity, V9 preserves every pristine legacy delivery as its own synthetic event, rejects every row that claims prior execution without authoritative attempt evidence, marks active legacy endpoints REQUIRES_SECRET_ROTATION, and exhausts pristine queued rows for inactive endpoints as ENDPOINT_DISABLED.
+- Proof: WebhookSecurityAndRetryTests.eventEnvelopeNormalizesTimestampToDatabasePrecisionBeforeSigning plus H2 and PostgreSQL Chapter 19 upgrade tests covering pristine active and inactive endpoint work and fail-fast scheduled/succeeded/failed representations.
+- Adversarial evidence: A nanosecond input produces one canonical microsecond timestamp in payload and columns; unsupported aggregate execution state fails before V9 schema creation; inactive endpoint work becomes terminal rather than stranded; no secret material, attempt history, or historical fan-out is fabricated.
 - Status: PASS
 
 ## C19-API-001
@@ -135,10 +135,10 @@
 
 - Lens: API_PRODUCT
 - Invariant: The transport accepts only a final HTTP response status in the protocol and persistence range `100..599`; informational responses do not become delivery outcomes.
-- Failure sequence: An untrusted callback sends a numeric `600` or `999`, which parses as an integer, reaches finalization, violates the attempt-table constraint, rolls back, and is later misclassified as lease uncertainty instead of following retry policy; or it sends `100 Continue` before a final `204`.
-- Implementation: SocketWebhookHttpTransport validates status-line grammar and range, consumes bounded informational responses, and returns only the final response status to delivery classification.
-- Proof: WebhookSecurityAndRetryTests.socketTransportRejectsOutOfRangeNumericStatusAsTransportFailure and socketTransportConsumesInformationalResponseBeforeFinalStatus.
-- Adversarial evidence: Raw socket fixtures emit `999` and `100` followed by `204`; the first becomes a classified transport error that finalizes normally, while the second succeeds on the final status without duplicate attempt truth.
+- Failure sequence: An untrusted callback sends a numeric `600` or `999`, a malformed `HTTP/not-http 204` protocol token, a control-bearing reason phrase, or `100 Continue` before a final `204`; THAAP accepts non-HTTP acknowledgement truth or reaches a persistence constraint instead of following retry policy.
+- Implementation: SocketWebhookHttpTransport accepts only HTTP/1.0 or HTTP/1.1 text status lines with exactly three ASCII status digits and a control-safe reason phrase, validates the `100..599` range, consumes bounded informational responses, and returns only the final response status to delivery classification.
+- Proof: WebhookSecurityAndRetryTests.socketTransportRejectsOutOfRangeNumericStatusAsTransportFailure, socketTransportRejectsMalformedHttpVersionAsTransportFailure, socketTransportRejectsControlBearingReasonPhrase, and socketTransportConsumesInformationalResponseBeforeFinalStatus.
+- Adversarial evidence: Raw socket fixtures emit `999`, `HTTP/not-http 204`, a control-bearing reason phrase, and `100` followed by `204`; malformed numeric/version/reason responses become classified post-send transport failures, while the valid informational exchange succeeds only on the final status.
 - Status: PASS
 
 ## C19-API-004
@@ -146,39 +146,39 @@
 - Lens: API_PRODUCT
 - Invariant: THAAP records a callback acknowledgement only after receiving a structurally complete, bounded final HTTP response head; a final status line without its terminating header boundary is not a successful delivery.
 - Failure sequence: A callback writes `HTTP/1.1 204 No Content\r\n` and disconnects or stalls before the empty line that completes the response head; THAAP reads the numeric status and incorrectly records `SUCCEEDED`.
-- Implementation: SocketWebhookHttpTransport consumes every informational and final response header section through a shared 32 KiB bound and returns the final status only after reading the empty line that terminates the final response head.
-- Proof: WebhookSecurityAndRetryTests.socketTransportConsumesInformationalResponseBeforeFinalStatus, socketTransportRejectsTruncatedFinalResponseHead, and socketTransportBoundsFinalResponseHeaders.
-- Adversarial evidence: A complete raw-socket `204` succeeds; the same status line without its terminating empty line and a final response head beyond the configured parser bound both become classified post-send transport failures rather than false `SUCCEEDED` truth.
+- Implementation: SocketWebhookHttpTransport consumes status lines, header lines, CRLF framing, informational sections, and the final section through one cumulative exact-byte 32 KiB budget and returns the final status only after reading its terminating empty line.
+- Proof: WebhookSecurityAndRetryTests.socketTransportConsumesInformationalResponseBeforeFinalStatus, socketTransportRejectsTruncatedFinalResponseHead, socketTransportBoundsFinalResponseHeaders, and socketTransportUsesOneResponseHeadBudgetAcrossInformationalAndFinalSections.
+- Adversarial evidence: A raw response head of exactly 32768 bytes succeeds; 32769 bytes, a truncated `204`, and informational plus final sections whose cumulative size crosses the budget all become post-send transport failures.
 - Status: PASS
 
 ## C19-OBS-001
 
 - Lens: OBSERVABILITY
 - Invariant: Operators can distinguish success, retry, exhaustion, lease uncertainty, disable, latency, queue age, and actual due backlog without high-cardinality or sensitive tags.
-- Failure sequence: Recovery or bulk disable bypasses normal finalization, or metrics/logs expose merchant, endpoint, URL, resource, payload, or secret values.
-- Implementation: WebhookMetrics records bounded enums and timers across normal and recovery paths; executor/finalization logs use bounded identifiers and omit protocol secrets.
-- Proof: WebhookDeliveryExecutorUnitTests.dueGaugeReportsRemainingEligibleBacklog, successfulFinalizationLogIncludesBoundedLatencyField, and endpoint/contract metric assertions.
-- Adversarial evidence: Unknown lease recovery and bulk terminal transitions are counted while tag and log scans reject forbidden dimensions and content.
+- Failure sequence: Recovery or bulk disable bypasses normal finalization; a claim changes a pre-counted queued row to DELIVERING while disable waits and terminal metrics overcount; distinct failure causes collapse; or telemetry exposes sensitive/high-cardinality values.
+- Implementation: WebhookMetrics records bounded outcome, status, and error-code enums plus timers; finalization returns committed classification directly; bulk disable performs one bounded update per canonical event type and records only actual affected-row counts after database predicate re-evaluation.
+- Proof: WebhookDeliveryExecutorUnitTests due/log/failure assertions, WebhookDeliveryExecutionContractTests, WebhookEndpointOperationsTests, and WebhookDeliveryPostgreSqlConcurrencyTests.concurrentClaimDoesNotInflateBulkDisableMetrics.
+- Adversarial evidence: The PostgreSQL disable backend is observed waiting on a row changed concurrently to DELIVERING, then updates zero rows and emits zero premature terminal/failure counts; normal causes remain distinguishable without forbidden tags.
 - Status: PASS
 
 ## C19-OBS-002
 
 - Lens: OBSERVABILITY
 - Invariant: Attempt evidence distinguishes a request known not to have been sent from an attempt whose send outcome is genuinely unknown.
-- Failure sequence: Secret loading, target validation, endpoint disable, or another preparation step fails before HTTP; the claim expires or is closed; recovery or dispatch preparation incorrectly changes `http_request_sent` from false to true and records false merchant-facing evidence.
-- Implementation: The attempt persists an explicit dispatch-start marker in the same locked transaction that renews the claim immediately before HTTP; recovery maps an unmarked attempt to a no-send retryable failure, disabled pre-dispatch closure remains known no-send, and only a marked attempt can become `OUTCOME_UNKNOWN`.
-- Proof: WebhookDeliveryExecutionContractTests.expiredPreDispatchLeaseRecordsNoSendFailure, expiredPostDispatchLeaseRecordsOutcomeUnknown, and disablingEndpointAfterClaimButBeforeDispatchPreventsHttpSend.
-- Adversarial evidence: Otherwise identical claims differ only by the durable dispatch marker and produce distinct, truthful outcomes; a disabled pre-dispatch claim remains terminal known-no-send without creating duplicate attempt numbers or emitting HTTP.
+- Failure sequence: Secret loading, target validation, endpoint disable, signing after preparation, or another pre-HTTP step fails; recovery or finalization records false send evidence.
+- Implementation: The attempt persists an explicit dispatch-start marker in the same locked transaction that renews the claim; recovery maps an unmarked attempt to no-send, disabled pre-dispatch closure remains no-send, a signing failure after the marker is explicitly finalized with http_request_sent=false, and only unresolved marked work becomes OUTCOME_UNKNOWN.
+- Proof: WebhookDeliveryExecutionContractTests.expiredPreDispatchLeaseRecordsNoSendFailure, expiredPostDispatchLeaseRecordsOutcomeUnknown, and disablingEndpointAfterClaimButBeforeDispatchPreventsHttpSend plus WebhookDeliveryExecutorUnitTests.signingFailureAfterPreparationFinalizesAsKnownNoSend.
+- Adversarial evidence: Otherwise identical claims differ by the durable marker and actual local knowledge; signing failure after preparation is not mislabeled unknown and no transport call occurs.
 - Status: PASS
 
 ## C19-OPS-001
 
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Slow, failing, crashing, or disabled endpoints consume bounded resources and converge to explainable durable state.
-- Failure sequence: DNS resolution stalls before lease renewal, a target trickles a status line, serial batch claims expire before send, attempt five lease expires, runtime infrastructure fails unexpectedly, or endpoint disable occurs before or after dispatch starts.
-- Implementation: A bounded target-resolution deadline, just-in-time one-row claims, durable pre-dispatch marking plus lease renewal, endpoint-active validation at the final no-bytes boundary, total wall-clock socket deadline, deterministic five-attempt policy, lease recovery, and classified safe terminal outcomes bound the worker.
-- Proof: WebhookSecurityAndRetryTests target-resolution and socket deadline tests, WebhookDeliveryExecutorUnitTests ordering/recovery tests, WebhookDeliveryExecutionContractTests pre/post-dispatch lease, pre-dispatch disable, and fifth-attempt/disable tests, and WebhookDeliveryPostgreSqlConcurrencyTests.disabledEndpointStillRecoversExpiredInFlightAttemptOnPostgreSql.
-- Adversarial evidence: A resolver that never returns is terminated within the configured preparation budget; trickle traffic exceeds per-read timing yet hits the total deadline; pre-send failure remains distinguishable from uncertain dispatch; endpoint disable before dispatch emits no HTTP; endpoint disable after dispatch does not strand an expired delivery; attempt six is never created.
+- Failure sequence: DNS resolution stalls before lease renewal, dispatch preparation waits longer than merchant signature tolerance, a target trickles bytes, serial claims expire, attempt five lease expires, runtime infrastructure fails, or endpoint disable occurs around dispatch.
+- Implementation: Bounded resolution, just-in-time claiming, durable preparation plus lease renewal, a fresh post-preparation signature timestamp, total socket deadline, deterministic retries, lease recovery, and classified safe outcomes bound the worker.
+- Proof: WebhookSecurityAndRetryTests resolution/deadline/limit tests, WebhookDeliveryExecutorUnitTests.signatureTimestampIsMintedAfterDispatchPreparationCompletes and ordering/recovery tests, WebhookDeliveryExecutionContractTests lease/disable tests, and PostgreSQL recovery/concurrency tests.
+- Adversarial evidence: A 301-second preparation delay still signs with the post-wait clock; resolver and trickle sequences remain bounded; no pre-send failure becomes false send truth; disable and fifth-attempt recovery converge without attempt six.
 - Status: PASS
 
 ## C19-OPS-002

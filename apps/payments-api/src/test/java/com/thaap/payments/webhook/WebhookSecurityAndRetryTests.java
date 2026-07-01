@@ -302,6 +302,47 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void socketTransportRejectsMalformedHttpVersionAsTransportFailure() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server, "HTTP/not-http 204 No Content\r\n\r\n"));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThatThrownBy(() -> transport.send(requestFor(server)))
+                    .isInstanceOf(WebhookTransportException.class)
+                    .satisfies(exception -> {
+                        WebhookTransportException transportException =
+                                (WebhookTransportException) exception;
+                        assertThat(transportException.getErrorCode())
+                                .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                        assertThat(transportException.getRequestSent()).isTrue();
+                    });
+        }
+    }
+
+    @Test
+    void socketTransportRejectsControlBearingReasonPhrase() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server,
+                    "HTTP/1.1 204 Invalid\u0001Reason\r\n\r\n"));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThatThrownBy(() -> transport.send(requestFor(server)))
+                    .isInstanceOf(WebhookTransportException.class)
+                    .satisfies(exception -> {
+                        WebhookTransportException transportException =
+                                (WebhookTransportException) exception;
+                        assertThat(transportException.getErrorCode())
+                                .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                        assertThat(transportException.getRequestSent()).isTrue();
+                    });
+        }
+    }
+
+    @Test
     void socketTransportConsumesInformationalResponseBeforeFinalStatus() throws Exception {
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
                 ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
@@ -337,11 +378,67 @@ class WebhookSecurityAndRetryTests {
 
     @Test
     void socketTransportBoundsFinalResponseHeaders() throws Exception {
-        String oversizedHeaders = "X-Bounded: value\r\n".repeat(2_000);
+        String exactBoundedHead = responseHeadOfSize(SocketWebhookHttpTransport.MAX_RESPONSE_HEAD_BYTES);
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
                 ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
-            serverExecutor.submit(() -> sendRawResponse(server,
-                    "HTTP/1.1 204 No Content\r\n" + oversizedHeaders + "\r\n"));
+            serverExecutor.submit(() -> sendRawResponse(server, exactBoundedHead));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThat(transport.send(requestFor(server)).statusCode()).isEqualTo(204);
+        }
+
+        String oversizedHead = responseHeadOfSize(
+                SocketWebhookHttpTransport.MAX_RESPONSE_HEAD_BYTES + 1);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server, oversizedHead));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThatThrownBy(() -> transport.send(requestFor(server)))
+                    .isInstanceOf(WebhookTransportException.class)
+                    .satisfies(exception -> {
+                        WebhookTransportException transportException =
+                                (WebhookTransportException) exception;
+                        assertThat(transportException.getErrorCode())
+                                .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                        assertThat(transportException.getRequestSent()).isTrue();
+                    });
+        }
+    }
+
+    @Test
+    void socketTransportRejectsOversizedPayloadBeforeConnecting() throws Exception {
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        java.net.URI uri = new java.net.URI("http://127.0.0.1:1/webhook");
+        WebhookHttpRequest request = new WebhookHttpRequest(
+                new ValidatedWebhookTarget(uri, loopback, 1),
+                UUID.randomUUID(), UUID.randomUUID(),
+                "t=1,v1=" + "a".repeat(64),
+                "x".repeat(WebhookEventEnvelopeFactory.MAX_PAYLOAD_BYTES + 1));
+        SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+        assertThatThrownBy(() -> transport.send(request))
+                .isInstanceOf(WebhookTransportException.class)
+                .satisfies(exception -> {
+                    WebhookTransportException transportException =
+                            (WebhookTransportException) exception;
+                    assertThat(transportException.getErrorCode())
+                            .isEqualTo(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED);
+                    assertThat(transportException.getRequestSent()).isFalse();
+                });
+    }
+
+    @Test
+    void socketTransportUsesOneResponseHeadBudgetAcrossInformationalAndFinalSections() throws Exception {
+        String informational = responseHeadOfSize(
+                "HTTP/1.1 100 Continue\r\n", 20_000);
+        String finalResponse = responseHeadOfSize(20_000);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server, informational + finalResponse));
             SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
                     Duration.ofSeconds(1), Duration.ofSeconds(1));
 
@@ -399,7 +496,7 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
-    void retryPolicyUsesExactChapter19ScheduleAndStopsAfterFiveAttempts() {
+    void retryPolicyUsesExactBackoffScheduleAndStopsAfterFiveAttempts() {
         WebhookRetryPolicy policy = new WebhookRetryPolicy();
 
         assertThat(policy.delayBeforeNextAttempt(1)).isEqualTo(Duration.ofMinutes(1));
@@ -584,6 +681,38 @@ class WebhookSecurityAndRetryTests {
         } catch (IOException ignored) {
             // The client owns the assertion for malformed or timed-out protocol behavior.
         }
+    }
+
+    private String responseHeadOfSize(int targetBytes) {
+        return responseHeadOfSize("HTTP/1.1 204 No Content\r\n", targetBytes);
+    }
+
+    private String responseHeadOfSize(String statusLine, int targetBytes) {
+        int remainingHeaderBytes = targetBytes
+                - statusLine.getBytes(java.nio.charset.StandardCharsets.US_ASCII).length
+                - 2;
+        if (remainingHeaderBytes < 0) {
+            throw new IllegalArgumentException("Response head target is too small");
+        }
+        StringBuilder response = new StringBuilder(statusLine);
+        while (remainingHeaderBytes > 0) {
+            int lineBytes = Math.min(SocketWebhookHttpTransport.MAX_LINE_BYTES, remainingHeaderBytes);
+            int bytesAfterLine = remainingHeaderBytes - lineBytes;
+            if (bytesAfterLine > 0 && bytesAfterLine < 4) {
+                lineBytes -= 4 - bytesAfterLine;
+            }
+            if (lineBytes < 4) {
+                throw new IllegalArgumentException("Response head target cannot form a complete header line");
+            }
+            response.append("X:");
+            response.append("a".repeat(lineBytes - 4));
+            response.append("\r\n");
+            remainingHeaderBytes -= lineBytes;
+        }
+        response.append("\r\n");
+        assertThat(response.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII))
+                .hasSize(targetBytes);
+        return response.toString();
     }
 
     private String flipLastCharacter(String value) {

@@ -20,7 +20,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -49,7 +48,9 @@ class WebhookDeliveryExecutorUnitTests {
         when(fixture.transport().send(any(WebhookHttpRequest.class)))
                 .thenReturn(new WebhookHttpResponse(204));
         when(fixture.finalizationService().succeed(any(WebhookDeliveryClaim.class), any(Instant.class), eq(204)))
-                .thenReturn(true);
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.SUCCEEDED, null,
+                        WebhookAttemptOutcome.SUCCEEDED, null));
 
         assertThat(fixture.executor().processDueDeliveries(Instant.parse("2026-06-28T10:00:00Z"), 3))
                 .isEqualTo(2);
@@ -75,21 +76,33 @@ class WebhookDeliveryExecutorUnitTests {
     }
 
     @Test
-    void signingFailureRemainsBeforeDurableDispatchBoundary() throws Exception {
+    void signingFailureAfterPreparationFinalizesAsKnownNoSend() throws Exception {
         ExecutorFixture fixture = fixture();
         WebhookDeliveryClaim claim = claim(1);
         when(fixture.endpointSecretService().loadForDelivery(claim.merchantId(), claim.endpointId()))
                 .thenReturn("whsec_test");
         when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
                 URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), any(Instant.class))).thenReturn(true);
         when(fixture.signer().sign(any(String.class), any(String.class), any(Instant.class)))
                 .thenThrow(new IllegalStateException("signing unavailable"));
+        when(fixture.finalizationService().failRetryably(
+                eq(claim), any(Instant.class), eq(false), eq(null),
+                eq(WebhookDeliveryErrorCode.SIGNING_FAILED)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.RETRY_SCHEDULED,
+                        WebhookDeliveryErrorCode.SIGNING_FAILED,
+                        WebhookAttemptOutcome.RETRYABLE_FAILURE,
+                        WebhookDeliveryErrorCode.SIGNING_FAILED));
 
         fixture.executor().processClaim(claim);
 
-        verifyNoInteractions(fixture.transport(), fixture.finalizationService());
-        verify(fixture.claimService(), never())
-                .prepareForDispatch(any(WebhookDeliveryClaim.class), any(Instant.class));
+        verifyNoInteractions(fixture.transport());
+        verify(fixture.finalizationService()).failRetryably(
+                eq(claim), any(Instant.class), eq(false), eq(null),
+                eq(WebhookDeliveryErrorCode.SIGNING_FAILED));
+        verify(fixture.metrics()).recordFailure(
+                claim.eventType(), WebhookDeliveryErrorCode.SIGNING_FAILED);
     }
 
     @Test
@@ -107,6 +120,101 @@ class WebhookDeliveryExecutorUnitTests {
         fixture.executor().processClaim(claim);
 
         verifyNoInteractions(fixture.transport(), fixture.finalizationService());
+        verifyNoInteractions(fixture.signer());
+    }
+
+    @Test
+    void signatureTimestampIsMintedAfterDispatchPreparationCompletes() throws Exception {
+        Clock clock = mock(Clock.class);
+        Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
+        Instant afterLockWait = claimedAt.plusSeconds(301);
+        when(clock.instant())
+                .thenReturn(claimedAt)
+                .thenReturn(afterLockWait)
+                .thenReturn(afterLockWait);
+        ExecutorFixture fixture = fixture(clock);
+        WebhookDeliveryClaim claim = claim(1);
+        when(fixture.endpointSecretService().loadForDelivery(claim.merchantId(), claim.endpointId()))
+                .thenReturn("whsec_test");
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), eq(claimedAt))).thenReturn(true);
+        WebhookSignature signature = new WebhookSignature(
+                afterLockWait.getEpochSecond(), "a".repeat(64),
+                "t=" + afterLockWait.getEpochSecond() + ",v1=" + "a".repeat(64));
+        when(fixture.signer().sign("whsec_test", claim.payload(), afterLockWait))
+                .thenReturn(signature);
+        when(fixture.transport().send(any(WebhookHttpRequest.class)))
+                .thenReturn(new WebhookHttpResponse(204));
+        when(fixture.finalizationService().succeed(eq(claim), eq(afterLockWait), eq(204)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.SUCCEEDED, null,
+                        WebhookAttemptOutcome.SUCCEEDED, null));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.signer()).sign("whsec_test", claim.payload(), afterLockWait);
+        verify(fixture.transport()).send(org.mockito.ArgumentMatchers.argThat(request ->
+                request.signatureHeader().startsWith("t=" + afterLockWait.getEpochSecond() + ",")));
+    }
+
+    @Test
+    void oversizedPersistedPayloadFailsTerminallyBeforeSecretOrHttp() {
+        ExecutorFixture fixture = fixture();
+        String payload = "x".repeat(WebhookEventEnvelopeFactory.MAX_PAYLOAD_BYTES + 1);
+        Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
+        WebhookDeliveryClaim claim = new WebhookDeliveryClaim(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "refund.created", "http://127.0.0.1/webhook", payload, SecretHasher.sha256(payload),
+                UUID.randomUUID(), 1, claimedAt, claimedAt.minusSeconds(5));
+        when(fixture.finalizationService().failTerminally(
+                eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED,
+                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.finalizationService()).failTerminally(
+                eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED));
+        verifyNoInteractions(
+                fixture.endpointSecretService(), fixture.targetPolicy(), fixture.signer(), fixture.transport());
+    }
+
+    @Test
+    void transportPayloadIntegrityDefenseFinalizesTerminallyWhenNoRequestWasSent() throws Exception {
+        ExecutorFixture fixture = fixture();
+        WebhookDeliveryClaim claim = claim(1);
+        when(fixture.endpointSecretService().loadForDelivery(claim.merchantId(), claim.endpointId()))
+                .thenReturn("whsec_test");
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), any(Instant.class))).thenReturn(true);
+        when(fixture.signer().sign(any(String.class), any(String.class), any(Instant.class)))
+                .thenReturn(new WebhookSignature(1L, "a".repeat(64), "t=1,v1=" + "a".repeat(64)));
+        when(fixture.transport().send(any(WebhookHttpRequest.class)))
+                .thenThrow(new WebhookTransportException(
+                        "payload exceeded the transport limit",
+                        WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED,
+                        false,
+                        new IllegalArgumentException("too large")));
+        when(fixture.finalizationService().failTerminally(
+                eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED,
+                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.finalizationService()).failTerminally(
+                eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED));
+        verify(fixture.finalizationService(), never()).failRetryably(
+                eq(claim), any(Instant.class), any(Boolean.class), eq(null),
+                eq(WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED));
     }
 
     @Test
@@ -140,17 +248,20 @@ class WebhookDeliveryExecutorUnitTests {
                         new java.io.IOException("status 999")));
         when(fixture.finalizationService().failRetryably(
                 eq(claim), any(Instant.class), eq(true), eq(null),
-                eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR))).thenReturn(true);
-        WebhookDelivery retryScheduled = mock(WebhookDelivery.class);
-        when(retryScheduled.getStatus()).thenReturn(WebhookDeliveryStatus.RETRY_SCHEDULED);
-        when(fixture.deliveryRepository().findById(claim.deliveryId()))
-                .thenReturn(Optional.of(retryScheduled));
+                eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.RETRY_SCHEDULED,
+                        WebhookDeliveryErrorCode.TRANSPORT_ERROR,
+                        WebhookAttemptOutcome.RETRYABLE_FAILURE,
+                        WebhookDeliveryErrorCode.TRANSPORT_ERROR));
 
         fixture.executor().processClaim(claim);
 
         verify(fixture.finalizationService()).failRetryably(
                 eq(claim), any(Instant.class), eq(true), eq(null),
                 eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR));
+        verify(fixture.metrics()).recordFailure(
+                claim.eventType(), WebhookDeliveryErrorCode.TRANSPORT_ERROR);
     }
 
     @Test
@@ -166,11 +277,12 @@ class WebhookDeliveryExecutorUnitTests {
                         new java.util.concurrent.RejectedExecutionException("full")));
         when(fixture.finalizationService().failRetryably(
                 eq(claim), any(Instant.class), eq(false), eq(null),
-                eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR))).thenReturn(true);
-        WebhookDelivery retryScheduled = mock(WebhookDelivery.class);
-        when(retryScheduled.getStatus()).thenReturn(WebhookDeliveryStatus.RETRY_SCHEDULED);
-        when(fixture.deliveryRepository().findById(claim.deliveryId()))
-                .thenReturn(Optional.of(retryScheduled));
+                eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.RETRY_SCHEDULED,
+                        WebhookDeliveryErrorCode.TRANSPORT_ERROR,
+                        WebhookAttemptOutcome.RETRYABLE_FAILURE,
+                        WebhookDeliveryErrorCode.TRANSPORT_ERROR));
 
         fixture.executor().processClaim(claim);
 
@@ -179,6 +291,31 @@ class WebhookDeliveryExecutorUnitTests {
                 eq(WebhookDeliveryErrorCode.TRANSPORT_ERROR));
         verify(fixture.finalizationService(), never()).failTerminally(
                 eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED));
+        verify(fixture.metrics()).recordFailure(
+                claim.eventType(), WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+        verifyNoInteractions(fixture.transport());
+    }
+
+    @Test
+    void targetPolicyDenialEmitsBoundedTerminalFailureCause() {
+        ExecutorFixture fixture = fixture();
+        WebhookDeliveryClaim claim = claim(1);
+        when(fixture.endpointSecretService().loadForDelivery(claim.merchantId(), claim.endpointId()))
+                .thenReturn("whsec_test");
+        when(fixture.targetPolicy().validate(claim.endpointUrl()))
+                .thenThrow(new WebhookTargetPolicyException("target is not allowed"));
+        when(fixture.finalizationService().failTerminally(
+                eq(claim), any(Instant.class), eq(WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED,
+                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.metrics()).recordFailure(
+                claim.eventType(), WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED);
         verifyNoInteractions(fixture.transport());
     }
 
@@ -208,7 +345,9 @@ class WebhookDeliveryExecutorUnitTests {
         when(fixture.transport().send(any(WebhookHttpRequest.class)))
                 .thenReturn(new WebhookHttpResponse(204));
         when(fixture.finalizationService().succeed(eq(claim), any(Instant.class), eq(204)))
-                .thenReturn(true);
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.SUCCEEDED, null,
+                        WebhookAttemptOutcome.SUCCEEDED, null));
         ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(WebhookDeliveryExecutor.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -229,6 +368,10 @@ class WebhookDeliveryExecutorUnitTests {
     }
 
     private ExecutorFixture fixture() {
+        return fixture(Clock.fixed(Instant.parse("2026-06-28T10:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private ExecutorFixture fixture(Clock clock) {
         WebhookDeliveryClaimService claimService = mock(WebhookDeliveryClaimService.class);
         WebhookDeliveryFinalizationService finalizationService = mock(WebhookDeliveryFinalizationService.class);
         WebhookDeliveryRepository deliveryRepository = mock(WebhookDeliveryRepository.class);
@@ -237,7 +380,6 @@ class WebhookDeliveryExecutorUnitTests {
         WebhookTargetPolicy targetPolicy = mock(WebhookTargetPolicy.class);
         WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
         WebhookMetrics metrics = mock(WebhookMetrics.class);
-        Clock clock = Clock.fixed(Instant.parse("2026-06-28T10:00:00Z"), ZoneOffset.UTC);
         WebhookDeliveryExecutor executor = new WebhookDeliveryExecutor(
                 claimService, finalizationService, deliveryRepository, endpointSecretService,
                 signer, targetPolicy, transport, metrics, clock);

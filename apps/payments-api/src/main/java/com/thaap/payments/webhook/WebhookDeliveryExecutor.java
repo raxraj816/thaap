@@ -1,6 +1,7 @@
 package com.thaap.payments.webhook;
 
 import com.thaap.payments.security.SecretHasher;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -66,28 +67,36 @@ public class WebhookDeliveryExecutor {
             requirePayloadIntegrity(claim);
             String rawSecret = endpointSecretService.loadForDelivery(claim.merchantId(), claim.endpointId());
             ValidatedWebhookTarget target = targetPolicy.validate(claim.endpointUrl());
-            Instant sendStartedAt = laterOf(attemptStartedAt, clock.instant());
-            WebhookSignature signature = signer.sign(rawSecret, claim.payload(), sendStartedAt);
-            if (!claimService.prepareForDispatch(claim, sendStartedAt)) {
+            Instant preparationStartedAt = laterOf(attemptStartedAt, clock.instant());
+            if (!claimService.prepareForDispatch(claim, preparationStartedAt)) {
                 LOGGER.warn("Skipped stale webhook claim before HTTP deliveryId={} eventId={} attempt={}",
                         claim.deliveryId(), claim.eventId(), claim.attemptNumber());
+                return;
+            }
+            WebhookSignature signature;
+            try {
+                Instant signatureTime = laterOf(preparationStartedAt, clock.instant());
+                signature = signer.sign(rawSecret, claim.payload(), signatureTime);
+            } catch (RuntimeException exception) {
+                LOGGER.error("Webhook signing failed after dispatch preparation; recording known no-send "
+                                + "deliveryId={} eventId={} attempt={}",
+                        claim.deliveryId(), claim.eventId(), claim.attemptNumber(), exception);
+                retryableNoRequestFailure(
+                        claim, attemptStartedAt, WebhookDeliveryErrorCode.SIGNING_FAILED);
                 return;
             }
             WebhookHttpResponse response = httpTransport.send(new WebhookHttpRequest(
                     target, claim.eventId(), claim.deliveryId(), signature.headerValue(), claim.payload()));
             Instant completedAt = completedAt(attemptStartedAt);
             if (response.isSuccessful()) {
-                boolean finalized = finalizationService.succeed(claim, completedAt, response.statusCode());
-                recordFinalization(claim, finalized, WebhookAttemptOutcome.SUCCEEDED, null,
-                        WebhookDeliveryStatus.SUCCEEDED, attemptStartedAt, completedAt);
+                WebhookDeliveryFinalizationResult result =
+                        finalizationService.succeed(claim, completedAt, response.statusCode());
+                recordFinalization(claim, result, attemptStartedAt, completedAt);
             } else {
-                boolean finalized = finalizationService.failRetryably(claim, completedAt, true,
-                        response.statusCode(), WebhookDeliveryErrorCode.HTTP_NON_SUCCESS);
-                WebhookDeliveryStatus terminal = claim.attemptNumber() >= WebhookRetryPolicy.MAX_ATTEMPTS
-                        ? WebhookDeliveryStatus.EXHAUSTED
-                        : null;
-                recordFinalization(claim, finalized, WebhookAttemptOutcome.RETRYABLE_FAILURE,
-                        WebhookDeliveryErrorCode.HTTP_NON_SUCCESS, terminal, attemptStartedAt, completedAt);
+                WebhookDeliveryFinalizationResult result = finalizationService.failRetryably(
+                        claim, completedAt, true, response.statusCode(),
+                        WebhookDeliveryErrorCode.HTTP_NON_SUCCESS);
+                recordFinalization(claim, result, attemptStartedAt, completedAt);
             }
         } catch (WebhookTargetResolutionException exception) {
             retryableNoRequestFailure(claim, attemptStartedAt, exception.getErrorCode());
@@ -96,17 +105,15 @@ public class WebhookDeliveryExecutor {
         } catch (WebhookSecretException exception) {
             terminalFailure(claim, attemptStartedAt, exception.getErrorCode());
         } catch (WebhookTransportException exception) {
+            if (exception.getErrorCode() == WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED
+                    && !Boolean.TRUE.equals(exception.getRequestSent())) {
+                terminalFailure(claim, attemptStartedAt, exception.getErrorCode());
+                return;
+            }
             Instant completedAt = completedAt(attemptStartedAt);
-            boolean finalized = finalizationService.failRetryably(claim, completedAt, exception.getRequestSent(),
-                    null, exception.getErrorCode());
-            WebhookDeliveryStatus terminal = claim.attemptNumber() >= WebhookRetryPolicy.MAX_ATTEMPTS
-                    ? WebhookDeliveryStatus.EXHAUSTED
-                    : null;
-            WebhookAttemptOutcome outcome = exception.getRequestSent() == null
-                    ? WebhookAttemptOutcome.OUTCOME_UNKNOWN
-                    : WebhookAttemptOutcome.RETRYABLE_FAILURE;
-            recordFinalization(claim, finalized, outcome,
-                    exception.getErrorCode(), terminal, attemptStartedAt, completedAt);
+            WebhookDeliveryFinalizationResult result = finalizationService.failRetryably(
+                    claim, completedAt, exception.getRequestSent(), null, exception.getErrorCode());
+            recordFinalization(claim, result, attemptStartedAt, completedAt);
         } catch (RuntimeException exception) {
             LOGGER.error("Webhook delivery execution failed unexpectedly; lease recovery will retry "
                             + "deliveryId={} eventId={} attempt={}",
@@ -117,15 +124,17 @@ public class WebhookDeliveryExecutor {
     private void retryableNoRequestFailure(WebhookDeliveryClaim claim, Instant startedAt,
             WebhookDeliveryErrorCode errorCode) {
         Instant completedAt = completedAt(startedAt);
-        boolean finalized = finalizationService.failRetryably(claim, completedAt, false, null, errorCode);
-        WebhookDeliveryStatus terminal = claim.attemptNumber() >= WebhookRetryPolicy.MAX_ATTEMPTS
-                ? WebhookDeliveryStatus.EXHAUSTED
-                : null;
-        recordFinalization(claim, finalized, WebhookAttemptOutcome.RETRYABLE_FAILURE,
-                errorCode, terminal, startedAt, completedAt);
+        WebhookDeliveryFinalizationResult result =
+                finalizationService.failRetryably(claim, completedAt, false, null, errorCode);
+        recordFinalization(claim, result, startedAt, completedAt);
     }
 
     private void requirePayloadIntegrity(WebhookDeliveryClaim claim) {
+        int payloadBytes = claim.payload().getBytes(StandardCharsets.UTF_8).length;
+        if (payloadBytes > WebhookEventEnvelopeFactory.MAX_PAYLOAD_BYTES) {
+            throw new WebhookSecretException("Webhook event payload exceeded the delivery byte limit",
+                    WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED);
+        }
         if (!SecretHasher.sha256(claim.payload()).equals(claim.payloadSha256())) {
             throw new WebhookSecretException("Webhook event payload integrity check failed",
                     WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED);
@@ -135,48 +144,36 @@ public class WebhookDeliveryExecutor {
     private void terminalFailure(WebhookDeliveryClaim claim, Instant startedAt,
             WebhookDeliveryErrorCode errorCode) {
         Instant completedAt = completedAt(startedAt);
-        boolean finalized = finalizationService.failTerminally(claim, completedAt, errorCode);
-        recordFinalization(claim, finalized, WebhookAttemptOutcome.TERMINAL_FAILURE,
-                errorCode, WebhookDeliveryStatus.EXHAUSTED, startedAt, completedAt);
+        WebhookDeliveryFinalizationResult result =
+                finalizationService.failTerminally(claim, completedAt, errorCode);
+        recordFinalization(claim, result, startedAt, completedAt);
     }
 
-    private void recordFinalization(WebhookDeliveryClaim claim, boolean finalized,
-            WebhookAttemptOutcome attemptOutcome, WebhookDeliveryErrorCode errorCode,
-            WebhookDeliveryStatus terminalStatus, Instant startedAt, Instant completedAt) {
-        if (!finalized) {
+    private void recordFinalization(WebhookDeliveryClaim claim,
+            WebhookDeliveryFinalizationResult result,
+            Instant startedAt, Instant completedAt) {
+        if (!result.finalized()) {
             LOGGER.warn("Ignored stale webhook finalization deliveryId={} eventId={} attempt={}",
                     claim.deliveryId(), claim.eventId(), claim.attemptNumber());
             return;
         }
         Duration attemptDuration = Duration.between(startedAt, completedAt);
-        WebhookDeliveryStatus finalizedStatus = terminalStatus;
-        if (terminalStatus == null) {
-            finalizedStatus = claimFinalizedStatus(claim);
-            if (finalizedStatus == WebhookDeliveryStatus.SUCCEEDED
-                    || finalizedStatus == WebhookDeliveryStatus.EXHAUSTED) {
-                terminalStatus = finalizedStatus;
-            }
+        metrics.recordAttempt(claim.eventType(), result.attemptOutcome().name(), attemptDuration);
+        WebhookDeliveryErrorCode effectiveErrorCode = result.deliveryErrorCode() == null
+                ? result.attemptErrorCode()
+                : result.deliveryErrorCode();
+        if (effectiveErrorCode != null) {
+            metrics.recordFailure(claim.eventType(), effectiveErrorCode);
         }
-        if (finalizedStatus == WebhookDeliveryStatus.EXHAUSTED
-                && attemptOutcome == WebhookAttemptOutcome.RETRYABLE_FAILURE) {
-            attemptOutcome = WebhookAttemptOutcome.TERMINAL_FAILURE;
-        }
-        metrics.recordAttempt(claim.eventType(), attemptOutcome.name(), attemptDuration);
-        if (terminalStatus != null) {
-            metrics.recordTerminal(claim.eventType(), terminalStatus,
+        if (result.deliveryStatus() == WebhookDeliveryStatus.SUCCEEDED
+                || result.deliveryStatus() == WebhookDeliveryStatus.EXHAUSTED) {
+            metrics.recordTerminal(claim.eventType(), result.deliveryStatus(),
                     Duration.between(claim.deliveryCreatedAt(), completedAt));
         }
         LOGGER.info("Webhook delivery attempt finalized deliveryId={} eventId={} attempt={} "
                         + "outcome={} errorCode={} latencyMs={}",
-                claim.deliveryId(), claim.eventId(), claim.attemptNumber(), attemptOutcome,
-                errorCode, attemptDuration.toMillis());
-    }
-
-    private WebhookDeliveryStatus claimFinalizedStatus(WebhookDeliveryClaim claim) {
-        return deliveryRepository.findById(claim.deliveryId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "Webhook delivery disappeared after finalization"))
-                .getStatus();
+                claim.deliveryId(), claim.eventId(), claim.attemptNumber(), result.attemptOutcome(),
+                effectiveErrorCode, attemptDuration.toMillis());
     }
 
     private Instant completedAt(Instant startedAt) {

@@ -44,19 +44,6 @@ public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery
             @Param("beforeId") UUID beforeId,
             Pageable pageable);
 
-    @Query("""
-            SELECT delivery.eventType AS eventType, COUNT(delivery) AS deliveryCount
-            FROM WebhookDelivery delivery
-            WHERE delivery.merchantId = :merchantId
-              AND delivery.webhookEndpointId = :endpointId
-              AND delivery.status IN :queuedStatuses
-            GROUP BY delivery.eventType
-            """)
-    List<WebhookDeliveryCountByEventType> countQueuedByEventType(
-            @Param("merchantId") UUID merchantId,
-            @Param("endpointId") UUID endpointId,
-            @Param("queuedStatuses") List<WebhookDeliveryStatus> queuedStatuses);
-
     @Query(value = """
             SELECT COUNT(*)
             FROM webhook_deliveries delivery
@@ -90,11 +77,13 @@ public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery
                 delivery.leaseExpiresAt = NULL
             WHERE delivery.merchantId = :merchantId
               AND delivery.webhookEndpointId = :endpointId
+              AND delivery.eventType = :eventType
               AND delivery.status IN :queuedStatuses
             """)
-    int exhaustQueuedForDisabledEndpoint(
+    int exhaustQueuedForDisabledEndpointByEventType(
             @Param("merchantId") UUID merchantId,
             @Param("endpointId") UUID endpointId,
+            @Param("eventType") String eventType,
             @Param("queuedStatuses") List<WebhookDeliveryStatus> queuedStatuses,
             @Param("exhaustedStatus") WebhookDeliveryStatus exhaustedStatus,
             @Param("errorCode") WebhookDeliveryErrorCode errorCode);

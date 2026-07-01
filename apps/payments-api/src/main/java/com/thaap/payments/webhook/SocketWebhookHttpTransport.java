@@ -20,9 +20,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class SocketWebhookHttpTransport implements WebhookHttpTransport {
 
-    private static final int MAX_LINE_BYTES = 8_192;
+    static final int MAX_LINE_BYTES = 8_192;
     private static final int MAX_INFORMATIONAL_RESPONSES = 8;
-    private static final int MAX_RESPONSE_HEADER_BYTES = 32_768;
+    static final int MAX_RESPONSE_HEAD_BYTES = 32_768;
 
     private final int connectTimeoutMillis;
     private final int requestTimeoutMillis;
@@ -36,6 +36,14 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
 
     @Override
     public WebhookHttpResponse send(WebhookHttpRequest request) {
+        byte[] payload = request.payload().getBytes(StandardCharsets.UTF_8);
+        if (payload.length > WebhookEventEnvelopeFactory.MAX_PAYLOAD_BYTES) {
+            throw new WebhookTransportException(
+                    "Webhook payload exceeded the transport byte limit",
+                    WebhookDeliveryErrorCode.PAYLOAD_INTEGRITY_FAILED,
+                    false,
+                    new IllegalArgumentException("Webhook payload is larger than 64 KiB"));
+        }
         boolean connected = false;
         Boolean[] requestSent = {false};
         AtomicReference<Socket> activeSocket = new AtomicReference<>();
@@ -53,10 +61,10 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
                     activeSocket.set(tlsSocket);
                     tlsSocket.setSoTimeout(requestTimeoutMillis);
                     tlsSocket.startHandshake();
-                    return exchange(tlsSocket, request, requestSent);
+                    return exchange(tlsSocket, request, payload, requestSent);
                 }
             }
-            return exchange(plainSocket, request, requestSent);
+            return exchange(plainSocket, request, payload, requestSent);
         } catch (SocketTimeoutException exception) {
             WebhookDeliveryErrorCode code = connected
                     ? WebhookDeliveryErrorCode.REQUEST_TIMEOUT
@@ -107,8 +115,7 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
     }
 
     private WebhookHttpResponse exchange(Socket socket, WebhookHttpRequest request,
-            Boolean[] requestSent) throws IOException {
-        byte[] payload = request.payload().getBytes(StandardCharsets.UTF_8);
+            byte[] payload, Boolean[] requestSent) throws IOException {
         URI uri = request.target().uri();
         String path = uri.getRawPath();
         if (path == null || path.isEmpty()) {
@@ -140,12 +147,13 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
     }
 
     private int readFinalStatusCode(BufferedInputStream input) throws IOException {
+        ResponseHeadBudget budget = new ResponseHeadBudget(MAX_RESPONSE_HEAD_BYTES);
         for (int informationalResponses = 0;
                 informationalResponses <= MAX_INFORMATIONAL_RESPONSES;
                 informationalResponses++) {
-            String statusLine = readLine(input);
+            String statusLine = readLine(input, budget);
             int statusCode = parseStatusCode(statusLine);
-            discardResponseHeaders(input);
+            discardResponseHeaders(input, budget);
             if (statusCode >= 200) {
                 return statusCode;
             }
@@ -158,9 +166,11 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
 
     private int parseStatusCode(String statusLine) throws IOException {
         String[] parts = statusLine.split(" ", 3);
-        if (parts.length < 2 || !parts[0].startsWith("HTTP/")
+        if (parts.length < 2
+                || (!parts[0].equals("HTTP/1.0") && !parts[0].equals("HTTP/1.1"))
                 || parts[1].length() != 3
-                || !parts[1].chars().allMatch(Character::isDigit)) {
+                || !parts[1].chars().allMatch(character -> character >= '0' && character <= '9')
+                || (parts.length == 3 && !isValidReasonPhrase(parts[2]))) {
             throw new IOException("Webhook target returned an invalid HTTP status line");
         }
         try {
@@ -174,19 +184,21 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
         }
     }
 
-    private void discardResponseHeaders(BufferedInputStream input) throws IOException {
-        int bytesRead = 0;
-        while (bytesRead <= MAX_RESPONSE_HEADER_BYTES) {
-            String headerLine = readLine(input);
-            bytesRead += headerLine.length() + 2;
+    private boolean isValidReasonPhrase(String reasonPhrase) {
+        return reasonPhrase.chars().allMatch(character ->
+                character == '\t' || (character >= 0x20 && character <= 0x7E));
+    }
+
+    private void discardResponseHeaders(BufferedInputStream input, ResponseHeadBudget budget) throws IOException {
+        while (true) {
+            String headerLine = readLine(input, budget);
             if (headerLine.isEmpty()) {
                 return;
             }
         }
-        throw new IOException("Webhook target response headers were too large");
     }
 
-    private String readLine(BufferedInputStream input) throws IOException {
+    private String readLine(BufferedInputStream input, ResponseHeadBudget budget) throws IOException {
         byte[] bytes = new byte[MAX_LINE_BYTES];
         int length = 0;
         int previous = -1;
@@ -195,6 +207,7 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
             if (current < 0) {
                 break;
             }
+            budget.consumeByte();
             if (previous == '\r' && current == '\n') {
                 return new String(bytes, 0, length - 1, StandardCharsets.US_ASCII);
             }
@@ -202,6 +215,22 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
             previous = current;
         }
         throw new IOException("Webhook target response line was missing or too large");
+    }
+
+    private static final class ResponseHeadBudget {
+
+        private int remainingBytes;
+
+        private ResponseHeadBudget(int remainingBytes) {
+            this.remainingBytes = remainingBytes;
+        }
+
+        private void consumeByte() throws IOException {
+            remainingBytes--;
+            if (remainingBytes < 0) {
+                throw new IOException("Webhook target response head was too large");
+            }
+        }
     }
 
     String hostHeader(ValidatedWebhookTarget target) {

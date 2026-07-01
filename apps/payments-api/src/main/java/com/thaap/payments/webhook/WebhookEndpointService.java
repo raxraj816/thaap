@@ -4,6 +4,7 @@ import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.tenant.MerchantContext;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -91,23 +92,28 @@ public class WebhookEndpointService {
         WebhookEndpointStatus beforeStatus = endpoint.getOperationalStatus();
         Set<String> enabledEvents = subscriptionStore.findWireValues(
                 merchantContext.merchantId(), endpointId);
-        List<WebhookDeliveryCountByEventType> queuedByEventType =
-                deliveryRepository.countQueuedByEventType(
-                        merchantContext.merchantId(), endpointId,
-                        List.of(WebhookDeliveryStatus.PENDING, WebhookDeliveryStatus.RETRY_SCHEDULED));
         endpoint.disable();
         endpointRepository.flush();
-        int queuedDeliveriesExhausted = deliveryRepository.exhaustQueuedForDisabledEndpoint(
-                merchantContext.merchantId(), endpointId,
-                List.of(WebhookDeliveryStatus.PENDING, WebhookDeliveryStatus.RETRY_SCHEDULED),
-                WebhookDeliveryStatus.EXHAUSTED, WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
+        List<DisableMetricObservation> disabledDeliveries = new ArrayList<>();
+        int queuedDeliveriesExhausted = 0;
+        for (WebhookEventType eventType : WebhookEventType.values()) {
+            int eventTypeExhausted = deliveryRepository.exhaustQueuedForDisabledEndpointByEventType(
+                    merchantContext.merchantId(), endpointId, eventType.wireValue(),
+                    List.of(WebhookDeliveryStatus.PENDING, WebhookDeliveryStatus.RETRY_SCHEDULED),
+                    WebhookDeliveryStatus.EXHAUSTED, WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
+            queuedDeliveriesExhausted += eventTypeExhausted;
+            if (eventTypeExhausted > 0) {
+                disabledDeliveries.add(new DisableMetricObservation(
+                        eventType.wireValue(), eventTypeExhausted));
+            }
+        }
 
         auditLogService.recordMerchantApiAction(merchantContext, requestId, "webhook_endpoint.disabled",
                 "webhook_endpoint", endpointId, "Webhook endpoint disabled",
                 Map.of("status", beforeStatus.name()),
                 Map.of("status", endpoint.getOperationalStatus().name(),
                         "queuedDeliveriesExhausted", queuedDeliveriesExhausted));
-        recordDisableMetricsAfterCommit(queuedByEventType);
+        recordDisableMetricsAfterCommit(List.copyOf(disabledDeliveries));
         return new EndpointStateResult(endpoint, enabledEvents);
     }
 
@@ -124,16 +130,18 @@ public class WebhookEndpointService {
                         "Webhook endpoint was not found"));
     }
 
-    private void recordDisableMetricsAfterCommit(List<WebhookDeliveryCountByEventType> counts) {
+    private void recordDisableMetricsAfterCommit(List<DisableMetricObservation> counts) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                for (WebhookDeliveryCountByEventType count : counts) {
-                    metrics.recordTerminalCount(count.getEventType(),
-                            WebhookDeliveryStatus.EXHAUSTED, count.getDeliveryCount());
+                for (DisableMetricObservation count : counts) {
+                    metrics.recordTerminalCount(count.eventType(),
+                            WebhookDeliveryStatus.EXHAUSTED, count.deliveryCount());
+                    metrics.recordFailureCount(count.eventType(),
+                            WebhookDeliveryErrorCode.ENDPOINT_DISABLED, count.deliveryCount());
                 }
             }
         });
@@ -180,5 +188,8 @@ public class WebhookEndpointService {
     }
 
     public record EndpointStateResult(WebhookEndpoint endpoint, Set<String> enabledEvents) {
+    }
+
+    private record DisableMetricObservation(String eventType, long deliveryCount) {
     }
 }

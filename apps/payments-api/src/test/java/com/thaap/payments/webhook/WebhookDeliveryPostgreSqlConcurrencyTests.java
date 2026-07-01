@@ -7,6 +7,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -81,6 +82,9 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -102,7 +106,8 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         endpointService.create(context, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "claim-race-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(merchant.getId(), "refund.created", UUID.randomUUID()));
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant now = Instant.now();
         CountDownLatch ready = new CountDownLatch(2);
@@ -251,7 +256,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> deliveryCreation = executor.submit(() -> {
                 new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-                    deliveryService.createDeliveries(
+                    deliveryService.createDeliveriesInCurrentTransaction(
                             merchant.getId(), "refund.created", UUID.randomUUID());
                     routingOwnsEndpointLock.countDown();
                     await(releaseRouting);
@@ -317,7 +322,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
                     routingBackendPid.set(currentBackendPid());
                     routingStarted.countDown();
-                        deliveryService.createDeliveries(
+                        deliveryService.createDeliveriesInCurrentTransaction(
                                 merchant.getId(), "refund.created", UUID.randomUUID());
                 });
                 return null;
@@ -348,7 +353,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 context, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "finalize-disable-create");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now();
@@ -368,7 +373,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
             });
             deliveryLocked.await();
 
-            Future<Boolean> finalization = executor.submit(() ->
+            Future<WebhookDeliveryFinalizationResult> finalization = executor.submit(() ->
                     finalizationService.failRetryably(
                             claim, claimedAt.plusSeconds(1), true, 503,
                             WebhookDeliveryErrorCode.HTTP_NON_SUCCESS));
@@ -381,7 +386,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
 
             releaseDelivery.countDown();
             lockHolder.get();
-            assertThat(finalization.get()).isTrue();
+            assertThat(finalization.get().finalized()).isTrue();
             disable.get();
         } finally {
             releaseDelivery.countDown();
@@ -409,7 +414,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 context, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "disable-crash-pg-create");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -431,6 +436,83 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         assertThat(attempt.getHttpRequestSent()).isNull();
         assertThat(attemptRepository.findByWebhookDeliveryIdAndAttemptNumber(delivery.getId(), 2))
                 .isEmpty();
+    }
+
+    @Test
+    void concurrentClaimDoesNotInflateBulkDisableMetrics() throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("disable-metric-race", "thaap_disable_metric_race"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "disable-metric-race", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult endpoint = endpointService.create(
+                context, "http://127.0.0.1:9191/thaap",
+                Set.of("refund.created"), "disable-metric-create");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", UUID.randomUUID()));
+        WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
+        double terminalBefore = meterRegistry.counter("thaap.webhook.delivery.terminal",
+                "event.type", "refund.created", "status", "EXHAUSTED").count();
+        double disabledBefore = meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "ENDPOINT_DISABLED").count();
+        CountDownLatch claimOwnsDeliveryLock = new CountDownLatch(1);
+        CountDownLatch releaseClaim = new CountDownLatch(1);
+        CountDownLatch disableStarted = new CountDownLatch(1);
+        AtomicInteger disableBackendPid = new AtomicInteger();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> claim = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    int updated = jdbcTemplate.update("""
+                            UPDATE webhook_deliveries
+                            SET status = 'DELIVERING',
+                                attempt_count = 1,
+                                last_attempt_at = ?,
+                                claim_token = ?,
+                                lease_expires_at = ?
+                            WHERE id = ?
+                            """,
+                            java.sql.Timestamp.from(Instant.now()),
+                            UUID.randomUUID(),
+                            java.sql.Timestamp.from(Instant.now().plusSeconds(30)),
+                            delivery.getId());
+                    assertThat(updated).isEqualTo(1);
+                    claimOwnsDeliveryLock.countDown();
+                    await(releaseClaim);
+                });
+                return null;
+            });
+            claimOwnsDeliveryLock.await();
+
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    disableBackendPid.set(currentBackendPid());
+                    disableStarted.countDown();
+                    endpointService.disable(
+                            context, endpoint.endpoint().getId(), "disable-metric-action");
+                });
+                return null;
+            });
+            disableStarted.await();
+            awaitBackendLockWait(disableBackendPid.get());
+
+            releaseClaim.countDown();
+            claim.get();
+            disable.get();
+        } finally {
+            releaseClaim.countDown();
+        }
+
+        assertThat(endpointRepository.findById(endpoint.endpoint().getId()).orElseThrow()
+                .getOperationalStatus()).isEqualTo(WebhookEndpointStatus.DISABLED);
+        assertThat(deliveryRepository.findById(delivery.getId()).orElseThrow().getStatus())
+                .isEqualTo(WebhookDeliveryStatus.DELIVERING);
+        assertThat(meterRegistry.counter("thaap.webhook.delivery.terminal",
+                "event.type", "refund.created", "status", "EXHAUSTED").count() - terminalBefore)
+                .isZero();
+        assertThat(meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "ENDPOINT_DISABLED").count() - disabledBefore)
+                .isZero();
     }
 
     private void awaitEndpointLockConflict(UUID endpointId) throws Exception {

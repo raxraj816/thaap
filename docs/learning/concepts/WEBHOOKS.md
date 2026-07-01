@@ -153,6 +153,8 @@ Chapter 19 implements the complete bounded V1 delivery loop:
 - a PostgreSQL lease worker claims each numbered attempt immediately before
   dispatch without holding locks over HTTP
 - exact payload bytes are timestamped and signed with HMAC-SHA256
+- signature time is read after dispatch preparation so database lock wait does
+  not consume the merchant freshness tolerance
 - payload bytes are produced by a JSON serializer, not manual string
   concatenation, so future event values cannot break the merchant-verifiable
   body
@@ -172,13 +174,23 @@ Chapter 19 implements the complete bounded V1 delivery loop:
 - malformed numeric statuses fail as transport errors, while bounded
   informational responses are consumed and the complete bounded final response
   head is received before classifying the acknowledgement
+- the 64 KiB request limit is enforced at creation, execution, and transport;
+  one cumulative exact 32 KiB budget covers every response-head byte
 - endpoint disable is monotonic: exclusive rotation/disable locks plus shared
   event-routing locks prevent reactivation and post-disable queued deliveries
 - endpoint disable prevents new claims and retries through a bulk queued-state
   update plus terminal recovery of any expired in-flight attempt
 - metrics include recovered-unknown and terminal paths; the due gauge reports
   claimable backlog rather than recently processed throughput
+- disable metrics use actual affected-row counts so a concurrent claim cannot
+  create premature or duplicate terminal telemetry
 - merchant reads are cursor-bounded and tenant scoped
+
+V9 treats migration evidence conservatively. Released V8 had no executor or
+attempt table, so only pristine zero-attempt queued rows can be upgraded.
+Aggregate retry/success/failure claims fail before V9 schema creation rather
+than becoming delivery history without attempts. Queued work for an inactive
+legacy endpoint becomes terminal `ENDPOINT_DISABLED`.
 
 Current implemented endpoints:
 

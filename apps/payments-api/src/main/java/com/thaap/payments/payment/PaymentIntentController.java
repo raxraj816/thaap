@@ -138,7 +138,8 @@ public class PaymentIntentController {
         PaymentIntent paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
                 request.customerId(), request.amount(), request.currency(), request.normalizedCaptureMethod(),
                 request.description(), request.normalizedMetadata()));
-        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.created",
+        webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                merchantContext.merchantId(), "payment_intent.created",
                 paymentIntent.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentIntentResponse.from(paymentIntent));
     }
@@ -199,7 +200,8 @@ public class PaymentIntentController {
         applyProcessorResult(paymentIntent, paymentAttempt, authorization);
         recordConfirmAuditLogs(merchantContext, requestId, startingStatus, paymentIntent, paymentAttempt, fraudDecision,
                 authorization);
-        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_attempt.created",
+        webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId());
         if (authorization.getStatus() == AuthorizationStatus.APPROVED
                 && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
@@ -380,7 +382,8 @@ public class PaymentIntentController {
         LedgerService.CaptureLedgerResult ledgerResult = ledgerService.recordCapture(merchantContext.merchantId(),
                 paymentIntent.getId(), authorization.getAuthorizedAmount(), authorization.getCurrency());
         paymentIntent.capture();
-        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.captured",
+        webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                merchantContext.merchantId(), "payment_intent.captured",
                 paymentIntent.getId());
         recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult,
                 captureTrigger);
@@ -409,7 +412,8 @@ public class PaymentIntentController {
                     authorization.getId(), authorization.getPaymentAttemptId(), paymentIntent.getId()));
         }
         paymentIntent.cancel();
-        webhookDeliveryService.createDeliveries(merchantContext.merchantId(), "payment_intent.canceled",
+        webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                merchantContext.merchantId(), "payment_intent.canceled",
                 paymentIntent.getId());
         recordCancelAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization,
                 authorizationVoid);

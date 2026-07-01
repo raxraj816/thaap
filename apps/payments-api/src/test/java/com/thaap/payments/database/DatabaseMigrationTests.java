@@ -623,17 +623,15 @@ class DatabaseMigrationTests {
     }
 
     @Test
-    void chapter19MigrationBackfillsImmutableEventsAndRequiresLegacySecretRotation() throws Exception {
-        UpgradeDatabase upgrade = createUpgradeDatabase("chapter19_webhook_backfill");
+    void v9MigrationBackfillsImmutableEventsAndRequiresLegacySecretRotation() throws Exception {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_backfill");
         migrate(upgrade.dataSource(), "8");
         UUID merchantId = UUID.randomUUID();
         UUID endpointId = UUID.randomUUID();
+        UUID disabledEndpointId = UUID.randomUUID();
         UUID deliveryId = UUID.randomUUID();
-        UUID scheduledDeliveryId = UUID.randomUUID();
-        UUID succeededDeliveryId = UUID.randomUUID();
-        UUID failedDeliveryId = UUID.randomUUID();
+        UUID disabledDeliveryId = UUID.randomUUID();
         UUID resourceId = UUID.randomUUID();
-        Instant scheduledAt = Instant.parse("2026-06-29T12:30:00Z");
         upgrade.jdbcTemplate().update("""
                 INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
                 VALUES (?, 'legacy-webhook-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
@@ -646,6 +644,13 @@ class DatabaseMigrationTests {
                 VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
                 """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
         upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://disabled.example/webhooks', FALSE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, disabledEndpointId, merchantId, "legacy-signing-hash-" + disabledEndpointId);
+        upgrade.jdbcTemplate().update("""
                 INSERT INTO webhook_deliveries (
                     id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
                     attempt_count, created_at
@@ -655,27 +660,10 @@ class DatabaseMigrationTests {
         upgrade.jdbcTemplate().update("""
                 INSERT INTO webhook_deliveries (
                     id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
-                    attempt_count, next_attempt_at, created_at
+                    attempt_count, created_at
                 )
-                VALUES (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 1, ?, CURRENT_TIMESTAMP)
-                """, scheduledDeliveryId, merchantId, endpointId, resourceId,
-                java.sql.Timestamp.from(scheduledAt));
-        upgrade.jdbcTemplate().update("""
-                INSERT INTO webhook_deliveries (
-                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
-                    attempt_count, next_attempt_at, delivered_at, created_at
-                )
-                VALUES (?, ?, ?, 'payment_intent.created', ?, 'SUCCEEDED', 1,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, succeededDeliveryId, merchantId, endpointId, resourceId);
-        upgrade.jdbcTemplate().update("""
-                INSERT INTO webhook_deliveries (
-                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
-                    attempt_count, next_attempt_at, delivered_at, last_error, created_at
-                )
-                VALUES (?, ?, ?, 'payment_intent.created', ?, 'FAILED', 2,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'legacy timeout', CURRENT_TIMESTAMP)
-                """, failedDeliveryId, merchantId, endpointId, resourceId);
+                VALUES (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                """, disabledDeliveryId, merchantId, disabledEndpointId, UUID.randomUUID());
 
         migrate(upgrade.dataSource(), "9");
 
@@ -684,6 +672,11 @@ class DatabaseMigrationTests {
                 FROM webhook_endpoints
                 WHERE id = ?
                 """, String.class, endpointId)).isEqualTo("REQUIRES_SECRET_ROTATION");
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT operational_status
+                FROM webhook_endpoints
+                WHERE id = ?
+                """, String.class, disabledEndpointId)).isEqualTo("DISABLED");
         assertThat(upgrade.jdbcTemplate().queryForObject("""
                 SELECT COUNT(*)
                 FROM webhook_endpoint_event_subscriptions
@@ -714,32 +707,71 @@ class DatabaseMigrationTests {
                 FROM webhook_deliveries
                 WHERE id = ?
                 """, UUID.class, deliveryId)).isEqualTo(deliveryId);
-        Map<String, Object> scheduled = upgrade.jdbcTemplate().queryForMap("""
-                SELECT status, next_attempt_at
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM webhook_deliveries
+                WHERE webhook_event_id = id
+                """, Integer.class)).isEqualTo(2);
+        assertThat(upgrade.jdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM webhook_events", Integer.class)).isEqualTo(2);
+        Map<String, Object> queued = upgrade.jdbcTemplate().queryForMap("""
+                SELECT status, next_attempt_at, last_error_code
                 FROM webhook_deliveries
                 WHERE id = ?
-                """, scheduledDeliveryId);
-        assertThat(scheduled.get("status")).isEqualTo("RETRY_SCHEDULED");
-        assertThat(((java.time.OffsetDateTime) scheduled.get("next_attempt_at")).toInstant())
-                .isEqualTo(scheduledAt);
-        Map<String, Object> succeeded = upgrade.jdbcTemplate().queryForMap("""
-                SELECT status, next_attempt_at, delivered_at
-                FROM webhook_deliveries
-                WHERE id = ?
-                """, succeededDeliveryId);
-        assertThat(succeeded.get("status")).isEqualTo("SUCCEEDED");
-        assertThat(succeeded.get("next_attempt_at")).isNull();
-        assertThat(succeeded.get("delivered_at")).isNotNull();
-        Map<String, Object> failed = upgrade.jdbcTemplate().queryForMap("""
+                """, deliveryId);
+        assertThat(queued)
+                .containsEntry("status", "PENDING")
+                .containsEntry("next_attempt_at", null)
+                .containsEntry("last_error_code", null);
+        Map<String, Object> disabled = upgrade.jdbcTemplate().queryForMap("""
                 SELECT status, next_attempt_at, delivered_at, last_error_code
                 FROM webhook_deliveries
                 WHERE id = ?
-                """, failedDeliveryId);
-        assertThat(failed)
+                """, disabledDeliveryId);
+        assertThat(disabled)
                 .containsEntry("status", "EXHAUSTED")
-                .containsEntry("last_error_code", "LEGACY_FAILURE");
-        assertThat(failed.get("next_attempt_at")).isNull();
-        assertThat(failed.get("delivered_at")).isNull();
+                .containsEntry("last_error_code", "ENDPOINT_DISABLED");
+        assertThat(disabled.get("next_attempt_at")).isNull();
+        assertThat(disabled.get("delivered_at")).isNull();
+        assertThat(upgrade.jdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM webhook_delivery_attempts", Integer.class)).isZero();
+    }
+
+    @Test
+    void v9MigrationRejectsLegacyExecutionStateWithoutAttemptEvidence() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_execution_guard");
+        migrate(upgrade.dataSource(), "8");
+        UUID merchantId = UUID.randomUUID();
+        UUID endpointId = UUID.randomUUID();
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-webhook-guard', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "legacy-webhook-guard-" + merchantId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, next_attempt_at, created_at
+                )
+                VALUES
+                    (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                    (?, ?, ?, 'payment_intent.created', ?, 'SUCCEEDED', 1, NULL, CURRENT_TIMESTAMP),
+                    (?, ?, ?, 'payment_intent.created', ?, 'FAILED', 2, NULL, CURRENT_TIMESTAMP)
+                """,
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID(),
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID(),
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID());
+
+        assertThatThrownBy(() -> migrate(upgrade.dataSource(), "9"))
+                .hasStackTraceContaining(
+                        "V9 cannot migrate unsupported legacy webhook delivery execution state")
+                .hasStackTraceContaining("3 row(s)");
     }
 
     private String captureMethod(JdbcTemplate source, UUID paymentIntentId) {

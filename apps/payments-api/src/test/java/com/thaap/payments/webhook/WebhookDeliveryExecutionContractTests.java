@@ -1,6 +1,7 @@
 package com.thaap.payments.webhook;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -108,6 +110,17 @@ class WebhookDeliveryExecutionContractTests {
     }
 
     @Test
+    void routingRequiresExistingDomainTransaction() {
+        assertThatThrownBy(() -> deliveryService.createDeliveriesInCurrentTransaction(
+                java.util.UUID.randomUUID(), "refund.created", java.util.UUID.randomUUID()))
+                .isInstanceOf(IllegalTransactionStateException.class)
+                .hasMessageContaining("existing transaction");
+
+        assertThat(eventRepository.count()).isZero();
+        assertThat(deliveryRepository.count()).isZero();
+    }
+
+    @Test
     void signedFailureRetrySuccessPreservesOneEventAndPaymentTruth() throws Exception {
         List<ReceivedRequest> received = new ArrayList<>();
         AtomicInteger responseNumber = new AtomicInteger();
@@ -130,7 +143,7 @@ class WebhookDeliveryExecutionContractTests {
         PaymentIntent paymentIntent = new TransactionTemplate(transactionManager).execute(status -> {
             PaymentIntent stored = paymentIntentRepository.save(new PaymentIntent(
                     merchant.getId(), customer.getId(), 2500, "USD"));
-            deliveryService.createDeliveries(
+            deliveryService.createDeliveriesInCurrentTransaction(
                     merchant.getId(), "payment_intent.created", stored.getId());
             return stored;
         });
@@ -172,6 +185,10 @@ class WebhookDeliveryExecutionContractTests {
                 .tag("event.type", "payment_intent.created")
                 .tag("outcome", "RETRYABLE_FAILURE")
                 .counter().count()).isGreaterThanOrEqualTo(1.0);
+        assertThat(meterRegistry.get("thaap.webhook.failures")
+                .tag("event.type", "payment_intent.created")
+                .tag("error.code", "HTTP_NON_SUCCESS")
+                .counter().count()).isGreaterThanOrEqualTo(1.0);
         assertThat(meterRegistry.get("thaap.webhook.delivery.terminal")
                 .tag("event.type", "payment_intent.created")
                 .tag("status", "SUCCEEDED")
@@ -191,7 +208,8 @@ class WebhookDeliveryExecutionContractTests {
         endpointService.create(merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "lease-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant firstClaimAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
@@ -208,9 +226,11 @@ class WebhookDeliveryExecutionContractTests {
         assertThat(expiredAttempt.getDispatchStartedAt()).isNull();
         assertThat(attemptRepository.findByWebhookDeliveryIdAndAttemptNumber(delivery.getId(), 2)
                 .orElseThrow().getOutcome()).isEqualTo(WebhookAttemptOutcome.IN_PROGRESS);
-        assertThat(finalizationService.succeed(first, firstClaimAt.plusSeconds(32), 204)).isFalse();
+        assertThat(finalizationService.succeed(
+                first, firstClaimAt.plusSeconds(32), 204).finalized()).isFalse();
         assertThat(claimService.prepareForDispatch(recovered, firstClaimAt.plusSeconds(32))).isTrue();
-        assertThat(finalizationService.succeed(recovered, firstClaimAt.plusSeconds(33), 204)).isTrue();
+        assertThat(finalizationService.succeed(
+                recovered, firstClaimAt.plusSeconds(33), 204).finalized()).isTrue();
         assertThat(deliveryRepository.findById(delivery.getId()).orElseThrow().getStatus())
                 .isEqualTo(WebhookDeliveryStatus.SUCCEEDED);
     }
@@ -224,7 +244,7 @@ class WebhookDeliveryExecutionContractTests {
         endpointService.create(merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "dispatch-lease-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant firstClaimAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -242,7 +262,8 @@ class WebhookDeliveryExecutionContractTests {
         assertThat(expiredAttempt.getHttpRequestSent()).isNull();
         assertThat(expiredAttempt.getDispatchStartedAt()).isEqualTo(firstClaimAt.plusSeconds(1));
         assertThat(recovered.attemptNumber()).isEqualTo(2);
-        assertThat(finalizationService.succeed(first, firstClaimAt.plusSeconds(33), 204)).isFalse();
+        assertThat(finalizationService.succeed(
+                first, firstClaimAt.plusSeconds(33), 204).finalized()).isFalse();
     }
 
     @Test
@@ -254,7 +275,7 @@ class WebhookDeliveryExecutionContractTests {
         endpointService.create(merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "ambiguous-write-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -265,7 +286,8 @@ class WebhookDeliveryExecutionContractTests {
         assertThat(attemptRepository.findByWebhookDeliveryIdAndAttemptNumber(delivery.getId(), 1)
                 .orElseThrow().getHttpRequestSent()).isNull();
         assertThat(finalizationService.failRetryably(
-                claim, completedAt, null, null, WebhookDeliveryErrorCode.TRANSPORT_ERROR)).isTrue();
+                claim, completedAt, null, null,
+                WebhookDeliveryErrorCode.TRANSPORT_ERROR).finalized()).isTrue();
 
         WebhookDeliveryAttempt attempt = attemptRepository
                 .findByWebhookDeliveryIdAndAttemptNumber(delivery.getId(), 1)
@@ -288,7 +310,8 @@ class WebhookDeliveryExecutionContractTests {
                 merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "disable-race-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now();
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
@@ -296,7 +319,7 @@ class WebhookDeliveryExecutionContractTests {
 
         endpointService.disable(merchantContext, endpoint.endpoint().getId(), "disable-race-request");
         assertThat(finalizationService.failRetryably(claim, claimedAt.plusSeconds(1), true, 503,
-                WebhookDeliveryErrorCode.HTTP_NON_SUCCESS)).isTrue();
+                WebhookDeliveryErrorCode.HTTP_NON_SUCCESS).finalized()).isTrue();
 
         WebhookDelivery exhausted = deliveryRepository.findById(delivery.getId()).orElseThrow();
         WebhookDeliveryAttempt attempt = attemptRepository
@@ -320,7 +343,7 @@ class WebhookDeliveryExecutionContractTests {
                 merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "disable-before-dispatch-create");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -361,7 +384,7 @@ class WebhookDeliveryExecutionContractTests {
                 merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "disable-crash-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(
+                deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -395,13 +418,16 @@ class WebhookDeliveryExecutionContractTests {
         endpointService.create(merchantContext, "http://127.0.0.1:9191/thaap",
                 Set.of("refund.created"), "lease-five-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant claimAt = Instant.now();
         double unknownBefore = meterRegistry.counter("thaap.webhook.attempts",
                 "event.type", "refund.created", "outcome", "OUTCOME_UNKNOWN").count();
         double exhaustedBefore = meterRegistry.counter("thaap.webhook.delivery.terminal",
                 "event.type", "refund.created", "status", "EXHAUSTED").count();
+        double leaseExpiredBefore = meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "LEASE_EXPIRED").count();
 
         for (int attempt = 1; attempt <= WebhookRetryPolicy.MAX_ATTEMPTS; attempt++) {
             List<WebhookDeliveryClaim> claims = claimService.claimDue(claimAt, 1);
@@ -427,6 +453,9 @@ class WebhookDeliveryExecutionContractTests {
         assertThat(meterRegistry.counter("thaap.webhook.delivery.terminal",
                 "event.type", "refund.created", "status", "EXHAUSTED").count() - exhaustedBefore)
                 .isEqualTo(1.0);
+        assertThat(meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "LEASE_EXPIRED").count()
+                - leaseExpiredBefore).isEqualTo(5.0);
     }
 
     @Test
@@ -445,7 +474,8 @@ class WebhookDeliveryExecutionContractTests {
                 "http://127.0.0.1:" + callbackServer.getAddress().getPort() + "/thaap",
                 Set.of("refund.created"), "exhaust-endpoint");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                deliveryService.createDeliveries(merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         Instant dueAt = Instant.now().plusSeconds(10);
 

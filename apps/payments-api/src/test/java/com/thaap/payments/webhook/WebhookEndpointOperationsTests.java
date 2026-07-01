@@ -99,6 +99,8 @@ class WebhookEndpointOperationsTests {
 
         double terminalBefore = meterRegistry.counter("thaap.webhook.delivery.terminal",
                 "event.type", "refund.created", "status", "EXHAUSTED").count();
+        double disabledBefore = meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "ENDPOINT_DISABLED").count();
         endpointService.disable(merchantContext, stored.getId(), "request-disable");
         WebhookDelivery queued = deliveryRepository.findAll().getFirst();
         assertThat(queued.getStatus()).isEqualTo(WebhookDeliveryStatus.EXHAUSTED);
@@ -107,6 +109,9 @@ class WebhookEndpointOperationsTests {
         assertThat(deliveryRepository.count()).isEqualTo(1);
         assertThat(meterRegistry.counter("thaap.webhook.delivery.terminal",
                 "event.type", "refund.created", "status", "EXHAUSTED").count() - terminalBefore)
+                .isEqualTo(1.0);
+        assertThat(meterRegistry.counter("thaap.webhook.failures",
+                "event.type", "refund.created", "error.code", "ENDPOINT_DISABLED").count() - disabledBefore)
                 .isEqualTo(1.0);
         assertThatThrownBy(() -> endpointService.rotateSecret(
                 merchantContext, stored.getId(), "disabled-rotation"))
@@ -160,7 +165,7 @@ class WebhookEndpointOperationsTests {
 
     private void createDeliveries(UUID merchantId, String eventType, UUID resourceId) {
         new TransactionTemplate(transactionManager).executeWithoutResult(
-                status -> deliveryService.createDeliveries(merchantId, eventType, resourceId));
+                status -> deliveryService.createDeliveriesInCurrentTransaction(merchantId, eventType, resourceId));
     }
 
     private MerchantContext context(Merchant merchant, String name) {

@@ -2146,8 +2146,8 @@ Detailed Phase 2 chapter plan:
 
 4. Chapter 19: Webhook Delivery Execution And Retry Behavior.
 
-   Status: complete after the 2026-06-30 hostile protocol, DNS-classification,
-   and forced-interleaving recovery pass.
+   Status: complete after the 2026-07-01 final migration, protocol-limit,
+   signature-freshness, and forced-observability-interleaving closure pass.
 
    Completion evidence:
 
@@ -2175,6 +2175,9 @@ Detailed Phase 2 chapter plan:
      HTTP response head is structurally complete. A truncated `204` status line
      and oversized final headers are post-send transport failures, not false
      success.
+   - The status-line parser accepts only HTTP/1.0 or HTTP/1.1 text responses
+     with exact status grammar; malformed version tokens remain post-send
+     transport failures rather than merchant acknowledgement truth.
    - Real PostgreSQL races prove one claim/attempt winner, monotonic endpoint
      disable against concurrent secret rotation, no stranded queued delivery
      when event creation races disable, and no stranded expired in-flight
@@ -2188,6 +2191,21 @@ Detailed Phase 2 chapter plan:
    - Protocol-boundary proof covers authenticated payload identity versus
      advisory headers, domain Host authority when DNS selects IPv6, IPv6
      literals, and payload/database timestamp precision.
+   - V9 fails before schema mutation when a V8 delivery claims execution
+     without authoritative attempt evidence, while pristine work on an already
+     disabled legacy endpoint becomes terminal `ENDPOINT_DISABLED` instead of
+     remaining stranded and unclaimable.
+   - The payload limit is rechecked before secret access and at the socket
+     boundary; one cumulative 32 KiB byte budget covers status lines, headers,
+     framing, informational responses, and the final response.
+   - Attempt signatures are minted after potentially blocking dispatch
+     preparation. A signing failure is classified as retryable known-no-send
+     evidence, and a 301-second preparation delay still produces a fresh
+     merchant-verifiable timestamp.
+   - Bulk endpoint disable executes one bounded update per canonical event type
+     and emits terminal metrics from actual affected-row counts. A forced
+     PostgreSQL claim/disable interleaving proves predicate re-evaluation cannot
+     create premature or duplicate terminal telemetry.
    - Signed webhook payloads are now produced through Jackson JSON encoding in
      both the runtime envelope factory and V9 legacy backfill path, eliminating
      manual JSON concatenation before merchant-verifiable signatures are
@@ -2200,11 +2218,14 @@ Detailed Phase 2 chapter plan:
      matrices. The closure dossier reconciles promises, hostile sequences,
      enforcement, exact proof, migrations, demo, operations, debt, custom
      infrastructure, escaped findings, and source-of-truth status.
-   - `ER-0001` through `ER-0005` record the findings that escaped earlier
+   - Bounded failure-cause telemetry distinguishes HTTP rejection,
+     resolver/transport failure, lease expiry, endpoint disable, target denial,
+     and secret failure without merchant, endpoint, URL, or resource tags.
+   - `ER-0001` through `ER-0012` record the findings that escaped earlier
      Chapter 19 reviews, their root-cause categories, resolution evidence, and
      the process corrections. ADR-0009 bounds the justified custom socket
      transport and establishes mature infrastructure as the default.
-   - The complete backend suite passes: 203 tests, zero failures, zero skipped.
+   - The complete backend suite passes: 215 tests, zero failures, zero skipped.
      The repository Python suite passes 36 tests, including callback-fixture,
      provenance, escaped-review, severity, closure, and source-contradiction
      negative cases. Commit readiness passes with the Chapter 19 invariant
@@ -2320,9 +2341,18 @@ Detailed Phase 2 chapter plan:
    - Add forward-only V9 migration and H2/PostgreSQL compatibility proof.
      Existing delivery rows receive safe immutable envelopes from their stored
      event type, resource ID, merchant ID, delivery creation time, and a
-     deterministic resource-type mapping. A legacy `PENDING` row with a
-     non-null `next_attempt_at` becomes `RETRY_SCHEDULED`; legacy terminal rows
-     are normalized before V9 constraints are installed.
+     deterministic resource-type mapping. Released V8 had no executor or
+     attempt evidence, so V9 accepts only pristine `PENDING`, zero-attempt rows.
+     Any row that claims retry, last-attempt, delivered, failed, or succeeded
+     execution state fails the migration before new schema truth is created.
+     Pristine queued rows for inactive legacy endpoints become terminal
+     `EXHAUSTED` with `ENDPOINT_DISABLED`; queued rows for active legacy
+     endpoints remain intact pending secret rotation.
+     V8 stored no event identity, so V9 cannot prove which legacy deliveries
+     were sibling routes from one historical emission. Each legacy delivery is
+     therefore preserved as one synthetic event using the delivery ID, rather
+     than inventing fan-out lineage by grouping on lossy attributes. Multi-
+     endpoint fan-out lineage is authoritative for events created after V9.
    - Existing endpoints have only irreversible signing-secret hashes. V9 must
      mark them `REQUIRES_SECRET_ROTATION` and prevent delivery rather than
      pretending their original secret is available. Their queued deliveries
@@ -2412,6 +2442,10 @@ Detailed Phase 2 chapter plan:
      response bodies. Accept only three-digit statuses in `100..599`, consume a
      bounded number of informational responses, and persist only the final
      response status plus a constrained safe error code.
+   - Enforce the 64 KiB UTF-8 payload limit again before signing and at the
+     socket boundary. Enforce one cumulative 32 KiB response-head budget across
+     every status line, header line, CRLF, informational section, and final
+     section with exact limit and limit-plus-one proof.
    - Build payloads from a strict allowlist. Raw PAN, CVV, buyer email, buyer
      phone, API keys, signing secrets, internal card fingerprints, idempotency
      keys/hashes, processor secrets, and unrestricted merchant metadata are
@@ -2443,8 +2477,11 @@ Detailed Phase 2 chapter plan:
      exceed connect timeout plus request deadline.
    - After secret loading and DNS policy validation, renew the matching claim
      under a delivery row lock immediately before HTTP. A worker whose token
-     became stale during preparation must not send. Finalization also locks the
-     delivery row before checking token/attempt identity, preventing a
+     became stale during preparation must not send. Mint the signature
+     timestamp only after that potentially blocking preparation returns, then
+     sign immediately before transport. If signing fails, finalize the prepared
+     attempt as retryable known-no-send `SIGNING_FAILED` evidence. Finalization
+     also locks the delivery row before checking token/attempt identity, preventing a
      check-then-write race with lease recovery.
    - Finalize in a new transaction only when delivery ID, attempt number, and
      claim token still match. Finalization and lease recovery mutate attempt
@@ -2504,6 +2541,9 @@ Detailed Phase 2 chapter plan:
      Attempt and terminal metrics include lease-recovered `OUTCOME_UNKNOWN`,
      fifth-lease exhaustion, and bulk-disable exhaustion. `due` is the actual
      claimable backlog remaining after a poll, not the poll's processed count.
+     Bulk-disable metrics come from five bounded event-type updates and their
+     actual affected-row counts, never from a pre-update count that can race a
+     claim.
    - Never use merchant ID, endpoint ID, delivery ID, URL, raw error text, or
      resource ID as a metric tag.
    - Add structured logs with event, delivery, attempt, bounded outcome, and
@@ -2547,8 +2587,9 @@ Detailed Phase 2 chapter plan:
    Required proof:
 
    - Clean and V8-to-V9 H2/PostgreSQL migration tests, including honest handling
-     of legacy endpoint secrets, immediate/scheduled pending rows, terminal
-     delivery representations, and delivery payload backfill.
+     of legacy endpoint secrets, pristine queued rows, already-disabled endpoint
+     exhaustion, delivery payload backfill, and fail-fast rejection of
+     aggregate retry/success/failure state without attempt evidence.
    - Event-envelope determinism and payload-hash tests.
    - HMAC signature verification against the exact transmitted bytes, plus
      tampered body, tampered timestamp, wrong endpoint secret, and retry
@@ -2582,6 +2623,9 @@ Detailed Phase 2 chapter plan:
      every final HTTP status class follow the documented policy. A final status
      line without the terminating response-head boundary and a final header
      section beyond the parser bound fail as post-send transport errors.
+     Exact-byte tests accept a cumulative 32 KiB response head and reject
+     32 KiB plus one across informational and final sections; oversized
+     persisted and direct-transport payloads fail before connection.
    - Redirect, user-info, private/link-local/metadata target, non-allowlisted
      hostname, and non-HTTPS non-local tests fail before outbound HTTP.
    - Slow-trickle response proof exceeds the per-read timeout pattern but is
@@ -2614,7 +2658,9 @@ Detailed Phase 2 chapter plan:
    - Tenant-isolation tests cover endpoint rotation/disable, event, delivery,
      attempt, and bounded listing/detail APIs.
    - Audit and metric tests prove safe bounded fields/tags, recovery and bulk
-     terminal counts, true due-backlog semantics, and latency-bearing logs.
+     terminal counts, true due-backlog semantics, and latency-bearing logs. A
+     forced PostgreSQL claim/disable interleaving proves bulk metrics count only
+     rows actually exhausted by disable.
    - The local failure-to-retry-to-success demo verifies the receiver signature
      and proves payment/ledger state does not change.
 

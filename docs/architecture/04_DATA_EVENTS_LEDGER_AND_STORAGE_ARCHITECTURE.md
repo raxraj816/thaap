@@ -555,8 +555,9 @@ originating payment mutation creates immutable WebhookEvent
   -> delivery rows created in the same transaction
   -> worker claims bounded due rows in a short transaction
   -> claim and numbered attempt commit
-  -> worker loads the key, validates target, and signs exact payload bytes
+  -> worker loads the key and validates the target
   -> worker atomically marks dispatch and renews lease
+  -> worker mints a fresh timestamp and signs exact payload bytes
   -> worker sends outside the transaction
   -> matching claim finalizes attempt and delivery in a new transaction
 ```
@@ -572,7 +573,9 @@ unknown hosts, and empty answers remain retryable known-no-send attempt truth;
 only explicit URL policy or prohibited-address decisions are terminal. The
 worker then locks the delivery,
 marks dispatch start, and renews the matching claim immediately before HTTP; a
-stale token skips the send.
+stale token skips the send. Only after that potentially blocking preparation
+returns does the worker read the clock and sign. A local signing failure is
+finalized as retryable known-no-send evidence.
 Finalization locks the same delivery row before validating ownership. The lease
 must exceed connect timeout plus the total request deadline.
 Expired delivering rows are recovered even when their endpoint was disabled
@@ -587,6 +590,13 @@ bulk exhaustion. Endpoint sets are locked in stable order.
 The delivery-to-event foreign key includes merchant, event ID, event type, and
 resource ID. This makes the delivery's operational projection agree with the
 immutable payload lineage even when data is written outside the ORM.
+
+V8 had no webhook executor or delivery-attempt table. V9 therefore accepts only
+pristine zero-attempt queued rows and fails before schema mutation when aggregate
+state claims retry, success, or failure that cannot be reconciled with attempt
+evidence. Pristine work for an inactive legacy endpoint becomes terminal
+`ENDPOINT_DISABLED`; work for an active legacy endpoint remains queued until
+the irrecoverable legacy signing secret is rotated.
 
 This provides at-least-once delivery. It cannot provide exactly-once receipt
 across an HTTP/network failure boundary.

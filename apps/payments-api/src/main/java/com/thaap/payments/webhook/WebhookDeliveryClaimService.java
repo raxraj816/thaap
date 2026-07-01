@@ -63,6 +63,7 @@ public class WebhookDeliveryClaimService {
         for (RecoveryObservation recovery : batch.recoveries()) {
             metrics.recordAttempt(recovery.eventType(),
                     recovery.outcome().name(), recovery.attemptDuration());
+            metrics.recordFailure(recovery.eventType(), recovery.errorCode());
             if (recovery.exhausted()) {
                 metrics.recordTerminal(recovery.eventType(), WebhookDeliveryStatus.EXHAUSTED,
                         recovery.deliveryLatency());
@@ -117,6 +118,7 @@ public class WebhookDeliveryClaimService {
         if (preparation.terminal()) {
             metrics.recordAttempt(preparation.eventType(), WebhookAttemptOutcome.TERMINAL_FAILURE.name(),
                     preparation.attemptDuration());
+            metrics.recordFailure(preparation.eventType(), preparation.errorCode());
             metrics.recordTerminal(preparation.eventType(), WebhookDeliveryStatus.EXHAUSTED,
                     preparation.deliveryLatency());
         }
@@ -178,6 +180,9 @@ public class WebhookDeliveryClaimService {
                         endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED;
                 recoveries.add(new RecoveryObservation(delivery.getEventType(),
                         expiredAttempt.getOutcome(),
+                        endpointDisabled
+                                ? WebhookDeliveryErrorCode.ENDPOINT_DISABLED
+                                : WebhookDeliveryErrorCode.LEASE_EXPIRED,
                         Duration.between(expiredAttempt.getStartedAt(), now),
                         Duration.between(delivery.getCreatedAt(), now),
                         attemptsExhausted || endpointDisabled));
@@ -235,6 +240,7 @@ public class WebhookDeliveryClaimService {
     private record RecoveryObservation(
             String eventType,
             WebhookAttemptOutcome outcome,
+            WebhookDeliveryErrorCode errorCode,
             Duration attemptDuration,
             Duration deliveryLatency,
             boolean exhausted) {
@@ -244,25 +250,28 @@ public class WebhookDeliveryClaimService {
             boolean prepared,
             boolean terminal,
             String eventType,
+            WebhookDeliveryErrorCode errorCode,
             Duration attemptDuration,
             Duration deliveryLatency) {
 
         private static DispatchPreparation ready() {
-            return new DispatchPreparation(true, false, null, null, null);
+            return new DispatchPreparation(true, false, null, null, null, null);
         }
 
         private static DispatchPreparation skipped() {
-            return new DispatchPreparation(false, false, null, null, null);
+            return new DispatchPreparation(false, false, null, null, null, null);
         }
 
         private static DispatchPreparation disabled(String eventType,
                 Duration attemptDuration, Duration deliveryLatency) {
-            return new DispatchPreparation(false, true, eventType, attemptDuration, deliveryLatency);
+            return new DispatchPreparation(false, true, eventType,
+                    WebhookDeliveryErrorCode.ENDPOINT_DISABLED, attemptDuration, deliveryLatency);
         }
 
         private static DispatchPreparation unavailable(String eventType,
                 Duration attemptDuration, Duration deliveryLatency) {
-            return new DispatchPreparation(false, true, eventType, attemptDuration, deliveryLatency);
+            return new DispatchPreparation(false, true, eventType,
+                    WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE, attemptDuration, deliveryLatency);
         }
     }
 }

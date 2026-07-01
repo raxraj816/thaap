@@ -32,6 +32,7 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
     @Override
     public void migrate(Context context) throws Exception {
         Connection connection = context.getConnection();
+        rejectUnsupportedLegacyDeliveryExecutionState(connection);
         createWebhookEventTable(connection);
         hardenWebhookEndpoints(connection);
         createEndpointSubscriptions(connection);
@@ -39,6 +40,29 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
         backfillLegacyEvents(connection);
         finishDeliveryConstraints(connection);
         createAttemptTable(connection);
+    }
+
+    private void rejectUnsupportedLegacyDeliveryExecutionState(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM webhook_deliveries
+                WHERE status <> 'PENDING'
+                   OR attempt_count <> 0
+                   OR next_attempt_at IS NOT NULL
+                   OR last_attempt_at IS NOT NULL
+                   OR delivered_at IS NOT NULL
+                   OR last_error IS NOT NULL
+                """);
+                ResultSet resultSet = statement.executeQuery()) {
+            resultSet.next();
+            long unsupportedRows = resultSet.getLong(1);
+            if (unsupportedRows > 0) {
+                throw new SQLException(
+                        "V9 cannot migrate unsupported legacy webhook delivery execution state "
+                                + "without authoritative attempt evidence; reset or explicitly remediate "
+                                + unsupportedRows + " row(s) before retrying");
+            }
+        }
     }
 
     private void createWebhookEventTable(Connection connection) throws SQLException {
@@ -197,6 +221,21 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
                         ELSE 'LEGACY_FAILURE'
                     END
                 """);
+        execute(connection, """
+                UPDATE webhook_deliveries
+                SET status = 'EXHAUSTED',
+                    next_attempt_at = NULL,
+                    delivered_at = NULL,
+                    last_error_code = 'ENDPOINT_DISABLED'
+                WHERE status = 'PENDING'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM webhook_endpoints endpoint
+                      WHERE endpoint.id = webhook_deliveries.webhook_endpoint_id
+                        AND endpoint.merchant_id = webhook_deliveries.merchant_id
+                        AND endpoint.operational_status = 'DISABLED'
+                  )
+                """);
         execute(connection, "ALTER TABLE webhook_deliveries DROP COLUMN last_error");
         execute(connection, """
                 ALTER TABLE webhook_deliveries
@@ -230,6 +269,10 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
                 UUID resourceId = uuid(deliveries, "resource_id");
                 Instant occurredAt = deliveries.getTimestamp("created_at").toInstant();
                 String resourceType = resourceType(eventType);
+                // V8 stored delivery rows without an event identity, so it cannot prove which
+                // rows came from one historical fan-out. Preserve each known delivery as its
+                // own synthetic event rather than inventing sibling lineage by grouping on
+                // lossy attributes such as resource, event type, or creation timestamp.
                 String payload = payload(deliveryId, merchantId, eventType, resourceId, resourceType, occurredAt);
 
                 eventInsert.setObject(1, deliveryId);

@@ -307,6 +307,11 @@ Chapter 19 webhook controls:
 - disable redirects, bound connect time, enforce a wall-clock request deadline
   across TLS/write/read, validate final HTTP status grammar/range, require a
   complete bounded final response head, and discard response bodies
+- recheck the 64 KiB UTF-8 body limit before secret access and at transport;
+  count status lines, headers, CRLF framing, and every informational/final
+  section against one exact cumulative 32 KiB response-head budget
+- mint the signature timestamp only after potentially blocking dispatch
+  preparation; classify a subsequent local signing failure as known no-send
 - durably distinguish pre-dispatch known-no-send state from in-flight,
   partial-write, and lease-recovered post-dispatch uncertainty
 - allow only loopback HTTP in local/test; this is simulator-only plaintext
@@ -319,6 +324,11 @@ Chapter 19 webhook controls:
   unique-local, CGNAT, benchmark, documentation, and reserved addresses
 - keep merchant, endpoint, delivery, resource, URL, and raw error values out of
   metric tags
+- expose canonical bounded webhook error-code tags so endpoint disable, lease
+  expiry, target/secret denial, HTTP rejection, and transport failure remain
+  operationally distinguishable without tenant cardinality
+- derive bulk-disable terminal metrics from actual per-event-type affected-row
+  counts, not a pre-update count that can race a claim
 - recover expired in-flight rows even after endpoint disable, count
   recovered-unknown and terminal lease/disable outcomes, report actual due
   backlog, and include bounded latency in finalization logs

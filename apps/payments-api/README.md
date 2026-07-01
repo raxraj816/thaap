@@ -136,16 +136,33 @@ processing. Only then parse the signed body, validate its `id` as a UUID,
 constant-time compare its exact value with `THAAP-Event-Id`, and record the
 body `id` transactionally with merchant side effects so a lease-recovery
 duplicate is harmless.
+THAAP mints the attempt timestamp after dispatch preparation has acquired and
+released its database locks, immediately before bounded transport work. A local
+signing failure after preparation is finalized as retryable known-no-send
+evidence rather than left as ambiguous lease recovery.
 
 Attempt 1 is immediate. Failed attempts schedule attempt 2 after 1 minute,
 attempt 3 after 5 minutes, attempt 4 after 30 minutes, and attempt 5 after 2
 hours; attempt 5 failure exhausts the delivery. Every `2xx` succeeds. Network
 errors, timeouts, and `3xx`/`4xx`/`5xx` responses retry; redirects are never
 followed and response bodies are discarded. Numeric statuses outside
-`100..599` are malformed transport failures. Bounded informational `1xx`
-responses are consumed and only a final status with a complete, bounded HTTP
-response head determines delivery truth. A status line without the terminating
-empty line is a post-send transport failure, not an acknowledgement.
+`100..599`, unsupported/malformed HTTP-version tokens, and control-bearing
+reason phrases are malformed transport failures. The text transport accepts
+HTTP/1.0 and HTTP/1.1 status lines. Bounded informational `1xx` responses are
+consumed and only a final status with a complete, bounded HTTP response head
+determines delivery truth. A status line without the terminating empty line is
+a post-send transport failure, not an acknowledgement. The 32 KiB response-head
+budget includes status lines, headers, CRLF framing, and every informational
+plus final section. Exactly 32 KiB is accepted; the next byte fails.
+Both event execution and the socket boundary reject a body larger than 64 KiB
+measured as UTF-8 before outbound connection.
+
+Operational metrics separate bounded attempt outcome, terminal status, and
+failure `error.code`. They distinguish HTTP rejection, resolver/transport
+failure, lease expiry, endpoint disable, target denial, and secret failure
+without merchant, endpoint, delivery, resource, URL, payload, or secret tags.
+Bulk-disable counters come from the rows actually updated per canonical event
+type, not from a pre-update count that can race a worker claim.
 
 Attempt reads expose `dispatchStartedAt` and a nullable `httpRequestSent`.
 `false` means the attempt has not crossed the durable dispatch boundary, `true`
@@ -538,9 +555,13 @@ same-tenant composite constraints. Existing endpoint hashes cannot recover the
 original HMAC key, so V9 marks those endpoints `REQUIRES_SECRET_ROTATION`
 instead of inventing a usable secret. Existing delivery rows receive a
 deterministic immutable envelope and become claimable only after their endpoint
-is safely rotated. Legacy `PENDING` rows with `next_attempt_at` are translated
-to `RETRY_SCHEDULED`; legacy success and failure rows have terminal timestamps
-normalized before V9 constraints are installed.
+is safely rotated. Pristine queued rows owned by a legacy endpoint already
+marked inactive become `EXHAUSTED` with `ENDPOINT_DISABLED`.
+Released V8 had no webhook executor or attempt table. If a V8 row nevertheless
+claims execution through a non-pending status, nonzero attempt count, retry or
+last-attempt time, delivered time, or last error, V9 fails before creating new
+schema truth. Reset or explicitly remediate that local state; V9 will not
+preserve aggregate success/retry claims without authoritative attempt evidence.
 Because Chapter 19's V9 was exercised locally while still uncommitted, a local
 volume that contains an earlier draft V9 may have the same Flyway version but an
 older table shape. Hibernate validation intentionally rejects that false schema.

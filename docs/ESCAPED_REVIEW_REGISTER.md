@@ -92,3 +92,122 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: `AGENTS.md`, the invariant process, the closure dossier, ADR-0009, and executable readiness scripts now form one quality operating system.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-06-30
+
+## ER-0006
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 observability reconciliation
+- Invariant: Operators must distinguish bounded webhook failure causes, including endpoint disable, lease expiry, target denial, secret failure, transport failure, and HTTP rejection, without tenant or endpoint cardinality.
+- Finding: Existing metrics exposed attempt outcome and terminal status but no error-code dimension, so distinct failure causes collapsed into the same RETRYABLE_FAILURE or EXHAUSTED series while the matrix and closure dossier claimed bounded outcome/error enums.
+- Why prior review missed it: Tests proved that recovery and bulk-disable transitions incremented counters and that sensitive tags were absent, but never compared two different failure causes to prove operational distinguishability.
+- Resolution evidence: WebhookMetrics now emits thaap.webhook.failures with canonical event.type and bounded error.code tags; finalization returns its committed classification without a post-commit reread; executor finalization, lease recovery, dispatch preparation, and bulk disable all record the effective durable cause, and focused tests prove HTTP_NON_SUCCESS, TRANSPORT_ERROR, TARGET_NOT_ALLOWED, LEASE_EXPIRED, and ENDPOINT_DISABLED without high-cardinality tags.
+- Process correction: Observability proof must assert both absence of forbidden dimensions and presence of the bounded dimensions required to distinguish every promised operator outcome.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0007
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 custom-protocol review
+- Invariant: A webhook callback acknowledgement requires a syntactically valid supported HTTP status line, an in-range final status, and a complete bounded response head.
+- Finding: SocketWebhookHttpTransport accepted any protocol token beginning with HTTP/, so a malformed response such as HTTP/not-http 204 could be recorded as successful despite the matrix claiming status-line grammar validation.
+- Why prior review missed it: Hostile protocol tests covered numeric range, informational responses, truncation, oversized heads, and deadlines but omitted malformed HTTP-version tokens and reason-phrase controls.
+- Resolution evidence: SocketWebhookHttpTransport now accepts only HTTP/1.0 or HTTP/1.1 text status lines with three ASCII digits and a bounded control-safe reason phrase; socketTransportRejectsMalformedHttpVersionAsTransportFailure and socketTransportRejectsControlBearingReasonPhrase prove both malformed responses remain post-send transport failures.
+- Process correction: Custom-protocol test inventories must vary every parsed grammar component, not only numeric values, framing boundaries, and size limits.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0008
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 migration and attempt-lineage review
+- Invariant: A delivery with prior execution state cannot survive migration without authoritative append-only attempt evidence for every claimed attempt number and terminal success.
+- Finding: V9 preserved schema-valid V8 scheduled, succeeded, and failed aggregate delivery states while creating zero attempt rows, so merchant reads could show success without a successful attempt or begin at attempt two with attempt one absent.
+- Why prior review missed it: Migration tests asserted aggregate status normalization and even asserted zero attempts, but did not compare that result with the frozen successful-attempt and complete-attempt-history promises.
+- Resolution evidence: V9 now rejects every V8 row that claims execution through status, attempt count, retry time, last-attempt time, delivered time, or last error; H2 and PostgreSQL hostile upgrade tests prove three unsupported representations fail before V9 creates new schema truth.
+- Process correction: Migration review must reconcile every preserved aggregate counter and terminal state with its required child evidence; an upgrade test that passes is not proof when its postconditions contradict runtime invariants.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0009
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 legacy endpoint-state review
+- Invariant: A disabled endpoint cannot retain nonterminal queued work that is neither claimable nor terminally explained.
+- Finding: V9 mapped inactive V8 endpoints to DISABLED but left their pristine PENDING deliveries unchanged; the claim predicate requires ACTIVE, so those rows became permanently stranded.
+- Why prior review missed it: Upgrade fixtures covered only active legacy endpoints and secret rotation, not the cross-product of endpoint operational state and queued delivery state.
+- Resolution evidence: V9 now exhausts pristine deliveries owned by disabled legacy endpoints with ENDPOINT_DISABLED while leaving active legacy endpoint work queued for secret rotation; both H2 and PostgreSQL upgrade tests prove the two postconditions.
+- Process correction: State-machine migrations must test the cross-product of parent eligibility and child work state, including proof that every migrated nonterminal row remains reachable by a worker.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0010
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 signature-freshness review
+- Invariant: The webhook signature timestamp is minted after potentially blocking dispatch preparation and immediately before bounded transport work.
+- Finding: The executor signed before acquiring dispatch-preparation locks, so a long endpoint or delivery lock wait could make the signature older than the documented merchant tolerance before HTTP began.
+- Why prior review missed it: Signature tests verified exact bytes and retry freshness but never advanced the clock across a blocked preparation boundary.
+- Resolution evidence: WebhookDeliveryExecutor now prepares first, rereads the clock, and signs immediately before transport; signatureTimestampIsMintedAfterDispatchPreparationCompletes advances time by 301 seconds across preparation, and signingFailureAfterPreparationFinalizesAsKnownNoSend proves a local signing failure remains durable false-send evidence.
+- Process correction: Time-bound credential and signature tests must place clock advancement across every preceding lock, queue, resolver, and retry boundary rather than checking only static cryptographic vectors.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0011
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 protocol-limit review
+- Invariant: The 64 KiB request and 32 KiB cumulative response-head limits are enforced at the execution and socket boundaries with exact byte accounting.
+- Finding: Payload size was checked only during normal envelope construction, while the socket response budget excluded status lines and could consume beyond the declared head limit before rejection.
+- Why prior review missed it: Tests used obviously oversized values and never exercised exact limit, limit-plus-one, persisted oversized payload, or cumulative informational/final head accounting.
+- Resolution evidence: The executor terminally rejects oversized persisted payloads before secret access, the transport independently rejects oversized direct requests before connect, and raw-socket tests accept exactly 32768 response-head bytes while rejecting 32769 with status lines, headers, CRLF framing, and informational responses sharing one budget.
+- Process correction: Every numeric protocol limit requires executable N-minus-one, N, and N-plus-one accounting at the real consumer boundary, including framing bytes and repeated protocol sections.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0012
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Final Chapter 19 disable-observability review
+- Invariant: Bulk-disable terminal metrics count only delivery rows actually changed by the disable transaction.
+- Finding: Disable counted queued rows before its bulk update; a concurrent claim could move a counted row to DELIVERING while the update waited, causing terminal and ENDPOINT_DISABLED metrics to overcount and later double-count recovery.
+- Why prior review missed it: Existing metrics proof covered sequential bulk disable and absence of sensitive tags but did not force claim-before-update predicate re-evaluation.
+- Resolution evidence: Disable now executes one bounded bulk update per canonical event type and records each actual update count; concurrentClaimDoesNotInflateBulkDisableMetrics proves the disable backend waits on the claimed delivery lock, updates zero rows after predicate re-evaluation, and emits zero premature terminal/failure counts.
+- Process correction: Metrics derived from state transitions must be tested under the same forced interleavings as the state change and must use affected-row truth rather than a pre-update observation.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01

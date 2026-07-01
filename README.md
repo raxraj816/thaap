@@ -12,7 +12,8 @@ chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 
 ## Current Status
 
-Chapter 19 is complete. Confirm now produces deterministic processor
+Chapter 19 is complete after the 2026-07-01 final migration, protocol-limit,
+signature-freshness, and observability closure pass. Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
 capture remains an explicit endpoint operation, and approved uncaptured
@@ -158,10 +159,11 @@ scenarios through public APIs:
   system: immutable event envelopes, endpoint-specific delivery state,
   append-only attempts, AES-256-GCM-protected signing keys, exact-byte HMAC
   signatures, explicit-CIDR SSRF-safe target validation, wall-clock request
-  deadlines, complete bounded response-head acknowledgement, exhaustive
-  retryable DNS-failure classification, just-in-time lease recovery,
-  deterministic retries, versioned key rollover, cursor-bounded tenant APIs,
-  safe metrics, and bulk queued-delivery exhaustion during endpoint disable.
+  deadlines, exact HTTP/1.0/1.1 status grammar, complete bounded response-head
+  acknowledgement, exhaustive retryable DNS-failure classification,
+  just-in-time lease recovery, deterministic retries, versioned key rollover,
+  cursor-bounded tenant APIs, bounded failure-cause metrics, and bulk
+  queued-delivery exhaustion during endpoint disable.
   Endpoint state transitions and event routing use compatible database locks;
   forced PostgreSQL orderings prove rotation cannot reactivate a disabled
   endpoint and concurrent event creation or retry finalization cannot strand
@@ -170,7 +172,14 @@ scenarios through public APIs:
   merchant guidance deduplicates only the signed payload event ID.
 - V9 honestly migrates legacy endpoints to `REQUIRES_SECRET_ROTATION`, backfills
   legacy delivery envelopes, and enforces same-tenant event/delivery/attempt
-  lineage in both H2 and PostgreSQL.
+  lineage in both H2 and PostgreSQL. It exhausts queued work for already
+  disabled legacy endpoints and fails before schema mutation when a V8 row
+  claims delivery execution that cannot be reconciled with authoritative
+  attempt evidence.
+- Dispatch signatures are minted only after potentially blocking preparation,
+  the 64 KiB payload and cumulative 32 KiB response-head limits are enforced
+  at their real runtime boundaries, and disable metrics count only rows actually
+  changed after PostgreSQL predicate re-evaluation.
 - `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
   once, retries with the same event and payload, succeeds, and leaves payment
   truth unchanged.

@@ -28,8 +28,12 @@ public class WebhookDeliveryService {
         this.clock = clock;
     }
 
+    /**
+     * Persists merchant-visible webhook truth atomically with its originating domain mutation.
+     * Callers must already own that transaction; this method must never create a standalone one.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void createDeliveries(UUID merchantId, String eventType, UUID resourceId) {
+    public void createDeliveriesInCurrentTransaction(UUID merchantId, String eventType, UUID resourceId) {
         WebhookEventType canonicalEventType = WebhookEventType.fromWireValue(eventType);
         List<String> endpointIdValues = webhookEndpointRepository.findActiveSubscribedEndpointIds(
                 merchantId, canonicalEventType.wireValue());

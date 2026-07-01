@@ -55,6 +55,21 @@ public class WebhookMetrics {
                 .increment(count);
     }
 
+    public void recordFailure(String eventType, WebhookDeliveryErrorCode errorCode) {
+        recordFailureCount(eventType, errorCode, 1);
+    }
+
+    public void recordFailureCount(String eventType, WebhookDeliveryErrorCode errorCode, long count) {
+        if (count <= 0) {
+            return;
+        }
+        Counter.builder("thaap.webhook.failures")
+                .tag("event.type", eventType)
+                .tag("error.code", errorCode.name())
+                .register(meterRegistry)
+                .increment(count);
+    }
+
     public void recordQueueAge(String eventType, Duration queueAge) {
         Timer.builder("thaap.webhook.queue.age")
                 .tag("event.type", eventType)
