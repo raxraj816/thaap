@@ -70,3 +70,16 @@ thaap:
   fraud:
     feature-snapshot:
       max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}
+  webhook:
+    execution-enabled: ${THAAP_WEBHOOK_EXECUTION_ENABLED:false}
+    secret-encryption-key: ${THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY:}
+    secret-key-version: ${THAAP_WEBHOOK_SECRET_KEY_VERSION:v1}
+    secret-decryption-keys: ${THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS:}
+    allowed-hosts: ${THAAP_WEBHOOK_ALLOWED_HOSTS:}
+    batch-size: ${THAAP_WEBHOOK_BATCH_SIZE:20}
+    lease-duration: ${THAAP_WEBHOOK_LEASE_DURATION:30s}
+    connect-timeout: ${THAAP_WEBHOOK_CONNECT_TIMEOUT:2s}
+    request-timeout: ${THAAP_WEBHOOK_REQUEST_TIMEOUT:5s}
+    target-resolution-timeout: ${THAAP_WEBHOOK_TARGET_RESOLUTION_TIMEOUT:2s}
+    resolver-threads: ${THAAP_WEBHOOK_RESOLVER_THREADS:4}
+    poll-delay: ${THAAP_WEBHOOK_POLL_DELAY:1s}

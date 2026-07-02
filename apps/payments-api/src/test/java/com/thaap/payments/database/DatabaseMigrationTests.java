@@ -27,9 +27,16 @@ import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.webhook.WebhookDelivery;
+import com.thaap.payments.webhook.WebhookDeliveryAttempt;
+import com.thaap.payments.webhook.WebhookDeliveryAttemptRepository;
 import com.thaap.payments.webhook.WebhookDeliveryRepository;
 import com.thaap.payments.webhook.WebhookEndpoint;
 import com.thaap.payments.webhook.WebhookEndpointRepository;
+import com.thaap.payments.webhook.WebhookEvent;
+import com.thaap.payments.webhook.WebhookEventRepository;
+import com.thaap.payments.webhook.WebhookEventType;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -56,6 +63,8 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("test")
 @SpringBootTest
 class DatabaseMigrationTests {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -95,6 +104,12 @@ class DatabaseMigrationTests {
 
     @Autowired
     private WebhookDeliveryRepository webhookDeliveryRepository;
+
+    @Autowired
+    private WebhookEventRepository webhookEventRepository;
+
+    @Autowired
+    private WebhookDeliveryAttemptRepository webhookDeliveryAttemptRepository;
 
     @BeforeEach
     void cleanDatabase() {
@@ -158,6 +173,13 @@ class DatabaseMigrationTests {
                   AND description = 'add refunds and refund ledger lineage'
                   AND success = TRUE
                 """, Integer.class);
+        var webhookDeliverySchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '9'
+                  AND description = 'harden webhook delivery execution'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
@@ -167,6 +189,7 @@ class DatabaseMigrationTests {
         assertThat(authorizationVoidSchema).isEqualTo(1);
         assertThat(legacyCaptureMethodHardening).isEqualTo(1);
         assertThat(refundLedgerSchema).isEqualTo(1);
+        assertThat(webhookDeliverySchema).isEqualTo(1);
     }
 
     @Test
@@ -181,7 +204,10 @@ class DatabaseMigrationTests {
                 "authorization_voids",
                 "idempotency_records",
                 "webhook_endpoints",
+                "webhook_endpoint_event_subscriptions",
+                "webhook_events",
                 "webhook_deliveries",
+                "webhook_delivery_attempts",
                 "fraud_decisions",
                 "feature_snapshots",
                 "audit_logs",
@@ -207,10 +233,14 @@ class DatabaseMigrationTests {
         assertIndexExists("authorization_voids", "idx_authorization_voids_merchant_created");
         assertIndexExists("authorization_voids", "idx_authorization_voids_attempt");
         assertIndexExists("payment_methods", "idx_payment_methods_merchant_bin");
-        assertIndexExists("webhook_endpoints", "idx_webhook_endpoints_merchant_active");
+        assertIndexExists("webhook_endpoints", "idx_webhook_endpoints_merchant_status");
         assertIndexExists("webhook_endpoints", "uk_webhook_endpoints_signing_secret_hash");
+        assertIndexExists("webhook_events", "idx_webhook_events_merchant_created");
         assertIndexExists("webhook_deliveries", "idx_webhook_deliveries_merchant_created");
         assertIndexExists("webhook_deliveries", "idx_webhook_deliveries_merchant_status_next_attempt");
+        assertIndexExists("webhook_deliveries", "idx_webhook_deliveries_due");
+        assertIndexExists("webhook_deliveries", "idx_webhook_deliveries_expired_lease");
+        assertIndexExists("webhook_delivery_attempts", "idx_webhook_attempts_merchant_delivery");
         assertIndexExists("fraud_decisions", "uk_fraud_decisions_merchant_id_id");
         assertIndexExists("fraud_decisions", "uk_fraud_decisions_attempt");
         assertIndexExists("fraud_decisions", "idx_fraud_decisions_merchant_created");
@@ -266,9 +296,20 @@ class DatabaseMigrationTests {
         assertThat(columnNames("refunds")).contains("merchant_id", "payment_intent_id", "payment_attempt_id",
                 "authorization_id", "amount", "currency", "status", "created_at");
         assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
-        assertThat(columnNames("webhook_endpoints")).contains("signing_secret_prefix", "signing_secret_hash");
+        assertThat(columnNames("webhook_endpoints")).contains(
+                "operational_status", "signing_secret_prefix", "signing_secret_hash",
+                "signing_secret_ciphertext", "signing_secret_nonce", "signing_secret_key_version")
+                .doesNotContain("active");
+        assertThat(columnNames("webhook_events")).contains(
+                "merchant_id", "event_type", "resource_id", "resource_type", "api_version",
+                "payload", "payload_sha256", "occurred_at", "created_at");
         assertThat(columnNames("webhook_deliveries")).contains("attempt_count", "next_attempt_at", "last_attempt_at",
-                "delivered_at", "last_error");
+                "delivered_at", "webhook_event_id", "last_error_code", "claim_token", "lease_expires_at")
+                .doesNotContain("last_error");
+        assertThat(columnNames("webhook_delivery_attempts")).contains(
+                "merchant_id", "webhook_delivery_id", "attempt_number", "outcome",
+                "http_request_sent", "dispatch_started_at", "response_status", "error_code", "started_at",
+                "completed_at", "latency_ms");
     }
 
     @Test
@@ -323,9 +364,33 @@ class DatabaseMigrationTests {
         var merchantB = merchantRepository.saveAndFlush(new Merchant("merchant-b", "thaap_test_b"));
         var endpointA = webhookEndpointRepository.saveAndFlush(new WebhookEndpoint(
                 merchantA.getId(), "https://merchant-a.example/webhooks"));
+        UUID resourceId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        Instant occurredAt = Instant.now();
+        String payload = "{\"id\":\"" + eventId + "\"}";
+        WebhookEvent eventA = webhookEventRepository.saveAndFlush(new WebhookEvent(
+                eventId, merchantA.getId(), WebhookEventType.PAYMENT_INTENT_CREATED,
+                resourceId, payload, SecretHasher.sha256(payload), occurredAt));
+        WebhookDelivery deliveryA = webhookDeliveryRepository.saveAndFlush(new WebhookDelivery(
+                merchantA.getId(), endpointA.getId(), eventA.getId(),
+                eventA.getEventType(), resourceId, occurredAt));
+        WebhookEndpoint secondEndpointA = webhookEndpointRepository.saveAndFlush(new WebhookEndpoint(
+                merchantA.getId(), "https://merchant-a.example/other-webhooks"));
 
         assertThatThrownBy(() -> webhookDeliveryRepository.saveAndFlush(new WebhookDelivery(
-                merchantB.getId(), endpointA.getId(), "payment_intent.created", UUID.randomUUID())))
+                merchantB.getId(), endpointA.getId(), eventA.getId(),
+                eventA.getEventType(), resourceId, occurredAt)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> webhookDeliveryRepository.saveAndFlush(new WebhookDelivery(
+                merchantA.getId(), endpointA.getId(), eventA.getId(),
+                eventA.getEventType(), resourceId, occurredAt)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> webhookDeliveryRepository.saveAndFlush(new WebhookDelivery(
+                merchantA.getId(), secondEndpointA.getId(), eventA.getId(),
+                WebhookEventType.REFUND_CREATED.wireValue(), resourceId, occurredAt)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> webhookDeliveryAttemptRepository.saveAndFlush(new WebhookDeliveryAttempt(
+                merchantB.getId(), deliveryA.getId(), 1, occurredAt)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -555,6 +620,199 @@ class DatabaseMigrationTests {
         assertThatThrownBy(() -> migrate(upgrade.dataSource(), "8"))
                 .hasMessageContaining("V8__add_refunds_and_refund_ledger_lineage.sql")
                 .hasStackTraceContaining("ck_chapter18_no_legacy_refunded_payment_intents");
+    }
+
+    @Test
+    void v9MigrationBackfillsImmutableEventsAndRequiresLegacySecretRotation() throws Exception {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_backfill");
+        migrate(upgrade.dataSource(), "8");
+        UUID merchantId = UUID.randomUUID();
+        UUID endpointId = UUID.randomUUID();
+        UUID disabledEndpointId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        UUID disabledDeliveryId = UUID.randomUUID();
+        UUID resourceId = UUID.randomUUID();
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-webhook-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "legacy-webhook-" + merchantId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://disabled.example/webhooks', FALSE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, disabledEndpointId, merchantId, "legacy-signing-hash-" + disabledEndpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, created_at
+                )
+                VALUES (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                """, deliveryId, merchantId, endpointId, resourceId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, created_at
+                )
+                VALUES (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                """, disabledDeliveryId, merchantId, disabledEndpointId, UUID.randomUUID());
+
+        migrate(upgrade.dataSource(), "9");
+
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT operational_status
+                FROM webhook_endpoints
+                WHERE id = ?
+                """, String.class, endpointId)).isEqualTo("REQUIRES_SECRET_ROTATION");
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT operational_status
+                FROM webhook_endpoints
+                WHERE id = ?
+                """, String.class, disabledEndpointId)).isEqualTo("DISABLED");
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM webhook_endpoint_event_subscriptions
+                WHERE webhook_endpoint_id = ?
+                """, Integer.class, endpointId)).isEqualTo(WebhookEventType.values().length);
+        Map<String, Object> event = upgrade.jdbcTemplate().queryForMap("""
+                SELECT id, merchant_id, event_type, resource_id, resource_type,
+                       api_version, payload, payload_sha256
+                FROM webhook_events
+                WHERE id = ?
+                """, deliveryId);
+        assertThat(event.get("merchant_id")).isEqualTo(merchantId);
+        assertThat(event.get("event_type")).isEqualTo("payment_intent.created");
+        assertThat(event.get("resource_id")).isEqualTo(resourceId);
+        assertThat(event.get("resource_type")).isEqualTo("PAYMENT_INTENT");
+        assertThat(event.get("api_version")).isEqualTo("v1");
+        JsonNode payload = OBJECT_MAPPER.readTree(event.get("payload").toString());
+        assertThat(payload.get("id").asText()).isEqualTo(deliveryId.toString());
+        assertThat(payload.get("type").asText()).isEqualTo("payment_intent.created");
+        assertThat(payload.get("apiVersion").asText()).isEqualTo("v1");
+        assertThat(payload.get("merchantId").asText()).isEqualTo(merchantId.toString());
+        assertThat(payload.path("data").path("object").get("id").asText()).isEqualTo(resourceId.toString());
+        assertThat(payload.path("data").path("object").get("type").asText()).isEqualTo("PAYMENT_INTENT");
+        assertThat(event.get("payload_sha256"))
+                .isEqualTo(SecretHasher.sha256(event.get("payload").toString()));
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT webhook_event_id
+                FROM webhook_deliveries
+                WHERE id = ?
+                """, UUID.class, deliveryId)).isEqualTo(deliveryId);
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM webhook_deliveries
+                WHERE webhook_event_id = id
+                """, Integer.class)).isEqualTo(2);
+        assertThat(upgrade.jdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM webhook_events", Integer.class)).isEqualTo(2);
+        Map<String, Object> queued = upgrade.jdbcTemplate().queryForMap("""
+                SELECT status, next_attempt_at, last_error_code
+                FROM webhook_deliveries
+                WHERE id = ?
+                """, deliveryId);
+        assertThat(queued)
+                .containsEntry("status", "PENDING")
+                .containsEntry("next_attempt_at", null)
+                .containsEntry("last_error_code", null);
+        Map<String, Object> disabled = upgrade.jdbcTemplate().queryForMap("""
+                SELECT status, next_attempt_at, delivered_at, last_error_code
+                FROM webhook_deliveries
+                WHERE id = ?
+                """, disabledDeliveryId);
+        assertThat(disabled)
+                .containsEntry("status", "EXHAUSTED")
+                .containsEntry("last_error_code", "ENDPOINT_DISABLED");
+        assertThat(disabled.get("next_attempt_at")).isNull();
+        assertThat(disabled.get("delivered_at")).isNull();
+        assertThat(upgrade.jdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM webhook_delivery_attempts", Integer.class)).isZero();
+    }
+
+    @Test
+    void v9MigrationRejectsLegacyExecutionStateWithoutAttemptEvidence() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_execution_guard");
+        migrate(upgrade.dataSource(), "8");
+        UUID merchantId = UUID.randomUUID();
+        UUID endpointId = UUID.randomUUID();
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-webhook-guard', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "legacy-webhook-guard-" + merchantId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, next_attempt_at, created_at
+                )
+                VALUES
+                    (?, ?, ?, 'payment_intent.created', ?, 'PENDING', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                    (?, ?, ?, 'payment_intent.created', ?, 'SUCCEEDED', 1, NULL, CURRENT_TIMESTAMP),
+                    (?, ?, ?, 'payment_intent.created', ?, 'FAILED', 2, NULL, CURRENT_TIMESTAMP)
+                """,
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID(),
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID(),
+                UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID());
+
+        assertThatThrownBy(() -> migrate(upgrade.dataSource(), "9"))
+                .hasStackTraceContaining(
+                        "V9 cannot migrate unsupported legacy webhook delivery execution state")
+                .hasStackTraceContaining("3 row(s)");
+    }
+
+    @Test
+    void v9MigrationRejectsUnsupportedLegacyEventTypesBeforeCreatingSchemaTruth() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_event_type_guard");
+        migrate(upgrade.dataSource(), "8");
+        UUID merchantId = UUID.randomUUID();
+        UUID endpointId = UUID.randomUUID();
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-webhook-event-guard', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "legacy-webhook-event-guard-" + merchantId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, created_at
+                )
+                VALUES (?, ?, ?, 'legacy.unknown', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID());
+
+        assertThatThrownBy(() -> migrate(upgrade.dataSource(), "9"))
+                .hasStackTraceContaining("V9 cannot migrate unsupported legacy webhook event types")
+                .hasStackTraceContaining("1 row(s)");
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_name = 'webhook_events'
+                """, Integer.class)).isZero();
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_name = 'webhook_endpoints'
+                  AND column_name = 'operational_status'
+                """, Integer.class)).isZero();
     }
 
     private String captureMethod(JdbcTemplate source, UUID paymentIntentId) {

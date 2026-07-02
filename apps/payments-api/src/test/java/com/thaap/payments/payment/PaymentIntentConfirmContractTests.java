@@ -161,7 +161,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
-        assertThat(countRows("audit_logs")).isEqualTo(3);
+        assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countAuditLogsByAction("payment_intent.confirmed")).isEqualTo(1);
         assertThat(countAuditLogsByAction("fraud_decision.completed")).isEqualTo(1);
         assertThat(countAuditLogsByAction("authorization.approved")).isEqualTo(1);
@@ -307,7 +307,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
         assertThat(countRows("authorizations")).isEqualTo(1);
-        assertThat(countRows("audit_logs")).isEqualTo(3);
+        assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
     }
 

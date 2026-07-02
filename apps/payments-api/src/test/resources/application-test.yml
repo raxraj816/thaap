@@ -31,3 +31,16 @@ thaap:
   fraud:
     feature-snapshot:
       max-json-bytes: 16384
+  webhook:
+    execution-enabled: false
+    secret-encryption-key: dGVzdC13ZWJob29rLWtleS0zMi1ieXRlcy0xMjM0NTY=
+    secret-key-version: test-v1
+    secret-decryption-keys:
+    allowed-hosts:
+    batch-size: 20
+    lease-duration: 30s
+    connect-timeout: 2s
+    request-timeout: 5s
+    target-resolution-timeout: 2s
+    resolver-threads: 2
+    poll-delay: 1s

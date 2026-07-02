@@ -5,10 +5,17 @@ Threat Hunting & Adaptive Analytics for Payments.
 THAAP is a production-shaped payment processing and fraud intelligence simulator. It exists to build payment and fraud primitives end to end: merchant onboarding, customer and payment method creation, PaymentIntent and PaymentAttempt lifecycle, processor simulation, idempotency, webhooks, ledgering, fraud rules, manual review, synthetic data, ML scoring, graph intelligence, and later GenAI-assisted offline investigation.
 
 The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md).
+Chapter completion is governed by
+[the invariant-proof process](docs/INVARIANT_PROOF_REVIEW_PROCESS.md),
+[the escaped-review register](docs/ESCAPED_REVIEW_REGISTER.md), and a
+chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 
 ## Current Status
 
-Chapter 18 is complete. Confirm now produces deterministic processor
+Chapter 19 is complete after the 2026-07-02 final pre-merge recovery covering
+request-target encoding, response-head grammar, timeout conversion, migration,
+signature freshness, readiness enforcement, and observability interleavings.
+Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
 capture remains an explicit endpoint operation, and approved uncaptured
@@ -150,6 +157,41 @@ scenarios through public APIs:
   partial/over/double-refund rejection, invalid lifecycle states, tenant and
   database lineage, migration compatibility, rollback on ledger/webhook/audit
   failure, and one coherent winner under a real PostgreSQL refund race.
+- Chapter 19 turns webhook records into an executable at-least-once delivery
+  system: immutable event envelopes, endpoint-specific delivery state,
+  append-only attempts, AES-256-GCM-protected signing keys, exact-byte HMAC
+  signatures, explicit-CIDR SSRF-safe target validation, wall-clock request
+  deadlines, exact positive-millisecond timeout conversion, exact HTTP/1.0/1.1
+  request-target/status/response-field grammar, complete bounded response-head
+  acknowledgement, exhaustive retryable DNS-failure classification,
+  just-in-time lease recovery, deterministic retries, versioned key rollover,
+  cursor-bounded tenant APIs, bounded failure-cause metrics, and bulk
+  queued-delivery exhaustion during endpoint disable.
+  Endpoint state transitions and event routing use compatible database locks;
+  forced PostgreSQL orderings prove rotation cannot reactivate a disabled
+  endpoint and concurrent event creation or retry finalization cannot strand
+  claimable work after disable. Timestamp canonicalization matches database
+  precision, Host authority remains correct across IPv4/IPv6 resolution, and
+  merchant guidance plus the executable callback fixture deduplicate only the
+  signed payload event ID through durable one-effect state that survives
+  concurrent duplicates and process restart. Disabled worker polls still report
+  the real due backlog without claiming or sending work.
+- V9 honestly migrates legacy endpoints to `REQUIRES_SECRET_ROTATION`, backfills
+  legacy delivery envelopes, and enforces same-tenant event/delivery/attempt
+  lineage in both H2 and PostgreSQL. It exhausts queued work for already
+  disabled legacy endpoints and fails before schema mutation when a V8 row
+  claims delivery execution that cannot be reconciled with authoritative
+  attempt evidence or contains an unsupported legacy event type.
+- Dispatch signatures are minted only after potentially blocking preparation,
+  the 64 KiB payload and cumulative 32 KiB response-head limits are enforced
+  at their real runtime boundaries, every ASCII response-field character class
+  and DNS/socket-duration conversion partition has executable boundary-family
+  proof, Unicode request targets retain exact meaning through percent-encoding,
+  and disable metrics count only rows actually changed after PostgreSQL
+  predicate re-evaluation.
+- `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
+  once, retries with the same event and payload, succeeds, and leaves payment
+  truth unchanged.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
@@ -165,6 +207,9 @@ scenarios through public APIs:
   requires capture state plus authorization and ledger evidence.
 - Staff-apprenticeship learning notes, deep dives, rubric, weekly review, and
   repetition trackers are in place under `docs/learning/`.
+- Non-trivial chapters now require a checked invariant-proof matrix with forced
+  PostgreSQL interleavings, protocol-boundary evidence, plan traceability, and a
+  separate hostile review before completion.
 
 ## Repository Layout
 
@@ -241,8 +286,9 @@ curl http://localhost:8080/actuator/health/readiness
 ```
 
 If an older local PostgreSQL volume was created before Flyway became the schema
-owner, or contains a pre-V8 thin `REFUNDED` PaymentIntent without reconstructable
-Refund/ledger lineage, reset it before normal local startup:
+owner, contains a pre-V8 thin `REFUNDED` PaymentIntent without reconstructable
+Refund/ledger lineage, or ran an earlier uncommitted draft of V9 while Chapter
+19 was still being developed, reset it before normal local startup:
 
 ```bash
 docker compose -f infra/docker/compose.yml down --volumes

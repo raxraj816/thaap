@@ -66,24 +66,51 @@ chargeback.created
 
 Webhooks solve the problem of keeping the merchant's system synchronized with the payment platform without constant polling.
 
-## Event, Endpoint, And Delivery
+## Event, Endpoint, Delivery, And Attempt
 
-Think of webhooks as three separate ideas.
+Think of webhooks as four separate ideas.
 
 `Event`
-: The fact that something happened. Example: `payment_intent.captured`.
+: The immutable fact and exact payload saying something happened. Example:
+  `payment_intent.captured`.
 
 `WebhookEndpoint`
 : The merchant-owned URL that wants to receive event notifications. Example: `https://merchant.example.com/webhooks/thaap`.
 
 `WebhookDelivery`
-: One attempt to deliver one event to one endpoint.
+: The routing and aggregate state for one event going to one endpoint.
+
+`WebhookDeliveryAttempt`
+: Append-only evidence for one claimed transmission try for one delivery. A
+  target-policy or signing failure can stop it before HTTP.
 
 This distinction matters.
 
-The event is the truth. The delivery is an attempt to tell another system about that truth.
+The event is the truth. The delivery routes that truth. Attempts record what
+happened each time THAAP tried to communicate it.
 
 If delivery fails, the event is still true. THAAP should retry delivery without undoing the payment state.
+
+Retries also create an unavoidable boundary:
+
+```text
+THAAP sends callback
+  -> merchant receives callback
+  -> THAAP crashes before recording success
+  -> THAAP must retry after lease recovery
+```
+
+The merchant can receive the same event twice. This is why webhook delivery is
+at least once, not exactly once. The merchant first verifies the signature over
+the raw body, then uses the stable `id` inside that authenticated body as the
+deduplication key. `THAAP-Event-Id` must match it, but the header alone is not
+signed and must not drive deduplication.
+
+The reference consumer persists that authenticated body ID and payload hash in
+the same SQLite transaction that represents its business effect. A crash after
+commit but before `204`, a process restart, or concurrent duplicate delivery
+therefore converges to one effect. Reusing the same event ID with different
+signed bytes is rejected instead of silently treated as an ordinary duplicate.
 
 ## Why We Persist Webhook Deliveries
 
@@ -98,7 +125,7 @@ When a payment state changes, THAAP should persist its own state first:
 ```text
 payment state changes
   -> write payment state
-  -> write event/outbox row
+  -> write immutable webhook event envelope
   -> write webhook delivery row
   -> commit transaction
 ```
@@ -107,31 +134,90 @@ The actual HTTP callback happens later:
 
 ```text
 worker reads pending delivery
+  -> claims delivery and numbered attempt
   -> signs payload
   -> POSTs to merchant URL
-  -> records success or failure
+  -> records append-only attempt success or failure
   -> schedules retry if needed
 ```
 
 This makes payment state durable even when the merchant endpoint is down, slow, or buggy.
 
+The Chapter 19 webhook event envelope is not the general Kafka/outbox record.
+Phase 5 introduces that broader cross-consumer event boundary.
+
 ## How THAAP Uses Webhooks Today
 
-The current implementation has the first webhook foundation:
+Chapter 19 implements the complete bounded V1 delivery loop:
 
-- merchants can create webhook endpoints
-- THAAP creates webhook delivery records for merchant-owned events
-- merchants can list their own webhook deliveries
-- webhook data is scoped by `merchant_id`
+- endpoint creation and rotation reveal a signing key once
+- raw signing keys are AES-256-GCM encrypted under a separate configured key
+- key-encryption-key rollover keeps versioned decrypt keys, fails closed on
+  unreadable active versions, and lazily re-encrypts old ciphertext
+- event subscriptions select only relevant active endpoints
+- payment mutations persist one immutable event and endpoint deliveries
+- a PostgreSQL lease worker claims each numbered attempt immediately before
+  dispatch without holding locks over HTTP
+- exact payload bytes are timestamped and signed with HMAC-SHA256
+- configured path/query values are serialized through the URI ASCII
+  representation so Unicode becomes UTF-8 percent escapes without rewriting
+  existing escapes
+- signature time is read after dispatch preparation so database lock wait does
+  not consume the merchant freshness tolerance
+- payload bytes are produced by a JSON serializer, not manual string
+  concatenation, so future event values cannot break the merchant-verifiable
+  body
+- failures use deterministic retries and append attempt evidence
+- dispatch start is persisted with lease renewal immediately before HTTP
+- pre-dispatch state records known-no-send evidence; in-flight, partial-write,
+  and post-dispatch expiry state remains unknown until it can be finalized
+- an expired in-flight row remains recoverable after endpoint disable and
+  exhausts without creating a replacement attempt
+- target policy pins approved addresses and explicitly rejects ULA, CGNAT,
+  reserved, private, and other unsafe callback targets
+- DNS uses a bounded resolver pool, bounded queue, and application deadline
+- unknown host, empty DNS answers, timeout, saturation, interruption, and
+  resolver failures retry as known-no-send; only explicit target-policy denial
+  is terminal
+- a wall-clock deadline bounds TLS, write, and response parsing
+- malformed numeric statuses fail as transport errors, while bounded
+  informational responses are consumed and the syntactically valid, complete,
+  bounded final response head is received before classifying the
+  acknowledgement
+- response fields require ASCII HTTP-token names, exact colon separators, and
+  control-safe values; property proof classifies the full ASCII name/value
+  domain instead of only known malformed examples
+- configured DNS/socket durations must survive conversion as positive bounded
+  whole integer milliseconds through one validator; fractional-millisecond
+  values cannot silently become different Java timeout semantics
+- the 64 KiB request limit is enforced at creation, execution, and transport;
+  one cumulative exact 32 KiB budget covers every response-head byte
+- endpoint disable is monotonic: exclusive rotation/disable locks plus shared
+  event-routing locks prevent reactivation and post-disable queued deliveries
+- endpoint disable prevents new claims and retries through a bulk queued-state
+  update plus terminal recovery of any expired in-flight attempt
+- metrics include recovered-unknown and terminal paths; the due gauge reports
+  claimable backlog rather than recently processed throughput
+- disable metrics use actual affected-row counts so a concurrent claim cannot
+  create premature or duplicate terminal telemetry
+- merchant reads are cursor-bounded and tenant scoped
+
+V9 treats migration evidence conservatively. Released V8 had no executor or
+attempt table, so only pristine zero-attempt queued rows can be upgraded.
+Aggregate retry/success/failure claims fail before V9 schema creation rather
+than becoming delivery history without attempts. Queued work for an inactive
+legacy endpoint becomes terminal `ENDPOINT_DISABLED`.
+Because V8 also lacked an event-type constraint, unknown legacy event types
+fail the V9 preflight before any table or column is created.
 
 Current implemented endpoints:
 
 - `POST /webhook_endpoints`
+- `POST /webhook_endpoints/{id}/rotate_secret`
+- `POST /webhook_endpoints/{id}/disable`
 - `GET /webhook_deliveries`
-
-Current implementation records delivery rows. It does not yet send real HTTP callbacks to merchant URLs.
-
-That is intentional for this stage. Durable delivery state comes before network delivery, retries, and signing.
+- `GET /webhook_deliveries/{id}`
+- `GET /webhook_deliveries/{id}/attempts`
 
 ## Multi-Tenant Requirement
 
@@ -152,37 +238,37 @@ This is why our tenant isolation tests include webhook delivery visibility.
 
 Real webhook systems need security controls because they call merchant-owned URLs over the network.
 
-THAAP should eventually support:
+Chapter 19 supports:
 
 - signing secrets per webhook endpoint
-- signed payloads
-- timestamped signatures
-- replay protection
-- no raw PAN or CVV in payloads
+- encrypted raw signing keys plus safe prefix/hash metadata
+- exact-byte timestamped HMAC signatures
+- stable signed-payload event IDs for merchant deduplication, with
+  header/body agreement validation
+- strict payload allowlisting
+- SSRF-safe outbound target policy
 - retry limits
 - delivery attempt history
 - response status capture
-- safe response-body truncation
+- no response-body retention
+- loopback HTTP is allowed only in local/test simulator mode; shared merchant
+  delivery requires the non-local HTTPS and allowlist path
 
 The merchant should verify signatures before trusting the webhook body.
 
+A one-way signing-secret hash is useful for checking a presented secret, but it
+cannot produce an HMAC with the original secret. Using the stored hash itself as
+the signing key would let a database-only attacker forge webhooks. The implemented
+boundary therefore encrypts the raw high-entropy signing key under a separately
+configured key-encryption key.
+
 ## What Remains To Build
 
-The current foundation is deliberately incomplete.
-
-Still needed:
-
-- domain outbox events
-- webhook event payload builder
-- signing-secret simulation
-- webhook sender worker
-- retry schedule
-- attempt count
-- delivery timeout handling
-- success/failure status transitions
-- endpoint event filtering
-- tests for failed delivery and retry
-- documentation for merchant-side signature verification
+The bounded V1 is complete. Named later slices own merchant-triggered replay,
+endpoint verification handshakes, overlapping signing-secret windows,
+per-endpoint rate controls, managed egress, multi-region scaling, and the
+general domain outbox/Kafka boundary. Those capabilities should extend stable
+event identity and the at-least-once contract rather than replacing them.
 
 ## Mental Model To Keep
 

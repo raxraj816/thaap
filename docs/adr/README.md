@@ -19,6 +19,7 @@ ADRs capture durable engineering decisions and the reasoning behind them.
 - [ADR-0006: Use A Tokenized Simulator Boundary For Card Data](0006-use-tokenized-simulator-boundary-for-card-data.md)
 - [ADR-0007: Start With Docker Compose And Use AWS As Reference Cloud](0007-start-with-docker-compose-and-aws-reference.md)
 - [ADR-0008: Use Merchant As The V1 Tenant Boundary](0008-use-merchant-as-v1-tenant-boundary.md)
+- [ADR-0009: Minimize Custom Infrastructure And Prove Required Protocol Boundaries](0009-minimize-custom-infrastructure.md)
 
 ## Template
 

@@ -12,11 +12,27 @@ Use this before saying a change is ready to commit.
   invariants, or roadmap changed.
 - `docs/TECHNICAL_DEBT_REGISTER.md` updated for every accepted or deferred
   technical, implementation, security, data/ML, or operational debt.
+- The chapter invariant-proof matrix was drafted from the frozen plan and
+  failure sequences, then updated with exact implementation and proof.
+- The matrix records honest provenance. `RETROACTIVE_RECOVERY` is never
+  rewritten as `PRE_IMPLEMENTATION`.
+- The matrix records `Boundary family review: PASS`; escaped grammar, numeric,
+  concurrency, dependency, migration, and authorization findings have
+  partition proof plus a real-boundary regression.
+- `scripts/invariant-proof-check.py` passes with every required lens and entry
+  at `PASS`.
+- `scripts/escaped-review-check.py` passes, and every blocking-severity escaped
+  finding for the chapter is resolved with product and process evidence.
+- The chapter closure dossier passes `scripts/chapter-closure-check.py` and
+  reconciles README and master-plan status.
+- Every custom infrastructure boundary has an accepted ADR and protocol
+  boundary table; otherwise the mature component is used.
 - `scripts/technical-debt-check.py` passes with no missing fields, vague owners,
   vague resolution targets, stale reviews, or dangling debt references.
 - Daily learning note exists for non-trivial implementation days.
 - Deep dive exists for non-trivial implementation days.
-- Relevant tests were run, or the reason they could not be run is recorded.
+- Relevant tests were run. Non-trivial readiness executes backend and
+  repository Python suites automatically.
 - Runtime smoke test was run when local startup behavior changed.
 - Senior Staff adversarial review gate completed before handoff.
 
@@ -35,6 +51,21 @@ Before committing, answer:
 9. Were cheap, valid review comments fixed before handoff?
 10. Does every true deferral have a registered `TD-NNNN` ID, exact owner slice,
     DRI, trigger/deadline, done criteria, and master-plan references?
+11. Can every frozen plan promise be traced to a production boundary and an
+    adversarial proof in the invariant matrix?
+12. Does each concurrency test force the dangerous ordering and prove the lock
+    or state boundary, rather than merely starting threads together?
+13. Do protocol tests cover authenticated identity, exact bytes, representation
+    edges, persistence precision, and the documented reference client?
+14. Is custom HTTP, crypto, queueing, scheduling, or concurrency machinery
+    justified by an accepted ADR rather than implementation convenience?
+15. Are all `P0`/`P1` and frozen-promise `P2` findings fixed and proven?
+16. Does the escaped-review register explain why prior review missed each
+    escaped finding and what process changed?
+17. Does the closure dossier reconcile promises, evidence, debt, demo,
+    operations, and merge recommendation without contradicting source docs?
+18. Did every escaped finding reopen and prove its entire boundary family
+    instead of adding only the observed regression example?
 
 ## Senior Staff Adversarial Review Gate
 
@@ -59,6 +90,14 @@ while the implementation context is still fresh.
 - **Test evidence review:** Do tests prove the riskiest invariant, rollback
   path, tenant boundary, privacy boundary, and idempotency behavior touched by
   the diff?
+- **Forced-interleaving review:** Do production-database tests place each
+  conflicting transaction at the dangerous boundary, prove lock ownership, and
+  assert the durable postcondition for both orderings?
+- **Protocol-boundary review:** Do tests distinguish authenticated body fields
+  from advisory headers, original host identity from resolved addresses, and
+  serialized precision from database precision?
+- **Reference-client review:** Do READMEs, fixtures, scripts, and demos teach
+  exactly the secure integration contract that the server enforces?
 - **Stripe/Mastercard reviewer pass:** What would a payments/fraud reviewer
   challenge first, and is the answer implemented, tested, documented, or
   explicitly deferred?
@@ -84,6 +123,9 @@ Final handoffs should include:
 - `Cheap fixes pulled forward: ...`
 - `True deferrals: ...`
 - `Proof: ...`
+- `Invariant matrix: VERIFIED`
+- `Traceability pass: PASS`
+- `Hostile failure-sequence pass: PASS`
 
 ## Command
 
@@ -96,5 +138,12 @@ scripts/commit-readiness-check.sh YYYY-MM-DD
 For non-trivial implementation days, include:
 
 ```bash
-scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required \
+  --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
+  --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
+
+For non-trivial work, omitting either current artifact fails the gate. This
+prevents an old verified matrix or dossier from masking an incomplete current
+chapter. `--deep-dive-required` also runs both test suites; `--run-tests` is
+only needed when a trivial invocation should run them too.

@@ -471,66 +471,157 @@ Good:
 
 ## 9. Webhook Delivery Architecture
 
-### 9.1 Webhook Endpoint
+### 9.1 Three Durable Records
 
-Fields:
+A webhook is not one mutable row. Chapter 19 separates:
 
-- `id`
-- `merchantId`
-- `url`
-- `enabledEvents`
-- `signingSecret`
-- `status`
-- `createdAt`
+1. `WebhookEvent`: immutable fact, canonical payload, and stable deduplication
+   identity.
+2. `WebhookDelivery`: routing and current aggregate state for one endpoint.
+3. `WebhookDeliveryAttempt`: append-only evidence for one claimed transmission
+   attempt, including safe failures that stop before HTTP.
 
-### 9.2 Webhook Delivery
+This separation prevents a retry from rebuilding historical payload truth from
+a resource that may have changed after the original event.
 
-Fields:
+The canonical event time is truncated to the database's microsecond precision
+before the JSON payload, hash, `occurred_at`, and delivery creation time are
+constructed. Canonicalizing once prevents an apparently immutable payload from
+disagreeing with its persisted lineage after a write/read round trip.
 
-- `id`
-- `webhookEndpointId`
-- `eventId`
-- `attemptNumber`
-- `status`
-- `responseStatus`
-- `nextRetryAt`
-- `createdAt`
-- `deliveredAt`
+### 9.2 Webhook Endpoint
 
-Statuses:
+Endpoint state includes tenant, URL, enabled-event subscriptions, operational
+status, signing-secret prefix/hash, AES-GCM encrypted secret material and key
+version, and creation/update times. The raw signing secret is revealed only at
+creation or rotation.
 
-- `PENDING`
-- `DELIVERING`
-- `SUCCEEDED`
-- `FAILED`
-- `RETRY_SCHEDULED`
-- `EXHAUSTED`
+A one-way secret hash alone is not usable for HMAC signing. Using that hash as
+the signing key would make a database-only compromise sufficient to forge
+merchant webhook signatures. Chapter 19 therefore introduces separately
+configured key encryption.
 
-### 9.3 Delivery Flow
+### 9.3 Webhook Event
+
+The immutable event stores:
+
+- event ID, merchant ID, event type, resource ID and constrained resource type
+- API version and event time
+- exact canonical UTF-8 payload
+- SHA-256 of those exact payload bytes
+
+The event envelope is written in the same transaction as the originating
+payment mutation and its endpoint-specific deliveries. It is not the Phase 5
+general domain outbox.
+
+### 9.4 Webhook Delivery
+
+The delivery stores:
+
+- delivery, merchant, endpoint, and event identities
+- aggregate status and attempt count
+- next/last attempt and delivered times
+- safe last error code
+- claim token and lease expiry while delivering
+
+Delivery statuses are `PENDING`, `DELIVERING`, `RETRY_SCHEDULED`, `SUCCEEDED`,
+and `EXHAUSTED`. Attempt failures are evidence on attempt rows; there is no
+ambiguous delivery-level `FAILED` state.
+
+### 9.5 Webhook Delivery Attempt
+
+Each attempt stores:
+
+- merchant, delivery, and monotonically increasing attempt number
+- started/completed times, bounded outcome, and latency
+- durable dispatch-start time, nullable HTTP-send evidence, optional response
+  status, or constrained safe error code
+
+`http_request_sent = false` is pre-dispatch known-no-send evidence, `true` means
+the request write completed, and `null` means dispatch began but send truth is
+not yet or is no longer knowable. The database permits `null` for an in-progress
+post-dispatch attempt or `OUTCOME_UNKNOWN`, and rejects it before dispatch.
+This avoids converting a secret-loading or DNS failure into false evidence that
+a merchant may have received a callback.
+
+Response bodies, headers, URLs, payloads, signatures, claim tokens, and secret
+material are not attempt evidence and are not persisted.
+
+### 9.6 Delivery Flow
 
 ```text
-domain event created
-  -> matching endpoints selected
-  -> delivery row created
-  -> worker signs payload
-  -> worker sends HTTP request
-  -> response stored
-  -> success marks SUCCEEDED
-  -> failure schedules retry
+originating payment mutation creates immutable WebhookEvent
+  -> matching active endpoints selected under shared row locks
+  -> delivery rows created in the same transaction
+  -> worker claims bounded due rows in a short transaction
+  -> claim and numbered attempt commit
+  -> worker loads the key and validates the target
+  -> worker atomically marks dispatch and renews lease
+  -> worker mints a fresh timestamp and signs exact payload bytes
+  -> worker sends outside the transaction
+  -> matching claim finalizes attempt and delivery in a new transaction
 ```
 
-### 9.4 Retry Strategy
+PostgreSQL claiming uses ordered bounded selection with
+`FOR UPDATE SKIP LOCKED`. Each row is claimed immediately before its network
+dispatch; a scheduler batch is a bound on completed claim/send/finalize cycles,
+not a pre-leased waiting list. A claim lease permits crash recovery, and a
+claim token prevents a stale worker from finalizing over a newer attempt.
+Preparation may include key access and DNS. DNS runs under an application
+deadline in a bounded executor and queue. Resolution infrastructure failures,
+unknown hosts, and empty answers remain retryable known-no-send attempt truth;
+only explicit URL policy or prohibited-address decisions are terminal. The
+worker then locks the delivery,
+marks dispatch start, and renews the matching claim immediately before HTTP; a
+stale token skips the send. Only after that potentially blocking preparation
+returns does the worker read the clock and sign. A local signing failure is
+finalized as retryable known-no-send evidence.
+Finalization locks the same delivery row before validating ownership. The lease
+must exceed connect timeout plus the total request deadline.
+Expired delivering rows are recovered even when their endpoint was disabled
+after claim. Recovery closes the append-only attempt evidence and exhausts the
+delivery without creating another attempt.
+
+Rotation and disable take an exclusive endpoint-row lock. A disabled endpoint
+cannot be rotated back to active, and the shared routing lock ensures a
+concurrent payment transaction cannot insert a pending delivery after disable's
+bulk exhaustion. Endpoint sets are locked in stable order.
+
+The delivery-to-event foreign key includes merchant, event ID, event type, and
+resource ID. This makes the delivery's operational projection agree with the
+immutable payload lineage even when data is written outside the ORM.
+
+V8 had no webhook executor or delivery-attempt table. V9 therefore accepts only
+pristine zero-attempt queued rows and fails before schema mutation when aggregate
+state claims retry, success, or failure that cannot be reconciled with attempt
+evidence. Pristine work for an inactive legacy endpoint becomes terminal
+`ENDPOINT_DISABLED`; work for an active legacy endpoint remains queued until
+the irrecoverable legacy signing secret is rotated.
+
+This provides at-least-once delivery. It cannot provide exactly-once receipt
+across an HTTP/network failure boundary.
+
+### 9.7 Retry Strategy
 
 Initial retry schedule:
 
 - immediate first attempt
-- 1 minute
-- 5 minutes
-- 30 minutes
-- 2 hours
-- exhausted after max attempts
+- attempt 2 after 1 minute
+- attempt 3 after 5 minutes
+- attempt 4 after 30 minutes
+- attempt 5 after 2 hours
+- exhausted after failure of attempt 5
 
-This can be configurable later.
+Any non-`2xx` response, timeout, or transport error follows this deterministic
+V1 policy. Redirects are not followed, and `Retry-After` is not interpreted in
+Chapter 19.
+
+Disabled endpoints, unusable/tampered signing secrets, and target-policy
+rejections are non-retryable configuration/security outcomes. They exhaust
+without an outbound HTTP call.
+
+The complete schema, signing, target-network, API, observability, migration, and
+test decisions live in Chapter 19 of the implementation master plan.
 
 ## 10. Analytics Architecture
 

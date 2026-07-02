@@ -61,3 +61,54 @@ deferred, its registered status is `OPEN` until implementation starts.
 - Done when: GeneratorRun and step state are durable, retries use stable idempotency identities, interrupted runs resume or terminate with explicit cleanup disposition, concurrency is bounded, and failure/retry tests prove no duplicate payment, fraud, or label truth.
 - Resolution evidence: Pending
 - Last reviewed: 2026-06-27
+
+## TD-0003: Webhook Signing-Secret Rotation Grace Windows
+
+- Status: OPEN
+- Debt type: SECURITY_DEBT
+- Priority: P2
+- Introduced: 2026-06-30
+- Origin: Chapter 19 — Webhook Delivery Execution And Retry Behavior
+- Resolution target: Phase 4.5 — Product-Grade Risk Operations, Developer/API Console Webhook Operations slice
+- Primary DRI: Payments Core
+- Supporting owners: Developer Experience, Security
+- Risk / invariant: A worker can load an endpoint's signing secret, then the merchant can rotate the endpoint secret before that already-claimed delivery reaches HTTP; without an explicit old/new verification window, the merchant may reject a legitimate in-flight delivery signed with the just-rotated secret.
+- Deferral reason: Chapter 19 V1 has a single active reveal-once signing secret and a local/test delivery wedge; product-grade rotation windows require schema/API support for previous-secret retention, expiry, merchant-facing verification guidance, and replay/deduplication behavior that belongs with the webhook operations console before shared non-local onboarding.
+- Trigger / deadline: Resolve before shared non-local merchant webhook onboarding, before recommending webhook secret rotation as an operational playbook, or before enabling endpoint verification/replay workflows for external merchants.
+- Done when: Endpoint rotation stores current and previous signing-secret material with explicit expiry, delivery signing and merchant verification docs define the accepted overlap window, tests prove old-secret in-flight delivery acceptance until expiry and rejection after expiry, audit/API responses remain secret-safe, and replay/deduplication behavior is unchanged.
+- Resolution evidence: Pending
+- Last reviewed: 2026-06-30
+
+## TD-0004: Webhook Delivery Fairness And Rate Controls
+
+- Status: OPEN
+- Debt type: OPERATIONS_DEBT
+- Priority: P2
+- Introduced: 2026-06-30
+- Origin: Chapter 19 — Webhook Delivery Execution And Retry Behavior
+- Resolution target: Phase 4.5 — Product-Grade Risk Operations, Developer/API Console Webhook Operations slice
+- Primary DRI: Payments Core
+- Supporting owners: Developer Experience, Risk Operations
+- Risk / invariant: In a shared merchant environment, one merchant or endpoint with a large delivery burst must not consume all webhook worker capacity or starve other merchants' delivery attempts.
+- Deferral reason: Chapter 19 V1 bounds total local worker behavior with disabled-by-default execution, capped batch size, one-at-a-time claims, leases, and network deadlines; per-merchant/per-endpoint fairness requires product policy, operator controls, metrics, and shared-environment workload targets that belong with product-grade webhook operations.
+- Trigger / deadline: Resolve before shared non-local merchant webhook onboarding, before enabling high-volume endpoint subscriptions for external merchants, or when measured webhook queue age shows one tenant can starve another.
+- Done when: Delivery claiming or scheduling enforces configurable per-merchant and/or per-endpoint fairness limits, burst behavior is observable, tests prove a noisy merchant cannot starve another merchant, and operational docs define default limits and override procedures.
+- Resolution evidence: Pending
+- Last reviewed: 2026-06-30
+
+## TD-0005: Webhook Endpoint Creation Idempotency
+
+- Status: OPEN
+- Debt type: IMPLEMENTATION_DEBT
+- Priority: P2
+- Introduced: 2026-06-30
+- Origin: Chapter 19 — Webhook Delivery Execution And Retry Behavior
+- Resolution target: Phase 4.5 — Product-Grade Risk Operations, Developer/API Console Webhook Operations slice
+- Primary DRI: Developer Experience
+- Supporting owners: Payments Core, Security
+- Risk / invariant: A retried endpoint-creation request after a network timeout can create duplicate active endpoints with distinct signing secrets, causing duplicate delivery streams and confusing one-time secret handling.
+- Deferral reason: Chapter 19 V1 supports explicit duplicate cleanup through endpoint disable; safe idempotent creation requires an API contract for idempotency keys, URL uniqueness or replay behavior, and one-time secret reveal semantics that must be designed with the developer console and merchant onboarding workflow.
+- Trigger / deadline: Resolve before shared non-local merchant webhook onboarding, before recommending automated endpoint provisioning, or before exposing webhook endpoint creation through a public developer console.
+- Done when: Endpoint creation has a tenant-scoped idempotency/retry contract that prevents accidental duplicate active endpoints, safely handles lost one-time secret responses, preserves audit evidence, and includes tests for same-key replay, changed-request conflict, cross-tenant isolation, and duplicate URL behavior.
+- Resolution evidence: Pending
+- Last reviewed: 2026-06-30

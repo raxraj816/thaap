@@ -466,23 +466,39 @@ Failure cases:
 
 For the learning-first explanation of why webhooks exist, see [Webhooks From First Principles](../learning/concepts/WEBHOOKS.md).
 
+Chapter 19 separates three kinds of truth:
+
 ```text
-domain event created
-  -> outbox row written
-  -> matching webhook endpoints selected for merchant
-  -> WebhookDelivery rows created
-  -> worker attempts delivery
-  -> payload signed
-  -> response status stored
-  -> retry scheduled on failure
+WebhookEvent           immutable fact and exact payload bytes
+  -> WebhookDelivery   routing and aggregate state for one endpoint
+    -> WebhookDeliveryAttempt
+                       append-only evidence for one HTTP attempt
 ```
+
+The Phase 2 flow is:
+
+```text
+payment mutation commits its domain state
+  -> immutable WebhookEvent written in the same transaction
+  -> matching webhook endpoints selected under shared endpoint locks
+  -> WebhookDelivery rows created
+  -> bounded worker claims due delivery and commits claim
+  -> worker signs exact persisted payload bytes
+  -> worker marks dispatch start and renews the claim atomically
+  -> worker performs HTTP outside database transaction
+  -> append-only attempt result and aggregate delivery state committed
+```
+
+Phase 5 introduces the general domain outbox and Kafka publication. Chapter 19
+does not pretend the webhook event envelope is already that cross-consumer
+outbox.
 
 V1 webhook payload should include:
 
 - event ID
 - event type
 - created timestamp
-- API version, when introduced
+- API version
 - object ID
 - object type
 - merchant ID
@@ -491,10 +507,41 @@ Delivery statuses:
 
 - `PENDING`
 - `DELIVERING`
-- `SUCCEEDED`
-- `FAILED`
 - `RETRY_SCHEDULED`
+- `SUCCEEDED`
 - `EXHAUSTED`
+
+Delivery is at least once. If the worker sends successfully and crashes before
+recording success, lease recovery may send the same immutable event again. The
+event ID remains stable. Merchants verify the timestamped body signature first,
+parse the signed body `id`, reject any mismatch with the advisory
+`THAAP-Event-Id` header, and deduplicate on the authenticated body value.
+
+The worker claims each attempt immediately before dispatch; rows do not wait
+inside a pre-leased serial batch. DNS has its own bounded resolver pool, queue,
+and deadline. Transient DNS outcomes retry as known no-send; only explicit
+target-policy denial is terminal. Connect time plus the total TLS/write/read
+deadline must fit inside the renewed lease. The worker durably marks dispatch
+start while renewing the claim: before that marker send evidence is false,
+while an in-flight or
+expired post-marker attempt has unknown send evidence until transport
+finalization establishes truth. Unclassified runtime failures preserve the
+claim for recovery instead of inventing terminal delivery truth. Expired
+`DELIVERING` rows remain recovery-eligible after endpoint disable so a crashed
+in-flight attempt converges to terminal state rather than becoming stranded.
+Claim selection checks active endpoint eligibility in a subquery and row-locks
+only delivery rows. It does not acquire an implicit endpoint write lock through
+a joined `FOR UPDATE`, which would undermine the endpoint-first kill-switch
+lock protocol.
+Endpoint disable takes an exclusive endpoint lock. It either follows and
+exhausts deliveries already routed under shared locks or precedes routing and
+causes the active-endpoint recheck to create no delivery.
+Retry finalization follows the same endpoint-before-delivery lock order so a
+disable cannot commit between endpoint-state validation and retry scheduling.
+
+The exact Chapter 19 signature, retry, claiming, secret-encryption, network
+target, and proof contract is owned by the Chapter 19 section of the
+implementation master plan.
 
 ## 16. Ledger Effects
 

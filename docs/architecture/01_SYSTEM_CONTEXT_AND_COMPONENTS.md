@@ -225,13 +225,21 @@ Can start inside `payments-api`.
 
 Responsibilities:
 
-- read pending webhook deliveries
-- sign payloads using simulated signing secret
-- attempt delivery
-- persist status and response code
-- schedule retries
+- claim one due delivery immediately before dispatch within a bounded poll
+  budget
+- sign exact immutable event payloads using encrypted per-endpoint secrets
+- enforce explicit global-address target policy and total HTTP request deadlines
+- append numbered attempt evidence and finalize aggregate delivery state
+- schedule deterministic retries and recover expired leases
+- read versioned key-encryption keys and lazily rewrap old endpoint ciphertext
+- report true due backlog plus normal, recovered-unknown, and terminal outcomes
 
-V1 can store delivery records without making external network calls if local callback endpoints are not available.
+Chapter 19 executes only against safe configured targets. Local/test execution
+is loopback-only; non-local execution is disabled until explicit HTTPS
+allowlisting and signing-key encryption are configured.
+Endpoint rotation/disable use exclusive row locks while event routing uses
+shared endpoint locks, making disable monotonic without serializing unrelated
+merchant endpoints.
 
 ### 4.6 `analyst-dashboard-ui`
 
@@ -472,10 +480,12 @@ Owns:
 Owns:
 
 - webhook endpoints
+- immutable webhook event envelopes
 - event filtering
 - delivery attempts
-- signing-secret simulation
-- retry metadata
+- encrypted signing-key lifecycle and exact-byte signatures
+- target-network policy
+- claim leases and deterministic retry metadata
 
 ### 5.13 Audit Module
 
