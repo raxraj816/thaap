@@ -1884,11 +1884,25 @@ Completed chapters:
   one transaction boundary.
 - `GET /refunds/{id}` and extended ledger reads expose safe tenant-scoped
   payment/refund lineage.
+- Chapter 19 adds immutable webhook events, signed at-least-once delivery,
+  append-only attempt evidence, deterministic retries, SSRF-safe pinned
+  transport, endpoint disable/rotation concurrency, bounded observability, and
+  executable merchant deduplication guidance.
+- Chapter 20 makes every simulator outcome one immutable documented catalog,
+  adds a loopback-only all-outcome public-API runner, and certifies the complete
+  Phase 2 processor/lifecycle/accounting/webhook boundary through a
+  pre-implementation invariant matrix and closure dossier.
 
-Remaining Phase 2 work:
+Phase 2 closure state:
 
-- Fees, payout settlement, disputes, and chargeback ledger groups.
-- Webhook delivery execution/retry behavior beyond delivery records.
+- Phase 2 is complete for the canonical V1 simulator boundary.
+- Fees belong to the trigger-based **Partial Money Accounting** slice only after
+  THAAP introduces fee postings or partial capture/refund.
+- Disputes and chargeback accounting remain owned by Phase 4 because they
+  require analyst, label, evidence, and offset workflow truth.
+- Payout settlement and full reconciliation remain outside V1.
+- General domain outbox/Kafka publication remains owned by Phase 5; it is not
+  required for the database-backed webhook delivery contract.
 
 Detailed Phase 2 chapter plan:
 
@@ -2745,8 +2759,9 @@ Detailed Phase 2 chapter plan:
      payment/webhook transaction separation must be fixed in Chapter 19 rather
      than registered for later.
 
-5. Chapter 20: Deterministic Processor Edge Cases And Replayable Demo
-   evidence.
+5. Chapter 20: Deterministic Processor Catalog And Phase 2 Closure.
+
+   Status: complete.
 
    Build:
 
@@ -2783,6 +2798,43 @@ Detailed Phase 2 chapter plan:
      completion, and acquirer reconciliation until the simulator contract is
      stable.
 
+   Implemented:
+
+   - `SimulatorProcessorCatalog` is the single immutable runtime mapping from
+     safe stored BIN-plus-last4 metadata to eight named processor fixtures;
+     unmapped valid simulator cards follow one explicit default-approval
+     fixture.
+   - `SimulatorProcessorAdapter` consumes that catalog without changing the
+     ProcessorAdapter or public authorization API.
+   - The processor-authorization concept note documents the full test-card
+     contract and distinguishes issuer/processor `SUSPECTED_FRAUD` truth from
+     THAAP's independent stub FraudDecision.
+   - `scripts/demo-chapter-20-processor-catalog.py` accepts only a loopback API,
+     rejects every HTTP redirect before credential forwarding, creates all nine
+     outcome partitions through public APIs, reconciles
+     PaymentIntent, PaymentAttempt, Authorization, FraudDecision,
+     FeatureSnapshot, ledger, webhook, and read-only local PostgreSQL audit
+     evidence, then atomically writes an owner-only sanitized report.
+   - Chapter 20 is the integrated Phase 2 closure chapter. Its
+     pre-implementation matrix covers the prior capture, cancel/void, refund,
+     ledger, webhook, audit, tenant, migration, concurrency, and operational
+     promises under the current closure system.
+
+   Proof:
+
+   - Catalog unit tests enumerate every fixture field, explicit unknown-card
+     behavior, and consumer immutability.
+   - Existing confirm contract tests prove all mapped decline/verification
+     outcomes, 3DS-required, mapped approval, and unknown default approval
+     through the public orchestration boundary.
+   - Phase-wide lifecycle, rollback, tenant, migration, forced PostgreSQL
+     concurrency, webhook protocol/security, and readiness suites remain green.
+   - Fresh PostgreSQL Chapter 17, 18, 19, and 20 demos prove automatic capture,
+     manual void, exact refund reversal, signed webhook retry, and complete
+     processor catalog behavior.
+   - The Chapter 20 invariant matrix and closure dossier reconcile the complete
+     evidence and accept no new debt.
+
 Deferred Phase 2 destination slices, not accepted Chapter 18 debt:
 
 - **Partial Money Accounting** — Payments Core owns the durable Capture model,
@@ -2803,9 +2855,12 @@ Done when:
 - Canceled authorization cannot be captured.
 - Double capture and over-refund are rejected.
 - Ledger transaction groups balance.
-- Webhook delivery records are created.
+- Webhook delivery records are created, signed, retried, and durably explained.
 - High-risk money movement and webhook configuration actions create audit logs
   with safe payloads.
+- Every documented processor fixture and the unknown-card default are
+  replayable through public APIs with processor, fraud-lineage, audit, webhook,
+  and ledger evidence.
 
 ### Phase 3: Fraud Decision MVP
 

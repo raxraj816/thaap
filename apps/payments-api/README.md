@@ -90,6 +90,28 @@ Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
 fraud/rule/review list scoping.
 
+## Deterministic Processor Catalog
+
+Chapter 20 makes the simulator mappings one immutable runtime contract keyed by
+safe stored BIN-plus-last4 metadata. The catalog covers approval, issuer
+decline, insufficient funds, suspected fraud, CVC failure, AVS line1 failure,
+AVS postal failure, and 3DS-required. Any other valid simulator card follows
+the documented default approval behavior.
+
+The complete fixture table and the crucial processor-truth-versus-fraud-truth
+distinction are documented in
+[`PROCESSOR_AUTHORIZATION.md`](../../docs/learning/concepts/PROCESSOR_AUTHORIZATION.md).
+Run the loopback-only public-API proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+scripts/demo-chapter-20-processor-catalog.py
+```
+
+The runner rejects all HTTP redirects before a second request is created, so
+merchant API keys and the admin bootstrap token cannot leave the validated
+loopback origin through redirect handling.
+
 ## Webhook Delivery Contract
 
 Chapter 19 uses three durable records: an immutable `WebhookEvent`, one
