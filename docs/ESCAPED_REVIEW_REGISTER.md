@@ -211,3 +211,139 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Metrics derived from state transitions must be tested under the same forced interleavings as the state change and must use affected-row truth rather than a pre-update observation.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-01
+
+## ER-0013
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Post-closure Chapter 19 final merge review
+- Invariant: A callback acknowledgement requires every non-empty line in the bounded final response head to be a syntactically valid HTTP field, not merely a CRLF-terminated string.
+- Finding: `SocketWebhookHttpTransport` validated the status line and final empty-line boundary but discarded arbitrary intervening lines without validating field-name tokens, the colon separator, obsolete folding, or control-bearing field values; `HTTP/1.1 204 No Content\r\nnot-a-header\r\n\r\n` could therefore become durable `SUCCEEDED` truth.
+- Why prior review missed it: Protocol review expanded malformed status grammar and byte framing but continued selecting isolated examples instead of enumerating every parsed response-head grammar component and its complete character partitions.
+- Resolution evidence: `SocketWebhookHttpTransport` now requires an ASCII HTTP token field name, an exact colon separator, and control-safe field values for every informational and final header line. `responseHeaderGrammarClassifiesEveryOctetForTheAsciiContract` exhaustively classifies all 256 input-octet values; `socketTransportRejectsMalformedHeaderFieldsBeforeAcknowledgingSuccess` proves missing-colon, whitespace-name, invalid-token, control-value, obsolete-folding, and non-ASCII responses fail at the raw-socket boundary; `malformedSuccessfulResponseHeadCannotBecomeDurableSuccess` proves the real executor/database state becomes retryable `TRANSPORT_ERROR`, never `SUCCEEDED`.
+- Process correction: The invariant process and executable matrix/dossier gates now require `Boundary family review: PASS`; an escaped defect must reopen its whole grammar, numeric, concurrency, dependency, migration, or authorization family and add generative/property proof plus a real-boundary regression.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0014
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: Post-closure Chapter 19 final merge review
+- Invariant: Every accepted socket timeout must retain a positive bounded value when converted to the millisecond integer consumed by Java socket and deadline APIs.
+- Finding: Positive durations below one millisecond passed `Duration` validation but truncated to zero; Java interprets a zero connect/read timeout as unbounded while the deadline thread sleeps zero milliseconds, contradicting the bounded-worker promise and allowing configuration representation to change runtime semantics.
+- Why prior review missed it: Timeout tests exercised runtime expiry and slow trickle behavior but did not enumerate negative, zero, sub-millisecond, exact-minimum, maximum, over-range, and conversion-overflow configuration partitions.
+- Resolution evidence: `WebhookDurationValidator` now centralizes DNS-resolution, connect, and request conversion and rejects null, negative, zero, fractional-millisecond, configured-maximum, and conversion-overflow durations before asynchronous resolution or socket construction. `webhookTimeoutConfigurationRejectsEveryUnrepresentableOrUnboundedDuration` proves all invalid partitions and the exact one-millisecond/socket-maximum/resolver-maximum boundaries.
+- Process correction: The new boundary-family gate requires representation-conversion reviews to enumerate the source domain, target domain, truncation points, exact boundaries, and overflow behavior rather than relying on runtime happy-path timeout tests.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0015
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-01
+- Escaped gate: ER-0013 boundary-family expansion before Chapter 19 re-closure
+- Invariant: An accepted HTTP/1.0 or HTTP/1.1 status line contains the required single-space separators around the three-digit status code, including the separator before an optionally empty reason phrase.
+- Finding: The status parser accepted `HTTP/1.1 204\r\n\r\n` because it allowed a two-part split, even though the documented exact status grammar requires the post-code space before the possibly empty reason phrase.
+- Why prior review missed it: Earlier status tests varied version tokens, numeric range, reason controls, and informational responses independently but never enumerated the complete separator, code-width, and code-character partitions.
+- Resolution evidence: `SocketWebhookHttpTransport` now requires exactly three status-line parts. `socketTransportRejectsEveryMalformedStatusLineGrammarPartition` sends missing post-code space, tab separator, doubled separator, two-digit, four-digit, and non-digit code variants through real sockets and proves none can become acknowledgement truth.
+- Process correction: The newly required boundary-family expansion caught this adjacent status-grammar defect before another completion claim; protocol review now enumerates every grammar component and partition rather than treating previous regression examples as exhaustive.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-01
+
+## ER-0016
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 19
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Final Chapter 19 pre-merge review after ER-0013 boundary-family recovery
+- Invariant: The outbound HTTP request target represents the merchant-configured URI path and query exactly after RFC ASCII serialization; transport encoding must never substitute characters and route a signed callback to a different resource.
+- Finding: `SocketWebhookHttpTransport` concatenated `URI.getRawPath()` and `getRawQuery()` into a Java string and encoded the complete request head with `US_ASCII`. Java replaced non-ASCII path/query characters with `?`, so `/café?q=naïve` became `/caf??q=na?ve` on the wire.
+- Why prior review missed it: Protocol review exhaustively classified response grammar but did not inventory the request-line representation boundary from Unicode Java `URI` characters to ASCII HTTP wire bytes.
+- Resolution evidence: The transport now derives path and query from `URI.toASCIIString()` before constructing the request line. `socketTransportPercentEncodesUnicodeRequestTargetWithoutChangingExistingEscapes` captures the real socket request line and proves UTF-8 characters become their percent-encoded octets while existing `%20` and `%2F` escapes remain unchanged.
+- Process correction: Custom HTTP protocol reviews must cover both request and response grammars, including every character-set conversion, percent-encoding boundary, and exact-wire identity claim.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02
+
+## ER-0017
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Final Chapter 19 pre-merge migration review
+- Invariant: Every unsupported V8 webhook representation is rejected before V9 creates tables, columns, subscriptions, or partially migrated lineage.
+- Finding: The V9 preflight rejected unsupported execution state but did not reject an unknown legacy `event_type`. Such a row reached resource-type mapping only after DDL had begun; PostgreSQL rolled the transaction back, while H2 retained partial schema and a failed Flyway record that blocked retry.
+- Why prior review missed it: Migration proof crossed endpoint state with execution state but did not enumerate the complete legacy event-type domain even though V8 had no event-type check constraint.
+- Resolution evidence: V9 now counts and rejects every event type outside the five canonical Chapter 19 values before its first DDL statement. `v9MigrationRejectsUnsupportedLegacyEventTypesBeforeCreatingSchemaTruth` and `v9MigrationRejectsUnsupportedLegacyEventTypesBeforeDdlOnPostgreSql` prove the failure and the absence of both `webhook_events` and `operational_status` after rejection.
+- Process correction: Migration boundary-family review must enumerate every unconstrained legacy enum/string domain and prove unsupported values fail before the first non-transactional or transactional schema mutation.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02
+
+## ER-0018
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Final Chapter 19 commit-readiness review
+- Invariant: Non-trivial commit readiness always executes the backend and repository Python suites; a caller cannot receive a green readiness result from structural artifacts alone.
+- Finding: `--deep-dive-required` still left test execution behind the optional `--run-tests` flag. The canonical non-trivial readiness command could therefore pass without executing Maven or Python tests even though the closure dossier described those suites as integrated gates.
+- Why prior review missed it: Negative readiness tests covered missing matrix/dossier inputs and structural contradictions but never observed whether the non-trivial invocation actually launched both test commands.
+- Resolution evidence: `commit-readiness-check.sh` now makes `--deep-dive-required` imply test execution. `CommitReadinessCheckTests.test_non_trivial_readiness_always_runs_backend_and_python_tests` runs the real shell script in an isolated fixture and proves both commands are invoked.
+- Process correction: Executable quality gates require behavior tests for promised side effects, not only parser/checker unit tests and successful manual invocations.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02
+
+## ER-0019
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Final Chapter 19 post-readiness merge review
+- Invariant: The executable merchant callback reference applies one durable business effect per authenticated signed-body event ID across duplicate delivery, concurrent receipt, and process restart.
+- Finding: The callback fixture verified the signature and authenticated event ID but incremented in-memory state and appended evidence for every valid retry. It had no durable uniqueness boundary, even though the matrix described the executable consumer as replay-safe.
+- Why prior review missed it: Fixture tests proved signature ordering, UUID parsing, and header agreement but never modeled merchant-side state, crash-after-side-effect recovery, concurrent duplicates, or restart.
+- Resolution evidence: `DurableEventStore` now atomically inserts the authenticated event ID and payload hash into SQLite before returning success, treats an existing identical row as an acknowledged duplicate, and rejects event-ID reuse with different bytes. Callback fixture tests prove one effect across restart, reject conflicting payload reuse, force sixteen concurrent duplicates to one winner, and run the real HTTP fixture to observe `204/204` with effect flags `true/false`; the public demo asserts `503 -> 204` applies exactly one durable effect.
+- Process correction: Any reference consumer called idempotent or replay-safe must include durable side-effect state and prove duplicate, concurrent, payload-conflict, and crash/restart partitions; parser-only tests cannot certify consumer idempotency.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02
+
+## ER-0020
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 19
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Final Chapter 19 post-readiness merge review
+- Invariant: `thaap.webhook.due` reports the actual database backlog in both enabled and intentionally disabled execution modes without causing disabled workers to claim or send work.
+- Finding: The scheduler returned immediately when execution was disabled, so the default safe mode left the due gauge at its initial zero even while active endpoints accumulated pending deliveries.
+- Why prior review missed it: Observability tests exercised the executor after an enabled processing pass and the claim/disable metric race, but the failure inventory did not cross backlog observation with the worker-disabled operating mode.
+- Resolution evidence: `WebhookDeliveryScheduler` now refreshes the due count through `WebhookDeliveryExecutor.refreshDueDeliveries` when execution is disabled and still invokes no claim/send path. `WebhookDeliverySchedulerUnitTests` proves both disabled observe-only behavior and enabled processing behavior at a fixed poll time.
+- Process correction: Operational-signal proof must cross every supported operating mode, especially fail-safe disabled, degraded, and recovery modes, with tests showing both metric truth and absence of prohibited side effects.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02

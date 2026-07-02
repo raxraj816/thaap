@@ -454,6 +454,61 @@ class PostgreSqlMigrationTests {
         }
     }
 
+    @Test
+    void v9MigrationRejectsUnsupportedLegacyEventTypesBeforeDdlOnPostgreSql() {
+        String schema = "v9_webhook_event_guard_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "8");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID endpointId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    )
+                    VALUES (?, 'legacy-event-guard', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "legacy-event-guard-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints (
+                        id, merchant_id, url, active, signing_secret_prefix,
+                        signing_secret_hash, created_at
+                    )
+                    VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?,
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), endpointId, merchantId, "legacy-secret-" + endpointId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, event_type, resource_id,
+                        status, attempt_count, created_at
+                    )
+                    VALUES (?, ?, ?, 'legacy.unknown', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID());
+
+            assertThatThrownBy(() -> migrateSchema(upgradeDataSource, schema, "9"))
+                    .hasStackTraceContaining(
+                            "V9 cannot migrate unsupported legacy webhook event types")
+                    .hasStackTraceContaining("1 row(s)");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = ?
+                      AND table_name = 'webhook_events'
+                    """, Integer.class, schema)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = ?
+                      AND table_name = 'webhook_endpoints'
+                      AND column_name = 'operational_status'
+                    """, Integer.class, schema)).isZero();
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
     private void migrateSchema(DriverManagerDataSource source, String schema, String target) {
         Flyway.configure()
                 .dataSource(source)

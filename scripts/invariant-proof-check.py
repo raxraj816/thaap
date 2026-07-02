@@ -21,6 +21,7 @@ REQUIRED_METADATA = {
     "Failure inventory",
     "Traceability review",
     "Fresh hostile review",
+    "Boundary family review",
     "Custom infrastructure review",
     "Escaped review assessment",
 }
@@ -82,6 +83,8 @@ def validate_matrix(path: pathlib.Path, text: str) -> list[str]:
         errors.append(f"{path}: Traceability review must be PASS")
     if metadata.get("Fresh hostile review") != "PASS":
         errors.append(f"{path}: Fresh hostile review must be PASS")
+    if metadata.get("Boundary family review") != "PASS":
+        errors.append(f"{path}: Boundary family review must be PASS")
     if metadata.get("Custom infrastructure review") not in {"PASS", "NOT_APPLICABLE"}:
         errors.append(
             f"{path}: Custom infrastructure review must be PASS or NOT_APPLICABLE")

@@ -19,7 +19,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class WebhookHostResolver {
 
-    private final Duration timeout;
+    private static final int MAXIMUM_RESOLUTION_TIMEOUT_MILLIS = 60_000;
+
+    private final int timeoutMillis;
     private final ExecutorService executor;
     private final HostLookup hostLookup;
 
@@ -31,15 +33,11 @@ public class WebhookHostResolver {
     }
 
     WebhookHostResolver(Duration timeout, int resolverThreads, HostLookup hostLookup) {
-        if (timeout.isZero() || timeout.isNegative() || timeout.toMillis() < 1
-                || timeout.compareTo(Duration.ofMinutes(1)) > 0) {
-            throw new IllegalArgumentException(
-                    "Webhook target resolution timeout must be between 1 millisecond and 1 minute");
-        }
+        this.timeoutMillis = WebhookDurationValidator.checkedWholeMilliseconds(
+                timeout, "target resolution timeout", MAXIMUM_RESOLUTION_TIMEOUT_MILLIS);
         if (resolverThreads < 1 || resolverThreads > 32) {
             throw new IllegalArgumentException("Webhook resolver threads must be between 1 and 32");
         }
-        this.timeout = timeout;
         this.hostLookup = hostLookup;
         this.executor = new ThreadPoolExecutor(
                 resolverThreads,
@@ -61,7 +59,7 @@ public class WebhookHostResolver {
                     WebhookDeliveryErrorCode.TRANSPORT_ERROR, exception);
         }
         try {
-            return resolution.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            return resolution.get(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
             resolution.cancel(true);
             throw new WebhookTargetResolutionException(

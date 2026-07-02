@@ -12,8 +12,10 @@ chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 
 ## Current Status
 
-Chapter 19 is complete after the 2026-07-01 final migration, protocol-limit,
-signature-freshness, and observability closure pass. Confirm now produces deterministic processor
+Chapter 19 is complete after the 2026-07-02 final pre-merge recovery covering
+request-target encoding, response-head grammar, timeout conversion, migration,
+signature freshness, readiness enforcement, and observability interleavings.
+Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
 capture remains an explicit endpoint operation, and approved uncaptured
@@ -159,7 +161,8 @@ scenarios through public APIs:
   system: immutable event envelopes, endpoint-specific delivery state,
   append-only attempts, AES-256-GCM-protected signing keys, exact-byte HMAC
   signatures, explicit-CIDR SSRF-safe target validation, wall-clock request
-  deadlines, exact HTTP/1.0/1.1 status grammar, complete bounded response-head
+  deadlines, exact positive-millisecond timeout conversion, exact HTTP/1.0/1.1
+  request-target/status/response-field grammar, complete bounded response-head
   acknowledgement, exhaustive retryable DNS-failure classification,
   just-in-time lease recovery, deterministic retries, versioned key rollover,
   cursor-bounded tenant APIs, bounded failure-cause metrics, and bulk
@@ -169,17 +172,23 @@ scenarios through public APIs:
   endpoint and concurrent event creation or retry finalization cannot strand
   claimable work after disable. Timestamp canonicalization matches database
   precision, Host authority remains correct across IPv4/IPv6 resolution, and
-  merchant guidance deduplicates only the signed payload event ID.
+  merchant guidance plus the executable callback fixture deduplicate only the
+  signed payload event ID through durable one-effect state that survives
+  concurrent duplicates and process restart. Disabled worker polls still report
+  the real due backlog without claiming or sending work.
 - V9 honestly migrates legacy endpoints to `REQUIRES_SECRET_ROTATION`, backfills
   legacy delivery envelopes, and enforces same-tenant event/delivery/attempt
   lineage in both H2 and PostgreSQL. It exhausts queued work for already
   disabled legacy endpoints and fails before schema mutation when a V8 row
   claims delivery execution that cannot be reconciled with authoritative
-  attempt evidence.
+  attempt evidence or contains an unsupported legacy event type.
 - Dispatch signatures are minted only after potentially blocking preparation,
   the 64 KiB payload and cumulative 32 KiB response-head limits are enforced
-  at their real runtime boundaries, and disable metrics count only rows actually
-  changed after PostgreSQL predicate re-evaluation.
+  at their real runtime boundaries, every ASCII response-field character class
+  and DNS/socket-duration conversion partition has executable boundary-family
+  proof, Unicode request targets retain exact meaning through percent-encoding,
+  and disable metrics count only rows actually changed after PostgreSQL
+  predicate re-evaluation.
 - `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
   once, retries with the same event and payload, succeeds, and leaves payment
   truth unchanged.

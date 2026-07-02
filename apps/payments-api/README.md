@@ -136,6 +136,12 @@ processing. Only then parse the signed body, validate its `id` as a UUID,
 constant-time compare its exact value with `THAAP-Event-Id`, and record the
 body `id` transactionally with merchant side effects so a lease-recovery
 duplicate is harmless.
+The loopback reference fixture demonstrates that boundary with a SQLite
+uniqueness row keyed by the authenticated body `id` and bound to the exact
+payload hash. The row is the representative merchant business effect: it
+commits before `204`, survives restart, acknowledges an identical duplicate
+without applying the effect again, and rejects reuse of one event ID with
+different payload bytes.
 THAAP mints the attempt timestamp after dispatch preparation has acquired and
 released its database locks, immediately before bounded transport work. A local
 signing failure after preparation is finalized as retryable known-no-send
@@ -149,11 +155,15 @@ followed and response bodies are discarded. Numeric statuses outside
 `100..599`, unsupported/malformed HTTP-version tokens, and control-bearing
 reason phrases are malformed transport failures. The text transport accepts
 HTTP/1.0 and HTTP/1.1 status lines. Bounded informational `1xx` responses are
-consumed and only a final status with a complete, bounded HTTP response head
-determines delivery truth. A status line without the terminating empty line is
-a post-send transport failure, not an acknowledgement. The 32 KiB response-head
-budget includes status lines, headers, CRLF framing, and every informational
-plus final section. Exactly 32 KiB is accepted; the next byte fails.
+consumed and only a final status with syntactically valid response fields and a
+complete, bounded HTTP response head determines delivery truth. Every non-empty
+field line requires an ASCII HTTP-token name, an exact colon separator, and a
+control-safe value; missing-colon, whitespace-name, invalid-token,
+control-bearing, and obsolete-folded fields fail. A status line without the
+terminating empty line is a post-send transport failure, not an
+acknowledgement. The 32 KiB response-head budget includes status lines, fields,
+CRLF framing, and every informational plus final section. Exactly 32 KiB is
+accepted; the next byte fails.
 Both event execution and the socket boundary reject a body larger than 64 KiB
 measured as UTF-8 before outbound connection.
 
@@ -205,11 +215,19 @@ terminal target-policy decisions. Resolver timeout, saturation, interruption,
 unknown host, empty address answers, and resolver infrastructure failures are
 retryable known-no-send outcomes. The request timeout is a wall-clock deadline
 across TLS, write, and response parsing. The claim lease must exceed connect
-plus request timeout.
+plus request timeout. DNS-resolution, connect, and request durations must remain
+positive bounded whole milliseconds after conversion; zero, negative,
+fractional-millisecond, configured-maximum, and conversion-overflow values fail
+startup rather than being truncated into different Java timeout semantics.
 Workers claim one delivery immediately before dispatch rather than leasing a
 waiting batch. These settings are bounded through the `THAAP_WEBHOOK_*`
 configuration in `application.yml`.
-`thaap.webhook.due` measures the remaining claimable backlog after each poll;
+The outbound HTTP request target is derived from the URI ASCII representation:
+Unicode path/query characters are UTF-8 percent-encoded and existing percent
+escapes remain unchanged instead of being replaced during ASCII socket writes.
+`thaap.webhook.due` measures the remaining database backlog after each poll,
+including observe-only polls while execution is disabled; disabled polls never
+claim or send work.
 attempt and terminal counters include lease-recovered `OUTCOME_UNKNOWN` and
 disable/exhaustion paths. Finalization logs include bounded `latencyMs` without
 payload, URL, signature, or secret material.
@@ -562,6 +580,9 @@ claims execution through a non-pending status, nonzero attempt count, retry or
 last-attempt time, delivered time, or last error, V9 fails before creating new
 schema truth. Reset or explicitly remediate that local state; V9 will not
 preserve aggregate success/retry claims without authoritative attempt evidence.
+V8 also had no database event-type constraint. V9 therefore rejects any value
+outside the five canonical Chapter 19 event types before its first DDL
+statement rather than leaving partial local migration state.
 Because Chapter 19's V9 was exercised locally while still uncommitted, a local
 volume that contains an earlier draft V9 may have the same Flyway version but an
 older table shape. Hibernate validation intentionally rejects that false schema.

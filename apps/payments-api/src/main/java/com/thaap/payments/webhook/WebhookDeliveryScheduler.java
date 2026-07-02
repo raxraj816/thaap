@@ -1,6 +1,7 @@
 package com.thaap.payments.webhook;
 
 import java.time.Clock;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,11 +32,13 @@ public class WebhookDeliveryScheduler {
 
     @Scheduled(fixedDelayString = "${thaap.webhook.poll-delay:1s}")
     public void poll() {
-        if (!executionEnabled) {
-            return;
-        }
         try {
-            executor.processDueDeliveries(clock.instant(), batchSize);
+            Instant now = clock.instant();
+            if (executionEnabled) {
+                executor.processDueDeliveries(now, batchSize);
+            } else {
+                executor.refreshDueDeliveries(now);
+            }
         } catch (RuntimeException exception) {
             LOGGER.error("Webhook delivery poll failed", exception);
         }

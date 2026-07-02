@@ -32,6 +32,10 @@ for arg in "$@"; do
   esac
 done
 
+if [[ "$deep_dive_required" == true ]]; then
+  run_tests=true
+fi
+
 if [[ -z "$date_arg" ]]; then
   date_arg="$(date +%F)"
 fi
@@ -131,6 +135,7 @@ echo "- Observability and failure-mode review: logs, metrics, comments, debuggab
 echo "- Test evidence review: riskiest invariant, rollback path, tenant boundary, privacy boundary, idempotency behavior."
 echo "- Forced-interleaving review: dangerous ordering, actual lock/state boundary, production-database postcondition."
 echo "- Protocol-boundary review: authenticated identity, exact bytes, hostname/address identity, persistence precision, reference clients."
+echo "- Boundary-family review: every escaped grammar, numeric, concurrency, dependency, migration, or authorization finding has partition proof plus a real-boundary regression."
 echo "- Custom-infrastructure review: accepted ADR, narrow ownership surface, complete boundary table, and replacement trigger."
 echo "- Severity closure: P0/P1 and frozen-promise P2 findings are fixed and proven; future-scale P2 has TD-NNNN."
 echo "- Escaped-review quality: every escaped finding has ER-NNNN, root cause, resolution evidence, and process correction."
@@ -161,7 +166,7 @@ echo "- Check master plan if scope, sequencing, or invariants changed."
 echo "- Check runtime smoke test evidence if local startup behavior changed."
 echo "- Check that unrelated files are not mixed into the commit."
 echo "- Include adversarial-review status, cheap fixes, true deferrals, and proof in the final handoff."
-echo "- Include invariant-matrix, traceability-pass, and hostile failure-sequence-pass status."
+echo "- Include invariant-matrix, traceability-pass, hostile failure-sequence-pass, and boundary-family-pass status."
 echo "- Include closure-dossier, matrix-provenance, escaped-review, and custom-infrastructure status."
 echo "- Name every new, changed, or resolved TD-NNNN entry in the final handoff."
 

@@ -22,6 +22,7 @@ REQUIRED_METADATA = {
     "Failure inventory",
     "Traceability review",
     "Hostile review",
+    "Boundary family review",
     "Custom infrastructure review",
     "Escaped review assessment",
     "Merge recommendation",
@@ -29,6 +30,7 @@ REQUIRED_METADATA = {
 REQUIRED_SECTIONS = {
     "Observable promises",
     "Failure inventory",
+    "Boundary family evidence",
     "Enforcement boundaries",
     "Exact proof",
     "Migration evidence",
@@ -102,6 +104,8 @@ def validate_closure(
         errors.append(f"{dossier_path}: Traceability review must be PASS")
     if metadata.get("Hostile review") != "PASS":
         errors.append(f"{dossier_path}: Hostile review must be PASS")
+    if metadata.get("Boundary family review") != "PASS":
+        errors.append(f"{dossier_path}: Boundary family review must be PASS")
     if metadata.get("Custom infrastructure review") not in {"PASS", "NOT_APPLICABLE"}:
         errors.append(
             f"{dossier_path}: Custom infrastructure review must be PASS or NOT_APPLICABLE")
@@ -118,6 +122,9 @@ def validate_closure(
     if metadata.get("Matrix provenance") != matrix_metadata.get("Matrix provenance"):
         errors.append(
             f"{dossier_path}: Matrix provenance disagrees with the invariant matrix")
+    if metadata.get("Boundary family review") != matrix_metadata.get("Boundary family review"):
+        errors.append(
+            f"{dossier_path}: Boundary family review disagrees with the invariant matrix")
     if metadata.get("Chapter") != matrix_metadata.get("Chapter"):
         errors.append(f"{dossier_path}: Chapter disagrees with the invariant matrix")
 

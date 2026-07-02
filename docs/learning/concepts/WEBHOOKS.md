@@ -106,6 +106,12 @@ the raw body, then uses the stable `id` inside that authenticated body as the
 deduplication key. `THAAP-Event-Id` must match it, but the header alone is not
 signed and must not drive deduplication.
 
+The reference consumer persists that authenticated body ID and payload hash in
+the same SQLite transaction that represents its business effect. A crash after
+commit but before `204`, a process restart, or concurrent duplicate delivery
+therefore converges to one effect. Reusing the same event ID with different
+signed bytes is rejected instead of silently treated as an ordinary duplicate.
+
 ## Why We Persist Webhook Deliveries
 
 First principle:
@@ -153,6 +159,9 @@ Chapter 19 implements the complete bounded V1 delivery loop:
 - a PostgreSQL lease worker claims each numbered attempt immediately before
   dispatch without holding locks over HTTP
 - exact payload bytes are timestamped and signed with HMAC-SHA256
+- configured path/query values are serialized through the URI ASCII
+  representation so Unicode becomes UTF-8 percent escapes without rewriting
+  existing escapes
 - signature time is read after dispatch preparation so database lock wait does
   not consume the merchant freshness tolerance
 - payload bytes are produced by a JSON serializer, not manual string
@@ -172,8 +181,15 @@ Chapter 19 implements the complete bounded V1 delivery loop:
   is terminal
 - a wall-clock deadline bounds TLS, write, and response parsing
 - malformed numeric statuses fail as transport errors, while bounded
-  informational responses are consumed and the complete bounded final response
-  head is received before classifying the acknowledgement
+  informational responses are consumed and the syntactically valid, complete,
+  bounded final response head is received before classifying the
+  acknowledgement
+- response fields require ASCII HTTP-token names, exact colon separators, and
+  control-safe values; property proof classifies the full ASCII name/value
+  domain instead of only known malformed examples
+- configured DNS/socket durations must survive conversion as positive bounded
+  whole integer milliseconds through one validator; fractional-millisecond
+  values cannot silently become different Java timeout semantics
 - the 64 KiB request limit is enforced at creation, execution, and transport;
   one cumulative exact 32 KiB budget covers every response-head byte
 - endpoint disable is monotonic: exclusive rotation/disable locks plus shared
@@ -191,6 +207,8 @@ attempt table, so only pristine zero-attempt queued rows can be upgraded.
 Aggregate retry/success/failure claims fail before V9 schema creation rather
 than becoming delivery history without attempts. Queued work for an inactive
 legacy endpoint becomes terminal `ENDPOINT_DISABLED`.
+Because V8 also lacked an event-type constraint, unknown legacy event types
+fail the V9 preflight before any table or column is created.
 
 Current implemented endpoints:
 

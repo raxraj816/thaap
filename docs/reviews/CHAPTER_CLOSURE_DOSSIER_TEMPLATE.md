@@ -9,6 +9,7 @@
 - Failure inventory: COMPLETE
 - Traceability review: PENDING
 - Hostile review: PENDING
+- Boundary family review: PENDING
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
 - Merge recommendation: DO_NOT_MERGE
@@ -23,6 +24,13 @@ downstream data consumers may rely on.
 List the shortest rollback, duplicate, stale-worker, network-ambiguity,
 tenant-substitution, secret-compromise, malformed-protocol, migration,
 dependency, and operator-error sequences that could falsify those promises.
+
+## Boundary family evidence
+
+For each escaped or custom-boundary finding, name the full grammar, numeric,
+concurrency, dependency-result, migration-state, or authorization family; list
+its valid and invalid partitions; and link both generative/property proof and a
+real-boundary regression.
 
 ## Enforcement boundaries
 

@@ -774,6 +774,47 @@ class DatabaseMigrationTests {
                 .hasStackTraceContaining("3 row(s)");
     }
 
+    @Test
+    void v9MigrationRejectsUnsupportedLegacyEventTypesBeforeCreatingSchemaTruth() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("v9_webhook_event_type_guard");
+        migrate(upgrade.dataSource(), "8");
+        UUID merchantId = UUID.randomUUID();
+        UUID endpointId = UUID.randomUUID();
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'legacy-webhook-event-guard', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "legacy-webhook-event-guard-" + merchantId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_endpoints (
+                    id, merchant_id, url, active, signing_secret_prefix,
+                    signing_secret_hash, created_at
+                )
+                VALUES (?, ?, 'https://legacy.example/webhooks', TRUE, 'whsec_', ?, CURRENT_TIMESTAMP)
+                """, endpointId, merchantId, "legacy-signing-hash-" + endpointId);
+        upgrade.jdbcTemplate().update("""
+                INSERT INTO webhook_deliveries (
+                    id, merchant_id, webhook_endpoint_id, event_type, resource_id, status,
+                    attempt_count, created_at
+                )
+                VALUES (?, ?, ?, 'legacy.unknown', ?, 'PENDING', 0, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, endpointId, UUID.randomUUID());
+
+        assertThatThrownBy(() -> migrate(upgrade.dataSource(), "9"))
+                .hasStackTraceContaining("V9 cannot migrate unsupported legacy webhook event types")
+                .hasStackTraceContaining("1 row(s)");
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_name = 'webhook_events'
+                """, Integer.class)).isZero();
+        assertThat(upgrade.jdbcTemplate().queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_name = 'webhook_endpoints'
+                  AND column_name = 'operational_status'
+                """, Integer.class)).isZero();
+    }
+
     private String captureMethod(JdbcTemplate source, UUID paymentIntentId) {
         return source.queryForObject("""
                 SELECT capture_method

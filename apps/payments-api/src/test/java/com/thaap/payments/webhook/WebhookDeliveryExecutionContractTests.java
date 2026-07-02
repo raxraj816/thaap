@@ -19,13 +19,19 @@ import com.thaap.payments.payment.PaymentIntentStatus;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -198,6 +204,95 @@ class WebhookDeliveryExecutionContractTests {
                 .flatExtracting(meter -> meter.getId().getTags())
                 .extracting(io.micrometer.core.instrument.Tag::getKey)
                 .doesNotContain("merchant.id", "endpoint.id", "delivery.id", "resource.id", "url");
+    }
+
+    @Test
+    void malformedSuccessfulResponseHeadCannotBecomeDurableSuccess() throws Exception {
+        try (ServerSocket server = new ServerSocket(
+                0, 1, java.net.InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> {
+                try (Socket socket = server.accept()) {
+                    consumeHttpRequest(socket);
+                    socket.getOutputStream().write(
+                            "HTTP/1.1 204 No Content\r\nnot-a-header\r\n\r\n"
+                                    .getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                } catch (IOException ignored) {
+                    // The delivery assertions own the malformed-response outcome.
+                }
+            });
+
+            Merchant merchant = merchantRepository.saveAndFlush(
+                    new Merchant("malformed-response", "thaap_test_malformed_response"));
+            MerchantContext merchantContext = new MerchantContext(
+                    merchant.getId(), "malformed-response", merchant.getApiKeyPrefix());
+            endpointService.create(merchantContext,
+                    "http://127.0.0.1:" + server.getLocalPort() + "/thaap",
+                    Set.of("refund.created"), "malformed-response-endpoint");
+            new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                    deliveryService.createDeliveriesInCurrentTransaction(
+                            merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+            WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
+            Instant attemptAt = Instant.now()
+                    .truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+                    .plusSeconds(1);
+
+            assertThat(executor.processDueDeliveries(attemptAt, 1)).isEqualTo(1);
+
+            WebhookDelivery retry = deliveryRepository.findById(delivery.getId()).orElseThrow();
+            WebhookDeliveryAttempt attempt = attemptRepository
+                    .findByWebhookDeliveryIdAndAttemptNumber(delivery.getId(), 1)
+                    .orElseThrow();
+            assertThat(retry.getStatus()).isEqualTo(WebhookDeliveryStatus.RETRY_SCHEDULED);
+            assertThat(retry.getLastErrorCode()).isEqualTo(
+                    WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+            assertThat(retry.getNextAttemptAt()).isEqualTo(attemptAt.plusSeconds(60));
+            assertThat(attempt.getOutcome()).isEqualTo(WebhookAttemptOutcome.RETRYABLE_FAILURE);
+            assertThat(attempt.getHttpRequestSent()).isTrue();
+            assertThat(attempt.getResponseStatus()).isNull();
+            assertThat(attempt.getErrorCode()).isEqualTo(
+                    WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+        }
+    }
+
+    private void consumeHttpRequest(Socket socket) throws IOException {
+        InputStream input = socket.getInputStream();
+        ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
+        int firstPrevious = -1;
+        int secondPrevious = -1;
+        int thirdPrevious = -1;
+        boolean headerComplete = false;
+        while (headerBytes.size() < 16_384) {
+            int current = input.read();
+            if (current < 0) {
+                throw new IOException("Webhook request ended before its header boundary");
+            }
+            headerBytes.write(current);
+            if (firstPrevious == '\r'
+                    && secondPrevious == '\n'
+                    && thirdPrevious == '\r'
+                    && current == '\n') {
+                headerComplete = true;
+                break;
+            }
+            firstPrevious = secondPrevious;
+            secondPrevious = thirdPrevious;
+            thirdPrevious = current;
+        }
+        if (!headerComplete) {
+            throw new IOException("Webhook request headers exceeded the fixture limit");
+        }
+        String headers = headerBytes.toString(StandardCharsets.US_ASCII);
+        int contentLength = -1;
+        for (String line : headers.split("\r\n")) {
+            if (line.regionMatches(true, 0, "Content-Length:", 0, "Content-Length:".length())) {
+                contentLength = Integer.parseInt(line.substring("Content-Length:".length()).trim());
+            }
+        }
+        if (contentLength < 0 || input.readNBytes(contentLength).length != contentLength) {
+            throw new IOException("Webhook request body was incomplete");
+        }
     }
 
     @Test

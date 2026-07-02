@@ -2146,8 +2146,10 @@ Detailed Phase 2 chapter plan:
 
 4. Chapter 19: Webhook Delivery Execution And Retry Behavior.
 
-   Status: complete after the 2026-07-01 final migration, protocol-limit,
-   signature-freshness, and forced-observability-interleaving closure pass.
+   Status: complete after the 2026-07-02 final pre-merge recovery pass covering
+   exact request-target and response-field grammar, socket-duration conversion,
+   migration preflight, signature freshness, readiness enforcement, and forced
+   observability interleavings.
 
    Completion evidence:
 
@@ -2172,9 +2174,10 @@ Detailed Phase 2 chapter plan:
      and unexpected resolver failures remain retryable known-no-send outcomes;
      only explicit URL/allowlist/address-policy denial is terminal.
    - A final callback acknowledgement is accepted only after the bounded final
-     HTTP response head is structurally complete. A truncated `204` status line
-     and oversized final headers are post-send transport failures, not false
-     success.
+     HTTP response head is syntactically valid and structurally complete.
+     Missing-colon, whitespace-name, invalid-token, control-bearing,
+     obsolete-folded, truncated, and oversized field representations are
+     post-send transport failures, not false success.
    - The status-line parser accepts only HTTP/1.0 or HTTP/1.1 text responses
      with exact status grammar; malformed version tokens remain post-send
      transport failures rather than merchant acknowledgement truth.
@@ -2190,14 +2193,19 @@ Detailed Phase 2 chapter plan:
      retry-scheduled work behind concurrent disable.
    - Protocol-boundary proof covers authenticated payload identity versus
      advisory headers, domain Host authority when DNS selects IPv6, IPv6
-     literals, and payload/database timestamp precision.
+     literals, Unicode path/query percent-encoding without escape rewriting,
+     and payload/database timestamp precision.
    - V9 fails before schema mutation when a V8 delivery claims execution
-     without authoritative attempt evidence, while pristine work on an already
-     disabled legacy endpoint becomes terminal `ENDPOINT_DISABLED` instead of
-     remaining stranded and unclaimable.
+     without authoritative attempt evidence or contains an unsupported legacy
+     event type, while pristine work on an already disabled legacy endpoint
+     becomes terminal `ENDPOINT_DISABLED` instead of remaining stranded and
+     unclaimable.
    - The payload limit is rechecked before secret access and at the socket
      boundary; one cumulative 32 KiB byte budget covers status lines, headers,
      framing, informational responses, and the final response.
+   - One shared DNS/socket duration validator rejects null, negative, zero,
+     fractional-millisecond, configured-maximum, and overflow values before
+     Java future/socket APIs can reinterpret a truncated configuration.
    - Attempt signatures are minted after potentially blocking dispatch
      preparation. A signing failure is classified as retryable known-no-send
      evidence, and a 301-second preparation delay still produces a fresh
@@ -2210,7 +2218,7 @@ Detailed Phase 2 chapter plan:
      both the runtime envelope factory and V9 legacy backfill path, eliminating
      manual JSON concatenation before merchant-verifiable signatures are
      computed.
-   - The Chapter 19 invariant-proof matrix traces 19 payment/fraud, tenant,
+   - The Chapter 19 invariant-proof matrix traces 23 payment/fraud, tenant,
      security, concurrency, data/ML, API/product, observability, and operations
      claims through hostile failure sequences to implementation and proof.
    - The matrix honestly records `RETROACTIVE_RECOVERY`; Chapter 19 is the
@@ -2221,19 +2229,24 @@ Detailed Phase 2 chapter plan:
    - Bounded failure-cause telemetry distinguishes HTTP rejection,
      resolver/transport failure, lease expiry, endpoint disable, target denial,
      and secret failure without merchant, endpoint, URL, or resource tags.
-   - `ER-0001` through `ER-0012` record the findings that escaped earlier
+   - `ER-0001` through `ER-0020` record the findings that escaped earlier
      Chapter 19 reviews, their root-cause categories, resolution evidence, and
-     the process corrections. ADR-0009 bounds the justified custom socket
-     transport and establishes mature infrastructure as the default.
-   - The complete backend suite passes: 215 tests, zero failures, zero skipped.
-     The repository Python suite passes 36 tests, including callback-fixture,
-     provenance, escaped-review, severity, closure, and source-contradiction
-     negative cases. Commit readiness passes with the Chapter 19 invariant
-     matrix and closure dossier named explicitly.
+     process corrections. The executable closure gates now require a
+     boundary-family review so an escaped grammar or representation defect
+     cannot close from one example-level regression. ADR-0009 bounds the
+     justified custom socket transport and establishes mature infrastructure
+     as the default.
+   - The complete backend suite passes: 225 tests, zero failures, zero skipped.
+     The repository Python suite passes 44 tests, including callback-fixture
+     restart/concurrency/payload-conflict proof,
+     mandatory non-trivial test execution, provenance, boundary-family,
+     escaped-review, severity, closure, and source-contradiction negative
+     cases. Commit readiness passes with the Chapter 19 invariant matrix and
+     closure dossier named explicitly and automatically runs both suites.
    - The loopback public-API demo starts against a fresh PostgreSQL 16 schema
      migrated through V9 and verifies a signed `503` then `204`, one stable
-     event/payload across two attempts, and unchanged PaymentIntent and ledger
-     truth.
+     event/payload across two attempts, exactly one durable callback effect, and
+     unchanged PaymentIntent and ledger truth.
 
    First-principles model:
 
@@ -2306,7 +2319,9 @@ Detailed Phase 2 chapter plan:
    - Merchant verification documentation and the callback fixture require a
      bounded timestamp tolerance and constant-time MAC comparison before JSON
      processing, then UUID validation and header agreement before
-     deduplicating on the signed payload `id`.
+     atomically deduplicating on the signed payload `id`. The fixture binds that
+     ID to the payload hash in durable SQLite state, proves restart and
+     concurrent duplicate safety, and rejects conflicting bytes under one ID.
 
    Chapter 19A: Durable event, delivery, and attempt schema.
 
@@ -2442,10 +2457,16 @@ Detailed Phase 2 chapter plan:
      response bodies. Accept only three-digit statuses in `100..599`, consume a
      bounded number of informational responses, and persist only the final
      response status plus a constrained safe error code.
+     Reject every configured duration that cannot remain within
+     `1..Integer.MAX_VALUE` milliseconds after conversion to the Java socket
+     API representation.
    - Enforce the 64 KiB UTF-8 payload limit again before signing and at the
      socket boundary. Enforce one cumulative 32 KiB response-head budget across
      every status line, header line, CRLF, informational section, and final
-     section with exact limit and limit-plus-one proof.
+     section with exact limit and limit-plus-one proof. Every non-empty
+     response-field line must have an ASCII HTTP-token name, exact colon
+     separator, and control-safe value before its status can become delivery
+     truth.
    - Build payloads from a strict allowlist. Raw PAN, CVV, buyer email, buyer
      phone, API keys, signing secrets, internal card fingerprints, idempotency
      keys/hashes, processor secrets, and unrestricted merchant metadata are
@@ -2554,7 +2575,8 @@ Detailed Phase 2 chapter plan:
    Build:
 
    - Add a local loopback callback fixture that verifies the exact body and
-     signature and can deterministically return success or configured failures.
+     signature, atomically applies one durable effect per authenticated event
+     ID, and can deterministically return success or configured failures.
    - Add a repeatable demo covering event creation, first failure, scheduled
      retry, eventual success, attempt history, and unchanged payment/ledger
      truth.
@@ -2594,7 +2616,9 @@ Detailed Phase 2 chapter plan:
    - HMAC signature verification against the exact transmitted bytes, plus
      tampered body, tampered timestamp, wrong endpoint secret, and retry
      signature tests. The executable callback fixture must reject a validly
-     signed body paired with a different `THAAP-Event-Id`.
+     signed body paired with a different `THAAP-Event-Id`, serialize concurrent
+     duplicates to one effect, survive restart, and reject one event ID reused
+     with different payload bytes.
    - Encryption round-trip, wrong-key, ciphertext-tampering, reveal-once,
      rotation, startup-fail-closed, and log/response secret-scan tests.
    - Successful callback moves one delivery to `SUCCEEDED` with one successful
@@ -2621,8 +2645,11 @@ Detailed Phase 2 chapter plan:
      the production database and verifies no replacement attempt is created.
    - Callback timeout, malformed numeric status, informational response, and
      every final HTTP status class follow the documented policy. A final status
-     line without the terminating response-head boundary and a final header
-     section beyond the parser bound fail as post-send transport errors.
+     line followed by malformed field grammar, without the terminating
+     response-head boundary, or beyond the parser bound fails as a post-send
+     transport error. Property proof classifies every ASCII field-name and
+     field-value character, while raw sockets cover the malformed field
+     families at the real boundary.
      Exact-byte tests accept a cumulative 32 KiB response head and reject
      32 KiB plus one across informational and final sections; oversized
      persisted and direct-transport payloads fail before connection.
@@ -2630,6 +2657,9 @@ Detailed Phase 2 chapter plan:
      hostname, and non-HTTPS non-local tests fail before outbound HTTP.
    - Slow-trickle response proof exceeds the per-read timeout pattern but is
      still terminated by the total wall-clock request deadline.
+   - Configuration-domain proof rejects negative, zero, fractional-millisecond,
+     configured-maximum, and overflow DNS/socket durations while accepting
+     exact one-millisecond, resolver-maximum, and socket-maximum boundaries.
    - A non-returning DNS lookup hits the application deadline; resolver thread
      and queue saturation reject additional work without unbounded growth.
    - Resolver deadline/capacity failure finalization records retryable

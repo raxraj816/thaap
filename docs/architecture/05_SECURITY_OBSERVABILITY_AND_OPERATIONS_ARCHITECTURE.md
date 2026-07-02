@@ -290,6 +290,8 @@ Chapter 19 webhook controls:
   as the signing key
 - reveal a raw signing secret only at endpoint creation or rotation
 - require endpoint rotation when legacy rows have only irreversible hashes
+- reject unsupported legacy execution state and event types before V9's first
+  DDL statement
 - serialize rotation/disable with an endpoint write lock, reject rotation of a
   disabled endpoint, and use shared routing locks so disable cannot miss a
   concurrently created delivery
@@ -297,6 +299,9 @@ Chapter 19 webhook controls:
   not string concatenation, because the exact bytes become the merchant
   signature contract
 - execute HTTP after the originating payment transaction commits
+- serialize path and query through the URI ASCII representation so Unicode
+  characters become UTF-8 percent escapes and existing escapes remain stable
+  on the HTTP request line
 - claim one attempt immediately before dispatch with a bounded lease and append
   delivery-attempt evidence
 - bound DNS with an application deadline, fixed resolver capacity, and bounded
@@ -306,7 +311,12 @@ Chapter 19 webhook controls:
   for URL policy and prohibited resolved addresses
 - disable redirects, bound connect time, enforce a wall-clock request deadline
   across TLS/write/read, validate final HTTP status grammar/range, require a
-  complete bounded final response head, and discard response bodies
+  complete bounded final response head, validate every response field as an
+  ASCII HTTP-token name plus exact colon and control-safe value, and discard
+  response bodies
+- use one validator to reject null, negative, zero, fractional-millisecond,
+  configured-maximum, and overflow DNS/socket durations before conversion can
+  truncate them into different Java timeout semantics
 - recheck the 64 KiB UTF-8 body limit before secret access and at transport;
   count status lines, headers, CRLF framing, and every informational/final
   section against one exact cumulative 32 KiB response-head budget
@@ -349,6 +359,14 @@ Webhook delivery is at least once. Merchants verify the exact-body signature,
 then parse the signed payload `id`, require the `THAAP-Event-Id` convenience
 header to agree, and deduplicate on the authenticated body value. THAAP must
 not advertise exactly-once receipt.
+The loopback reference consumer proves the merchant half of that contract with
+a durable SQLite uniqueness transaction binding event ID to payload hash.
+Concurrent or post-restart duplicates acknowledge without applying a second
+effect; conflicting bytes under one ID fail closed.
+
+Worker disable is an execution kill switch, not an observability kill switch.
+Disabled scheduler polls must refresh `thaap.webhook.due` from durable state
+without claiming or sending any delivery.
 
 ## 7. Fraud And Rule Security
 

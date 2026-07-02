@@ -8,6 +8,7 @@
 - Failure inventory: COMPLETE
 - Traceability review: PASS
 - Fresh hostile review: PASS
+- Boundary family review: PASS
 - Custom infrastructure review: PASS
 - Escaped review assessment: COMPLETE
 
@@ -115,10 +116,10 @@
 
 - Lens: API_PRODUCT
 - Invariant: Merchant integration guidance produces a verifiable, replay-safe consumer and delivery reads remain safe, bounded, stable, and tenant scoped.
-- Failure sequence: A merchant follows the README or fixture, deduplicates before signature verification, trusts an unauthenticated header, loses a page boundary, or receives secret/internal fields.
-- Implementation: The service README and fixture require verify-then-parse signed body id plus header agreement; APIs use paired stable cursors and allowlisted response DTOs.
-- Proof: webhook_callback_fixture_tests.py, WebhookEndpointOperationsTests, and cursor traversal contract tests.
-- Adversarial evidence: Changed header identity, malformed signed body id, partial cursor, cross-tenant reads, and unsafe response fields are rejected.
+- Failure sequence: A merchant follows the README or fixture, deduplicates before signature verification, trusts an unauthenticated header, applies the same business effect after a crash/restart or concurrent duplicate, accepts event-ID reuse with changed bytes, loses a page boundary, or receives secret/internal fields.
+- Implementation: The service README and fixture require verify-then-parse signed body id plus header agreement; the fixture atomically persists that authenticated ID and payload hash with its representative business effect before acknowledgement; APIs use paired stable cursors and allowlisted response DTOs.
+- Proof: webhook_callback_fixture_tests.py live HTTP duplicate plus durable restart/concurrency/payload-conflict tests, the public demo's exactly-one-effect assertion, WebhookEndpointOperationsTests, and cursor traversal contract tests.
+- Adversarial evidence: Changed header identity, malformed signed body id, a live `204/204` duplicate exchange, a restart after the first effect, sixteen concurrent duplicates, conflicting bytes under one event ID, partial cursor, cross-tenant reads, and unsafe response fields are rejected or converge to one effect.
 - Status: PASS
 
 ## C19-API-002
@@ -135,30 +136,30 @@
 
 - Lens: API_PRODUCT
 - Invariant: The transport accepts only a final HTTP response status in the protocol and persistence range `100..599`; informational responses do not become delivery outcomes.
-- Failure sequence: An untrusted callback sends a numeric `600` or `999`, a malformed `HTTP/not-http 204` protocol token, a control-bearing reason phrase, or `100 Continue` before a final `204`; THAAP accepts non-HTTP acknowledgement truth or reaches a persistence constraint instead of following retry policy.
-- Implementation: SocketWebhookHttpTransport accepts only HTTP/1.0 or HTTP/1.1 text status lines with exactly three ASCII status digits and a control-safe reason phrase, validates the `100..599` range, consumes bounded informational responses, and returns only the final response status to delivery classification.
-- Proof: WebhookSecurityAndRetryTests.socketTransportRejectsOutOfRangeNumericStatusAsTransportFailure, socketTransportRejectsMalformedHttpVersionAsTransportFailure, socketTransportRejectsControlBearingReasonPhrase, and socketTransportConsumesInformationalResponseBeforeFinalStatus.
-- Adversarial evidence: Raw socket fixtures emit `999`, `HTTP/not-http 204`, a control-bearing reason phrase, and `100` followed by `204`; malformed numeric/version/reason responses become classified post-send transport failures, while the valid informational exchange succeeds only on the final status.
+- Failure sequence: An untrusted callback sends a numeric `600` or `999`, a malformed `HTTP/not-http 204` protocol token, missing/tab/doubled separators, wrong-width or non-digit status code, a control-bearing reason phrase, or `100 Continue` before a final `204`; THAAP accepts non-HTTP acknowledgement truth or reaches a persistence constraint instead of following retry policy.
+- Implementation: SocketWebhookHttpTransport accepts only HTTP/1.0 or HTTP/1.1 text status lines with the required single-space separators, exactly three ASCII status digits, and a control-safe optionally empty reason phrase, validates the `100..599` range, consumes bounded informational responses, and returns only the final response status to delivery classification.
+- Proof: WebhookSecurityAndRetryTests.socketTransportRejectsOutOfRangeNumericStatusAsTransportFailure, socketTransportRejectsMalformedHttpVersionAsTransportFailure, socketTransportRejectsEveryMalformedStatusLineGrammarPartition, socketTransportRejectsControlBearingReasonPhrase, and socketTransportConsumesInformationalResponseBeforeFinalStatus.
+- Adversarial evidence: Raw socket fixtures emit `999`, `HTTP/not-http 204`, six separator/code-shape violations, a control-bearing reason phrase, and `100` followed by `204`; malformed numeric/version/separator/code/reason responses become classified post-send transport failures, while the valid informational exchange succeeds only on the final status.
 - Status: PASS
 
 ## C19-API-004
 
 - Lens: API_PRODUCT
-- Invariant: THAAP records a callback acknowledgement only after receiving a structurally complete, bounded final HTTP response head; a final status line without its terminating header boundary is not a successful delivery.
-- Failure sequence: A callback writes `HTTP/1.1 204 No Content\r\n` and disconnects or stalls before the empty line that completes the response head; THAAP reads the numeric status and incorrectly records `SUCCEEDED`.
-- Implementation: SocketWebhookHttpTransport consumes status lines, header lines, CRLF framing, informational sections, and the final section through one cumulative exact-byte 32 KiB budget and returns the final status only after reading its terminating empty line.
-- Proof: WebhookSecurityAndRetryTests.socketTransportConsumesInformationalResponseBeforeFinalStatus, socketTransportRejectsTruncatedFinalResponseHead, socketTransportBoundsFinalResponseHeaders, and socketTransportUsesOneResponseHeadBudgetAcrossInformationalAndFinalSections.
-- Adversarial evidence: A raw response head of exactly 32768 bytes succeeds; 32769 bytes, a truncated `204`, and informational plus final sections whose cumulative size crosses the budget all become post-send transport failures.
+- Invariant: THAAP records a callback acknowledgement only after receiving a syntactically valid, structurally complete, bounded final HTTP response head; a final status line followed by malformed fields or without its terminating header boundary is not a successful delivery.
+- Failure sequence: A callback writes `HTTP/1.1 204 No Content\r\n` and either disconnects before the empty line or inserts a missing-colon, whitespace-name, invalid-token, obsolete-folded, or control-bearing header line; THAAP reads the numeric status and incorrectly records `SUCCEEDED`.
+- Implementation: SocketWebhookHttpTransport consumes status lines, validates every non-empty field line as an ASCII HTTP token name plus colon and control-safe value, requires the final empty-line boundary, and counts all status lines, fields, CRLF framing, informational sections, and the final section through one cumulative exact-byte 32 KiB budget.
+- Proof: WebhookSecurityAndRetryTests.responseHeaderGrammarClassifiesEveryOctetForTheAsciiContract, socketTransportRejectsMalformedHeaderFieldsBeforeAcknowledgingSuccess, socketTransportConsumesInformationalResponseBeforeFinalStatus, socketTransportRejectsTruncatedFinalResponseHead, socketTransportBoundsFinalResponseHeaders, and socketTransportUsesOneResponseHeadBudgetAcrossInformationalAndFinalSections plus WebhookDeliveryExecutionContractTests.malformedSuccessfulResponseHeadCannotBecomeDurableSuccess.
+- Adversarial evidence: Generative character-partition proof classifies every byte value for the ASCII field-name/value contract; raw sockets prove five malformed ASCII field families, a non-ASCII field octet, and a truncated `204` become post-send transport failures; the integrated executor/database proof shows malformed `204` state becomes retryable `TRANSPORT_ERROR`, never `SUCCEEDED`; an exact 32768-byte valid head succeeds while 32769 bytes fail.
 - Status: PASS
 
 ## C19-OBS-001
 
 - Lens: OBSERVABILITY
 - Invariant: Operators can distinguish success, retry, exhaustion, lease uncertainty, disable, latency, queue age, and actual due backlog without high-cardinality or sensitive tags.
-- Failure sequence: Recovery or bulk disable bypasses normal finalization; a claim changes a pre-counted queued row to DELIVERING while disable waits and terminal metrics overcount; distinct failure causes collapse; or telemetry exposes sensitive/high-cardinality values.
-- Implementation: WebhookMetrics records bounded outcome, status, and error-code enums plus timers; finalization returns committed classification directly; bulk disable performs one bounded update per canonical event type and records only actual affected-row counts after database predicate re-evaluation.
-- Proof: WebhookDeliveryExecutorUnitTests due/log/failure assertions, WebhookDeliveryExecutionContractTests, WebhookEndpointOperationsTests, and WebhookDeliveryPostgreSqlConcurrencyTests.concurrentClaimDoesNotInflateBulkDisableMetrics.
-- Adversarial evidence: The PostgreSQL disable backend is observed waiting on a row changed concurrently to DELIVERING, then updates zero rows and emits zero premature terminal/failure counts; normal causes remain distinguishable without forbidden tags.
+- Failure sequence: Recovery or bulk disable bypasses normal finalization; a claim changes a pre-counted queued row to DELIVERING while disable waits and terminal metrics overcount; execution is intentionally disabled while pending work accumulates and the due gauge remains false-zero; distinct failure causes collapse; or telemetry exposes sensitive/high-cardinality values.
+- Implementation: WebhookMetrics records bounded outcome, status, and error-code enums plus timers; finalization returns committed classification directly; bulk disable performs one bounded update per canonical event type and records only actual affected-row counts after database predicate re-evaluation; disabled scheduler polls refresh due backlog without invoking claim/send work.
+- Proof: WebhookDeliveryExecutorUnitTests due/log/failure assertions, WebhookDeliverySchedulerUnitTests disabled/enabled mode tests, WebhookDeliveryExecutionContractTests, WebhookEndpointOperationsTests, and WebhookDeliveryPostgreSqlConcurrencyTests.concurrentClaimDoesNotInflateBulkDisableMetrics.
+- Adversarial evidence: The PostgreSQL disable backend is observed waiting on a row changed concurrently to DELIVERING, then updates zero rows and emits zero premature terminal/failure counts; a fixed-time disabled poll updates backlog while never processing a delivery; normal causes remain distinguishable without forbidden tags.
 - Status: PASS
 
 ## C19-OBS-002
@@ -199,4 +200,44 @@
 - Implementation: WebhookHostResolver maps timeout, saturation, interruption, unknown host, and unexpected resolver failure to WebhookTargetResolutionException; WebhookTargetPolicy maps empty address answers to the same retryable boundary and reserves WebhookTargetPolicyException for URL, scheme, allowlist, and prohibited-address decisions.
 - Proof: WebhookSecurityAndRetryTests.targetResolutionDeadlineBoundsNonReturningResolver, emptyDnsAnswerIsRetryableResolutionFailureNotTerminalTargetDenial, and unknownHostAndResolverFailuresRemainRetryableKnownNoSendOutcomes plus WebhookDeliveryExecutorUnitTests.resolverCapacityFailureRetriesWithoutTerminalTargetDenialOrHttp.
 - Adversarial evidence: Timeout, saturated capacity, NXDOMAIN/unknown host, empty answer, and injected resolver failure all carry bounded retryable codes; private or non-allowlisted targets remain terminal policy failures; the executor records the retry path with `http_request_sent=false` and no transport interaction.
+- Status: PASS
+
+## C19-OPS-004
+
+- Lens: OPERATIONS_RESILIENCE
+- Invariant: Every accepted DNS-resolution, connect, and request timeout remains a positive bounded whole-millisecond value after conversion from configuration `Duration` to the integer/long milliseconds consumed by Java future, socket, and deadline APIs.
+- Failure sequence: An operator configures a positive sub-millisecond timeout; validation accepts the source duration, conversion truncates it to zero, Java treats the socket timeout as unbounded while the deadline thread sleeps for zero milliseconds, and the documented bounded-worker semantics become representation-dependent.
+- Implementation: WebhookDurationValidator centralizes conversion for SocketWebhookHttpTransport and WebhookHostResolver, rejecting null, negative, zero, fractional-millisecond, configured-maximum violations, and conversion-overflow durations before a resolver worker or socket can start.
+- Proof: WebhookSecurityAndRetryTests.webhookTimeoutConfigurationRejectsEveryUnrepresentableOrUnboundedDuration.
+- Adversarial evidence: The test exercises null, zero, one nanosecond, 999999 nanoseconds, 1.000001 milliseconds, negative one millisecond, exact one millisecond, exact socket maximum, socket maximum plus one nanosecond/millisecond, resolver maximum, resolver maximum plus one millisecond, and Duration-to-millisecond overflow; both socket parameters and the resolver constructor share the validator.
+- Status: PASS
+
+## C19-API-005
+
+- Lens: API_PRODUCT
+- Invariant: The outbound HTTP request target represents the merchant-configured URI path and query exactly after RFC ASCII serialization; Unicode characters are percent-encoded and existing escapes are not rewritten.
+- Failure sequence: A merchant configures `/café?q=naïve`; the transport concatenates Unicode `URI` components and encodes the request head as US-ASCII, substitution turns characters into `?`, and the signed callback reaches a different server route.
+- Implementation: SocketWebhookHttpTransport derives the request path and query from `URI.toASCIIString()` before constructing the ASCII HTTP/1.1 request line.
+- Proof: WebhookSecurityAndRetryTests.socketTransportPercentEncodesUnicodeRequestTargetWithoutChangingExistingEscapes.
+- Adversarial evidence: A real socket captures `POST /caf%C3%A9/already%20encoded?q=na%C3%AFve&literal=%2F HTTP/1.1`; UTF-8 characters are encoded by octet while existing `%20` and `%2F` representations remain stable.
+- Status: PASS
+
+## C19-DATA-002
+
+- Lens: DATA_ML_LINEAGE
+- Invariant: V9 rejects every unsupported legacy webhook event type before creating any new schema or lineage truth.
+- Failure sequence: A V8 row contains an unconstrained unknown event type; execution-state preflight passes, V9 creates tables and mutates endpoints, and only then resource-type mapping fails, leaving partial H2 DDL and an unretryable failed migration.
+- Implementation: V9 preflights the complete legacy event-type domain against the five canonical Chapter 19 types immediately after execution-state validation and before its first DDL statement.
+- Proof: DatabaseMigrationTests.v9MigrationRejectsUnsupportedLegacyEventTypesBeforeCreatingSchemaTruth and PostgreSqlMigrationTests.v9MigrationRejectsUnsupportedLegacyEventTypesBeforeDdlOnPostgreSql.
+- Adversarial evidence: Both databases reject `legacy.unknown`; post-failure metadata proves neither `webhook_events` nor `webhook_endpoints.operational_status` exists, so no V9 product truth preceded rejection.
+- Status: PASS
+
+## C19-OPS-005
+
+- Lens: OPERATIONS_RESILIENCE
+- Invariant: Every non-trivial commit-readiness invocation executes both backend and repository Python suites before it can return success.
+- Failure sequence: A caller supplies the required matrix, dossier, and deep-dive flag but omits optional `--run-tests`; structural checks pass while broken product code is never executed.
+- Implementation: commit-readiness-check.sh makes `--deep-dive-required` imply `run_tests=true` while retaining optional test execution for explicitly trivial work.
+- Proof: CommitReadinessCheckTests.test_non_trivial_readiness_always_runs_backend_and_python_tests.
+- Adversarial evidence: The behavior test invokes the real readiness shell in an isolated repository fixture without `--run-tests` and asserts that both the Maven and Python commands ran before success.
 - Status: PASS

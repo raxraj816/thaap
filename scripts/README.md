@@ -85,11 +85,16 @@ The demo accepts only a loopback API origin and starts a loopback callback
 fixture. The endpoint secret is written to a mode-restricted temporary file and
 removed on exit. The fixture strictly verifies timestamped HMAC signatures,
 derives the deduplication ID from the signed payload, rejects a disagreeing
-`THAAP-Event-Id` header, returns `503` once and then `204`, and writes only
-sanitized event/delivery IDs,
-payload hashes, response statuses, and verification results under
+`THAAP-Event-Id` header, and atomically applies one representative merchant
+effect through a SQLite event-ID/payload-hash uniqueness row. That state
+survives restart, serializes concurrent duplicates, acknowledges identical
+redelivery without a second effect, and rejects conflicting bytes under one
+event ID. The fixture returns `503` once and then `204`, and writes only
+sanitized event/delivery IDs, effect/duplicate booleans, payload hashes,
+response statuses, and verification results under
 `build/reports/webhook-delivery/`. The script waits for the deterministic
-one-minute retry and proves two attempts share one immutable event.
+one-minute retry and proves two attempts share one immutable event and apply
+exactly one durable callback effect.
 
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
@@ -190,7 +195,7 @@ scripts/blog-public-check.sh docs/blog/drafts/YYYY-WNN-short-slug.md
 Run the commit-readiness gate before saying a change is ready to commit:
 
 ```bash
-scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests \
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required \
   --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
   --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
@@ -209,8 +214,13 @@ scripts/chapter-closure-check.py \
   docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
-These scripts enforce honest matrix provenance, immutable `ER-NNNN` findings,
-blocking severity, custom-infrastructure ADR evidence, and agreement between the
-closure dossier, root README, and implementation master plan. They validate the
-shape and consistency of the evidence; the traceability and hostile passes
-remain semantic engineering reviews.
+These scripts enforce honest matrix provenance, a completed boundary-family
+review with explicit dossier evidence, immutable `ER-NNNN` findings, blocking
+severity, custom-infrastructure ADR evidence, and agreement between the closure
+dossier, root README, and implementation master plan. They validate the shape
+and consistency of the evidence; the traceability, boundary-family, and hostile
+passes remain semantic engineering reviews.
+
+`--deep-dive-required` also makes backend and repository Python test execution
+mandatory. `--run-tests` remains available to request the same execution for a
+trivial readiness invocation.

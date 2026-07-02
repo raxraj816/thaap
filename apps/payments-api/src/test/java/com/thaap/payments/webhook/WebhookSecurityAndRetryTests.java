@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 
 class WebhookSecurityAndRetryTests {
@@ -282,6 +283,28 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void socketTransportPercentEncodesUnicodeRequestTargetWithoutChangingExistingEscapes() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            Future<String> requestLine = serverExecutor.submit(() -> captureRequestLineAndRespond(server));
+            java.net.URI uri = new java.net.URI(
+                    "http://127.0.0.1:" + server.getLocalPort()
+                            + "/caf\u00e9/already%20encoded?q=na\u00efve&literal=%2F");
+            WebhookHttpRequest request = new WebhookHttpRequest(
+                    new ValidatedWebhookTarget(uri, InetAddress.getByName("127.0.0.1"),
+                            server.getLocalPort()),
+                    UUID.randomUUID(), UUID.randomUUID(),
+                    "t=1,v1=" + "a".repeat(64), "{}");
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThat(transport.send(request).statusCode()).isEqualTo(204);
+            assertThat(requestLine.get()).isEqualTo(
+                    "POST /caf%C3%A9/already%20encoded?q=na%C3%AFve&literal=%2F HTTP/1.1");
+        }
+    }
+
+    @Test
     void socketTransportRejectsOutOfRangeNumericStatusAsTransportFailure() throws Exception {
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
                 ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
@@ -322,6 +345,50 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void socketTransportRejectsEveryMalformedStatusLineGrammarPartition() throws Exception {
+        List<String> malformedStatusLines = List.of(
+                "HTTP/1.1 204",
+                "HTTP/1.1\t204 No Content",
+                "HTTP/1.1  204 No Content",
+                "HTTP/1.1 20 No Content",
+                "HTTP/1.1 2000 No Content",
+                "HTTP/1.1 2O4 No Content");
+
+        for (String malformedStatusLine : malformedStatusLines) {
+            try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                    ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+                serverExecutor.submit(() -> sendRawResponse(
+                        server, malformedStatusLine + "\r\n\r\n"));
+                SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                        Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+                assertThatThrownBy(() -> transport.send(requestFor(server)))
+                        .as("malformed status line %s", malformedStatusLine)
+                        .isInstanceOf(WebhookTransportException.class)
+                        .satisfies(exception -> {
+                            WebhookTransportException transportException =
+                                    (WebhookTransportException) exception;
+                            assertThat(transportException.getErrorCode())
+                                    .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                            assertThat(transportException.getRequestSent()).isTrue();
+                        });
+            }
+        }
+
+        for (String validStatusLine : List.of("HTTP/1.0 204 ", "HTTP/1.1 204 ")) {
+            try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                    ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+                serverExecutor.submit(() -> sendRawResponse(
+                        server, validStatusLine + "\r\n\r\n"));
+                SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                        Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+                assertThat(transport.send(requestFor(server)).statusCode()).isEqualTo(204);
+            }
+        }
+    }
+
+    @Test
     void socketTransportRejectsControlBearingReasonPhrase() throws Exception {
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
                 ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
@@ -340,6 +407,142 @@ class WebhookSecurityAndRetryTests {
                         assertThat(transportException.getRequestSent()).isTrue();
                     });
         }
+    }
+
+    @Test
+    void responseHeaderGrammarClassifiesEveryOctetForTheAsciiContract() {
+        String tokenPunctuation = "!#$%&'*+-.^_`|~";
+        for (int codePoint = 0; codePoint <= 0xFF; codePoint++) {
+            char candidate = (char) codePoint;
+            if (candidate != ':') {
+                boolean expectedNameCharacter =
+                        (candidate >= 'a' && candidate <= 'z')
+                                || (candidate >= 'A' && candidate <= 'Z')
+                                || (candidate >= '0' && candidate <= '9')
+                                || tokenPunctuation.indexOf(candidate) >= 0;
+                assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine(
+                        "X" + candidate + "Name: value"))
+                        .as("header-name octet 0x%02X", codePoint)
+                        .isEqualTo(expectedNameCharacter);
+            }
+
+            boolean expectedValueCharacter =
+                    candidate == '\t' || (candidate >= 0x20 && candidate <= 0x7E);
+            assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine(
+                    "X-Test: before" + candidate + "after"))
+                    .as("header-value octet 0x%02X", codePoint)
+                    .isEqualTo(expectedValueCharacter);
+        }
+
+        assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine(
+                tokenPunctuation + "Az09:")).isTrue();
+        assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine("No-Colon")).isFalse();
+        assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine("Bad Name: value")).isFalse();
+        assertThat(SocketWebhookHttpTransport.isValidResponseHeaderLine(" continuation")).isFalse();
+    }
+
+    @Test
+    void socketTransportRejectsMalformedHeaderFieldsBeforeAcknowledgingSuccess() throws Exception {
+        List<String> malformedHeaders = List.of(
+                "No-Colon",
+                "Bad Name: value",
+                "Bad(Name: value",
+                "X-Test: before\u0001after",
+                " continuation");
+
+        for (String malformedHeader : malformedHeaders) {
+            try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                    ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+                serverExecutor.submit(() -> sendRawResponse(server,
+                        "HTTP/1.1 204 No Content\r\n" + malformedHeader + "\r\n\r\n"));
+                SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                        Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+                assertThatThrownBy(() -> transport.send(requestFor(server)))
+                        .as("malformed response header %s", malformedHeader)
+                        .isInstanceOf(WebhookTransportException.class)
+                        .satisfies(exception -> {
+                            WebhookTransportException transportException =
+                                    (WebhookTransportException) exception;
+                            assertThat(transportException.getErrorCode())
+                                    .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                            assertThat(transportException.getRequestSent()).isTrue();
+                        });
+            }
+        }
+
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            byte[] nonAsciiField = "HTTP/1.1 204 No Content\r\nX-Test: before\u0080after\r\n\r\n"
+                    .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+            serverExecutor.submit(() -> sendRawResponse(server, nonAsciiField));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            assertThatThrownBy(() -> transport.send(requestFor(server)))
+                    .isInstanceOf(WebhookTransportException.class)
+                    .extracting(exception -> ((WebhookTransportException) exception).getErrorCode())
+                    .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+        }
+    }
+
+    @Test
+    void webhookTimeoutConfigurationRejectsEveryUnrepresentableOrUnboundedDuration() {
+        assertThat(SocketWebhookHttpTransport.checkedMillis(
+                Duration.ofMillis(1), "connect timeout")).isEqualTo(1);
+        assertThat(SocketWebhookHttpTransport.checkedMillis(
+                Duration.ofMillis(Integer.MAX_VALUE), "request timeout"))
+                .isEqualTo(Integer.MAX_VALUE);
+
+        List<Duration> invalidDurations = List.of(
+                Duration.ZERO,
+                Duration.ofNanos(1),
+                Duration.ofNanos(999_999),
+                Duration.ofNanos(1_000_001),
+                Duration.ofMillis(-1),
+                Duration.ofMillis((long) Integer.MAX_VALUE + 1),
+                Duration.ofMillis(Integer.MAX_VALUE).plusNanos(1),
+                Duration.ofSeconds(Long.MIN_VALUE),
+                Duration.ofSeconds(Long.MAX_VALUE));
+        for (Duration invalidDuration : invalidDurations) {
+            assertThatThrownBy(() -> SocketWebhookHttpTransport.checkedMillis(
+                    invalidDuration, "request timeout"))
+                    .as("invalid socket duration %s", invalidDuration)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Webhook request timeout");
+        }
+        assertThatThrownBy(() -> SocketWebhookHttpTransport.checkedMillis(
+                null, "request timeout"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("between 1 millisecond");
+        assertThatThrownBy(() -> new SocketWebhookHttpTransport(
+                Duration.ofNanos(999_999), Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new SocketWebhookHttpTransport(
+                Duration.ofSeconds(1), Duration.ofNanos(999_999)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        WebhookHostResolver maximumResolver = new WebhookHostResolver(
+                Duration.ofMinutes(1), 1, host -> new InetAddress[0]);
+        maximumResolver.close();
+        for (Duration invalidResolutionTimeout : List.of(
+                Duration.ZERO,
+                Duration.ofMillis(-1),
+                Duration.ofNanos(999_999),
+                Duration.ofNanos(1_000_001),
+                Duration.ofMinutes(1).plusMillis(1),
+                Duration.ofSeconds(Long.MIN_VALUE),
+                Duration.ofSeconds(Long.MAX_VALUE))) {
+            assertThatThrownBy(() -> new WebhookHostResolver(
+                    invalidResolutionTimeout, 1, host -> new InetAddress[0]))
+                    .as("invalid resolver duration %s", invalidResolutionTimeout)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Webhook target resolution timeout");
+        }
+        assertThatThrownBy(() -> new WebhookHostResolver(
+                null, 1, host -> new InetAddress[0]))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Webhook target resolution timeout");
     }
 
     @Test
@@ -673,13 +876,72 @@ class WebhookSecurityAndRetryTests {
     }
 
     private void sendRawResponse(ServerSocket server, String response) {
+        sendRawResponse(server, response.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    }
+
+    private void sendRawResponse(ServerSocket server, byte[] response) {
         try (Socket socket = server.accept()) {
             socket.getInputStream().read();
-            socket.getOutputStream().write(
-                    response.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            socket.getOutputStream().write(response);
             socket.getOutputStream().flush();
         } catch (IOException ignored) {
             // The client owns the assertion for malformed or timed-out protocol behavior.
+        }
+    }
+
+    private String captureRequestLineAndRespond(ServerSocket server) throws IOException {
+        try (Socket socket = server.accept()) {
+            java.io.BufferedInputStream input = new java.io.BufferedInputStream(socket.getInputStream());
+            java.io.ByteArrayOutputStream requestLine = new java.io.ByteArrayOutputStream();
+            int previous = -1;
+            while (true) {
+                int current = input.read();
+                if (current < 0) {
+                    throw new IOException("Webhook request ended before its request-line boundary");
+                }
+                if (previous == '\r' && current == '\n') {
+                    break;
+                }
+                requestLine.write(current);
+                previous = current;
+            }
+            java.io.ByteArrayOutputStream headerBytes = new java.io.ByteArrayOutputStream();
+            int firstPrevious = -1;
+            int secondPrevious = -1;
+            int thirdPrevious = -1;
+            while (headerBytes.size() < 16_384) {
+                int current = input.read();
+                if (current < 0) {
+                    throw new IOException("Webhook request ended before its header boundary");
+                }
+                headerBytes.write(current);
+                if (firstPrevious == '\r'
+                        && secondPrevious == '\n'
+                        && thirdPrevious == '\r'
+                        && current == '\n') {
+                    break;
+                }
+                firstPrevious = secondPrevious;
+                secondPrevious = thirdPrevious;
+                thirdPrevious = current;
+            }
+            String headers = headerBytes.toString(java.nio.charset.StandardCharsets.US_ASCII);
+            int contentLength = -1;
+            for (String line : headers.split("\r\n")) {
+                if (line.regionMatches(true, 0, "Content-Length:", 0, "Content-Length:".length())) {
+                    contentLength = Integer.parseInt(
+                            line.substring("Content-Length:".length()).trim());
+                }
+            }
+            if (contentLength < 0 || input.readNBytes(contentLength).length != contentLength) {
+                throw new IOException("Webhook request body was incomplete");
+            }
+            socket.getOutputStream().write(
+                    "HTTP/1.1 204 No Content\r\n\r\n".getBytes(
+                            java.nio.charset.StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            String captured = requestLine.toString(java.nio.charset.StandardCharsets.US_ASCII);
+            return captured.substring(0, captured.length() - 1);
         }
     }
 

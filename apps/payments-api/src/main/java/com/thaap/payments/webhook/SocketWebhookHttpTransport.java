@@ -117,14 +117,7 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
     private WebhookHttpResponse exchange(Socket socket, WebhookHttpRequest request,
             byte[] payload, Boolean[] requestSent) throws IOException {
         URI uri = request.target().uri();
-        String path = uri.getRawPath();
-        if (path == null || path.isEmpty()) {
-            path = "/";
-        }
-        if (uri.getRawQuery() != null) {
-            path += "?" + uri.getRawQuery();
-        }
-        String headers = "POST " + path + " HTTP/1.1\r\n"
+        String headers = "POST " + requestTarget(uri) + " HTTP/1.1\r\n"
                 + "Host: " + hostHeader(request.target()) + "\r\n"
                 + "Content-Type: application/json\r\n"
                 + "User-Agent: THAAP-Webhook/1.0\r\n"
@@ -144,6 +137,18 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
 
         BufferedInputStream input = new BufferedInputStream(socket.getInputStream());
         return new WebhookHttpResponse(readFinalStatusCode(input));
+    }
+
+    private String requestTarget(URI uri) {
+        URI asciiUri = URI.create(uri.toASCIIString());
+        String path = asciiUri.getRawPath();
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+        if (asciiUri.getRawQuery() != null) {
+            path += "?" + asciiUri.getRawQuery();
+        }
+        return path;
     }
 
     private int readFinalStatusCode(BufferedInputStream input) throws IOException {
@@ -166,11 +171,11 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
 
     private int parseStatusCode(String statusLine) throws IOException {
         String[] parts = statusLine.split(" ", 3);
-        if (parts.length < 2
+        if (parts.length != 3
                 || (!parts[0].equals("HTTP/1.0") && !parts[0].equals("HTTP/1.1"))
                 || parts[1].length() != 3
                 || !parts[1].chars().allMatch(character -> character >= '0' && character <= '9')
-                || (parts.length == 3 && !isValidReasonPhrase(parts[2]))) {
+                || !isValidReasonPhrase(parts[2])) {
             throw new IOException("Webhook target returned an invalid HTTP status line");
         }
         try {
@@ -185,8 +190,8 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
     }
 
     private boolean isValidReasonPhrase(String reasonPhrase) {
-        return reasonPhrase.chars().allMatch(character ->
-                character == '\t' || (character >= 0x20 && character <= 0x7E));
+        return reasonPhrase.chars().allMatch(
+                SocketWebhookHttpTransport::isValidResponseTextCharacter);
     }
 
     private void discardResponseHeaders(BufferedInputStream input, ResponseHeadBudget budget) throws IOException {
@@ -195,7 +200,43 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
             if (headerLine.isEmpty()) {
                 return;
             }
+            if (!isValidResponseHeaderLine(headerLine)) {
+                throw new IOException("Webhook target returned an invalid HTTP header field");
+            }
         }
+    }
+
+    static boolean isValidResponseHeaderLine(String headerLine) {
+        int separator = headerLine.indexOf(':');
+        if (separator < 1) {
+            return false;
+        }
+        for (int index = 0; index < separator; index++) {
+            if (!isHeaderNameCharacter(headerLine.charAt(index))) {
+                return false;
+            }
+        }
+        for (int index = separator + 1; index < headerLine.length(); index++) {
+            int character = headerLine.charAt(index);
+            if (!isValidResponseTextCharacter(character)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isValidResponseTextCharacter(int character) {
+        return character == '\t' || (character >= 0x20 && character <= 0x7E);
+    }
+
+    private static boolean isHeaderNameCharacter(char character) {
+        return (character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || switch (character) {
+                    case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~' -> true;
+                    default -> false;
+                };
     }
 
     private String readLine(BufferedInputStream input, ResponseHeadBudget budget) throws IOException {
@@ -244,10 +285,8 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
         return defaultPort ? host : host + ":" + target.port();
     }
 
-    private int checkedMillis(Duration duration, String label) {
-        if (duration.isZero() || duration.isNegative() || duration.toMillis() > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("Webhook " + label + " must be a positive bounded duration");
-        }
-        return Math.toIntExact(duration.toMillis());
+    static int checkedMillis(Duration duration, String label) {
+        return WebhookDurationValidator.checkedWholeMilliseconds(
+                duration, label, Integer.MAX_VALUE);
     }
 }

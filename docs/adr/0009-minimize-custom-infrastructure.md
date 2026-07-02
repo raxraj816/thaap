@@ -38,11 +38,12 @@ heads, bounded wall-clock time, and local-loopback HTTP or allowlisted HTTPS.
 | --- | --- |
 | Destination identity | Connect only to an address returned by the validated, all-address DNS decision |
 | HTTP authority | Preserve the original URI hostname and port; bracket only IPv6 literals |
+| Request target | Serialize the configured path and query through the URI ASCII representation so Unicode is UTF-8 percent-encoded and existing escapes remain stable |
 | TLS identity | Use the original hostname for SNI and certificate verification |
 | Authenticated bytes | After dispatch preparation, sign a fresh timestamp plus the exact persisted UTF-8 payload bytes |
-| Response acceptance | Accept only a complete bounded final HTTP/1.0 or HTTP/1.1 response head with exact status grammar and status `100..599` |
+| Response acceptance | Accept only a complete bounded final HTTP/1.0 or HTTP/1.1 response head with exact status grammar, status `100..599`, ASCII HTTP-token field names, exact colon separators, and control-safe field values |
 | Redirects | Never follow |
-| Limits | 64 KiB payload rechecked at execution/transport; one cumulative 32 KiB response-head budget including status lines, headers, CRLFs, and all informational/final sections; bounded resolver pool/queue; total request deadline |
+| Limits | 64 KiB payload rechecked at execution/transport; one cumulative 32 KiB response-head budget including status lines, fields, CRLFs, and all informational/final sections; bounded resolver pool/queue; connect/request durations that remain positive bounded integer milliseconds; total request deadline |
 | Retry truth | Persist known no-send, known request-write, or post-dispatch unknown evidence |
 | Persistence | Reuse one immutable event payload and timestamp across retries |
 | Operations | Bounded logs/metrics; no URL, payload, signature, secret, PII, PAN, or CVV |

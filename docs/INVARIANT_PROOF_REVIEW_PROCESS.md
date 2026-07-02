@@ -21,6 +21,9 @@ Chapter 19 exposed five repeatable review failures:
    precision.
 5. Chapter completion was declared from test count and broad review passes
    before a line-by-line plan-to-proof reconciliation was durable.
+6. Escaped findings were repaired as individual examples without reopening the
+   full equivalence class of malformed inputs, numeric conversions, or
+   interleavings that produced them.
 
 The correction is a proof system, not another reminder.
 
@@ -68,6 +71,7 @@ Required completion metadata is:
 - `Promise freeze: CONFIRMED`
 - `Failure inventory: COMPLETE`
 - `Traceability review: PASS`
+- `Boundary family review: PASS`
 - `Custom infrastructure review: PASS` or `NOT_APPLICABLE`
 - `Escaped review assessment: COMPLETE`
 
@@ -117,12 +121,35 @@ For every external or persisted protocol, build a boundary table covering:
 - header/body identity agreement
 - hostname, IP literal, resolved address, port, and TLS identity
 - minimum/maximum length, malformed syntax, Unicode, and case behavior
+- request-target percent encoding and existing-escape stability
 - database precision versus serialized precision
 - retry/replay stability
 - reference documentation and fixtures
 
 Executable fixtures must reject unsafe examples. A reference client that teaches
 an insecure integration is a product defect even when the server is correct.
+
+### 4A. Expand Every Escaped Finding To Its Boundary Family
+
+An escaped finding invalidates the proof for its whole input family, not only
+the observed example. Before changing production code:
+
+1. Name the equivalence class: grammar component, numeric conversion,
+   transaction ordering, dependency result, migration state, or authorization
+   substitution.
+2. Enumerate every valid and invalid partition for that class.
+3. Add generative, property-style, or table-driven proof across the partitions,
+   plus a real-boundary regression for the observed failure.
+4. Inspect adjacent conversions and state transitions that share the same
+   parser, representation, lock, or configuration source.
+5. Record `Boundary family review: PASS` only when the family proof passes and
+   the matrix links it to the frozen promise.
+
+For migrations, include every legacy enum/string domain that lacked a database
+constraint and prove rejection occurs before the first DDL statement.
+
+Example-by-example regression tests are necessary but cannot close an escaped
+protocol, concurrency, or configuration finding.
 
 ### 5. Use A Proof Ladder
 
@@ -161,13 +188,15 @@ Run:
 ```bash
 scripts/invariant-proof-check.py
 scripts/escaped-review-check.py
-scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests \
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required \
   --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
   --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
 The explicit matrix argument is mandatory for non-trivial work. Validating old
 matrices without naming the current one is not completion evidence.
+`--deep-dive-required` automatically executes both backend and repository
+Python tests.
 
 The chapter cannot be marked complete when:
 
@@ -175,6 +204,7 @@ The chapter cannot be marked complete when:
 - any invariant is not `PASS`
 - scope is not `FROZEN`
 - either review pass is incomplete
+- the boundary-family review is absent or incomplete
 - an accepted deferral lacks a valid `TD-NNNN`
 - a concurrency claim has only timing-dependent thread-start evidence
 - protocol documentation or fixtures contradict authenticated server truth
@@ -201,6 +231,11 @@ the process correction. Repeated categories must change the process or its
 executable gate. The register measures review-system quality; it is not a
 developer scorecard.
 
+Register the finding before fixing it. A blocking `OPEN` or `IN_PROGRESS`
+finding automatically invalidates any `READY_TO_MERGE`/`MERGE` dossier through
+the closure checker. Reconcile README and master-plan status before making
+another completion claim.
+
 ### 9. Produce A Closure Dossier
 
 Complete `docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md` from
@@ -208,6 +243,7 @@ Complete `docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md` from
 chapter-level claim and must contain:
 
 - observable promises and hostile sequences
+- boundary-family partitions with generative/property and real-boundary proof
 - production enforcement boundaries
 - exact automated proof and results
 - migration and demo evidence

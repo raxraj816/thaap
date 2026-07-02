@@ -48,6 +48,7 @@ def valid_matrix() -> str:
 - Failure inventory: COMPLETE
 - Traceability review: PASS
 - Fresh hostile review: PASS
+- Boundary family review: PASS
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
 """ + "".join(entries)
@@ -76,6 +77,16 @@ class InvariantProofCheckTests(unittest.TestCase):
         errors = checker.validate_matrix(pathlib.Path("matrix.md"), matrix)
 
         self.assertTrue(any("must be PASS" in error for error in errors))
+
+    def test_incomplete_boundary_family_review_fails(self):
+        matrix = valid_matrix().replace(
+            "- Boundary family review: PASS",
+            "- Boundary family review: PENDING")
+
+        errors = checker.validate_matrix(pathlib.Path("matrix.md"), matrix)
+
+        self.assertTrue(any("Boundary family review must be PASS" in error
+                            for error in errors))
 
     def test_missing_proof_and_placeholder_fail(self):
         matrix = valid_matrix().replace(

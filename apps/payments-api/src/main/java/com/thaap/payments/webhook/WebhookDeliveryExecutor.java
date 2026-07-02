@@ -56,8 +56,12 @@ public class WebhookDeliveryExecutor {
             processClaim(claims.getFirst());
             processed++;
         }
-        metrics.setDueDeliveries(deliveryRepository.countDue(laterOf(now, clock.instant())));
+        refreshDueDeliveries(laterOf(now, clock.instant()));
         return processed;
+    }
+
+    public void refreshDueDeliveries(Instant now) {
+        metrics.setDueDeliveries(deliveryRepository.countDue(now));
     }
 
     void processClaim(WebhookDeliveryClaim claim) {

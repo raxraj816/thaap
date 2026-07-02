@@ -33,6 +33,7 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
     public void migrate(Context context) throws Exception {
         Connection connection = context.getConnection();
         rejectUnsupportedLegacyDeliveryExecutionState(connection);
+        rejectUnsupportedLegacyEventTypes(connection);
         createWebhookEventTable(connection);
         hardenWebhookEndpoints(connection);
         createEndpointSubscriptions(connection);
@@ -40,6 +41,30 @@ public class V9__harden_webhook_delivery_execution extends BaseJavaMigration {
         backfillLegacyEvents(connection);
         finishDeliveryConstraints(connection);
         createAttemptTable(connection);
+    }
+
+    private void rejectUnsupportedLegacyEventTypes(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM webhook_deliveries
+                WHERE event_type NOT IN (
+                    'payment_intent.created',
+                    'payment_attempt.created',
+                    'payment_intent.captured',
+                    'payment_intent.canceled',
+                    'refund.created'
+                )
+                """);
+                ResultSet resultSet = statement.executeQuery()) {
+            resultSet.next();
+            long unsupportedRows = resultSet.getLong(1);
+            if (unsupportedRows > 0) {
+                throw new SQLException(
+                        "V9 cannot migrate unsupported legacy webhook event types "
+                                + "without authoritative resource lineage; reset or explicitly remediate "
+                                + unsupportedRows + " row(s) before retrying");
+            }
+        }
     }
 
     private void rejectUnsupportedLegacyDeliveryExecutionState(Connection connection) throws SQLException {

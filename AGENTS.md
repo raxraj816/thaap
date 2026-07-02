@@ -254,6 +254,9 @@ A green suite is necessary but never sufficient for completion:
   and executable reference-client or fixture validation
 - documentation, fixtures, scripts, migrations, configuration, and demo paths
   are reviewed as product/security code
+- an escaped finding reopens its entire boundary family; enumerate valid and
+  invalid partitions and add generative, property-style, or table-driven proof
+  rather than closing only the observed example
 - completion requires a plan-to-implementation-to-proof traceability pass and a
   separate hostile failure-sequence pass
 - every matrix entry must be `PASS`; every real deferral must be registered
@@ -276,6 +279,9 @@ For every non-trivial chapter or implementation slice:
 2. Build the failure inventory before implementation from rollback, duplicate,
    stale-worker, network-ambiguity, tenant-substitution, secret-compromise,
    malformed-protocol, migration, dependency, and operator-error sequences.
+   If a finding escapes, reopen the affected grammar, numeric-conversion,
+   concurrency, dependency-result, migration-state, or authorization family and
+   prove every meaningful partition before re-closing the promise.
 3. Prove each claim at its real enforcement boundary. A mock cannot certify a
    PostgreSQL concurrency claim, a unit test cannot certify a migration, and a
    parser test cannot certify a hostile socket exchange.

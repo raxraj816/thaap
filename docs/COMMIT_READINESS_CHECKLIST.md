@@ -16,6 +16,9 @@ Use this before saying a change is ready to commit.
   failure sequences, then updated with exact implementation and proof.
 - The matrix records honest provenance. `RETROACTIVE_RECOVERY` is never
   rewritten as `PRE_IMPLEMENTATION`.
+- The matrix records `Boundary family review: PASS`; escaped grammar, numeric,
+  concurrency, dependency, migration, and authorization findings have
+  partition proof plus a real-boundary regression.
 - `scripts/invariant-proof-check.py` passes with every required lens and entry
   at `PASS`.
 - `scripts/escaped-review-check.py` passes, and every blocking-severity escaped
@@ -28,7 +31,8 @@ Use this before saying a change is ready to commit.
   vague resolution targets, stale reviews, or dangling debt references.
 - Daily learning note exists for non-trivial implementation days.
 - Deep dive exists for non-trivial implementation days.
-- Relevant tests were run, or the reason they could not be run is recorded.
+- Relevant tests were run. Non-trivial readiness executes backend and
+  repository Python suites automatically.
 - Runtime smoke test was run when local startup behavior changed.
 - Senior Staff adversarial review gate completed before handoff.
 
@@ -60,6 +64,8 @@ Before committing, answer:
     escaped finding and what process changed?
 17. Does the closure dossier reconcile promises, evidence, debt, demo,
     operations, and merge recommendation without contradicting source docs?
+18. Did every escaped finding reopen and prove its entire boundary family
+    instead of adding only the observed regression example?
 
 ## Senior Staff Adversarial Review Gate
 
@@ -132,11 +138,12 @@ scripts/commit-readiness-check.sh YYYY-MM-DD
 For non-trivial implementation days, include:
 
 ```bash
-scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required --run-tests \
+scripts/commit-readiness-check.sh YYYY-MM-DD --deep-dive-required \
   --invariant-matrix=docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
   --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
 For non-trivial work, omitting either current artifact fails the gate. This
 prevents an old verified matrix or dossier from masking an incomplete current
-chapter.
+chapter. `--deep-dive-required` also runs both test suites; `--run-tests` is
+only needed when a trivial invocation should run them too.

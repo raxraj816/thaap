@@ -39,6 +39,7 @@ def dossier(status: str = "READY_TO_MERGE", recommendation: str = "MERGE") -> st
 - Failure inventory: COMPLETE
 - Traceability review: PASS
 - Hostile review: PASS
+- Boundary family review: PASS
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
 - Merge recommendation: {recommendation}
@@ -52,6 +53,7 @@ def matrix() -> str:
 
 - Chapter: Chapter 19
 - Matrix provenance: RETROACTIVE_RECOVERY
+- Boundary family review: PASS
 """
 
 
@@ -94,6 +96,26 @@ class ChapterClosureCheckTests(unittest.TestCase):
         errors = self.validate(dossier(), register("IN_PROGRESS", "P2"))
 
         self.assertTrue(any("blocking escaped finding ER-0001" in error
+                            for error in errors))
+
+    def test_incomplete_boundary_family_review_fails(self):
+        incomplete = dossier().replace(
+            "- Boundary family review: PASS",
+            "- Boundary family review: PENDING")
+
+        errors = self.validate(incomplete)
+
+        self.assertTrue(any("Boundary family review must be PASS" in error
+                            for error in errors))
+
+    def test_missing_boundary_family_evidence_section_fails(self):
+        incomplete = dossier().replace(
+            "## Boundary family evidence\n\n"
+            "Concrete reviewed evidence for Boundary family evidence.\n", "")
+
+        errors = self.validate(incomplete)
+
+        self.assertTrue(any("missing section '## Boundary family evidence'" in error
                             for error in errors))
 
     def test_source_of_truth_status_contradiction_fails(self):

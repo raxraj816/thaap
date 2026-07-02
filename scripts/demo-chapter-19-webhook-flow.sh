@@ -121,6 +121,10 @@ if len(evidence) != 2 or [item["responseStatus"] for item in evidence] != [503, 
     raise SystemExit("Chapter 19 demo did not observe deterministic failure then success")
 if not all(item["signatureVerified"] for item in evidence):
     raise SystemExit("Chapter 19 callback signature verification failed")
+if [item["businessEffectApplied"] for item in evidence] != [False, True]:
+    raise SystemExit("Chapter 19 callback did not apply exactly one durable business effect")
+if any(item["duplicate"] for item in evidence):
+    raise SystemExit("Chapter 19 failure-then-success flow was incorrectly classified as a duplicate")
 if len({item["eventId"] for item in evidence}) != 1:
     raise SystemExit("Chapter 19 retry changed immutable event identity")
 if len({item["payloadSha256"] for item in evidence}) != 1:
@@ -137,6 +141,7 @@ print(json.dumps({
     "paymentIntentId": os.environ["PAYMENT_INTENT_ID"],
     "receiverStatuses": [item["responseStatus"] for item in evidence],
     "signatureVerified": True,
+    "businessEffectCount": sum(item["businessEffectApplied"] for item in evidence),
     "attemptCount": len(attempts),
     "paymentStatusUnchanged": os.environ["FINAL_PAYMENT_STATUS"],
     "ledgerUnchanged": True,
