@@ -34,10 +34,12 @@ stub `ALLOW` decision and `features_v1` snapshot, calls the simulator, persists
 an authorization row, and maps the result to PaymentAttempt and PaymentIntent
 state.
 
-Approved authorizations move the PaymentAttempt to `AUTHORIZED` and the
-PaymentIntent to `REQUIRES_CAPTURE`. Retryable declines move the PaymentAttempt
-to `DECLINED` and the PaymentIntent to `REQUIRES_PAYMENT_METHOD`. 3DS-required
-results move both objects to action-required states.
+Approved authorizations move the PaymentAttempt to `AUTHORIZED`. An approved
+`MANUAL` PaymentIntent moves to `REQUIRES_CAPTURE`; an approved `AUTOMATIC`
+PaymentIntent atomically moves to `CAPTURED` with balanced ledger, audit, and
+webhook truth. Retryable declines move the PaymentAttempt to `DECLINED` and the
+PaymentIntent to `REQUIRES_PAYMENT_METHOD`. Processor 3DS-required results move
+both objects to action-required states.
 
 `requested_amount` is what THAAP asked the processor to authorize.
 `authorized_amount` is what the processor actually allowed to be reserved.
@@ -56,6 +58,29 @@ tokenized boundary created during PaymentMethod creation. Its in-memory catalog
 uses an explicit `card_bin:card_last4` key; that makes the test simulator
 deterministic without teaching the production system to depend on raw card
 numbers.
+
+## Chapter 20 Simulator Fixture Contract
+
+These values are simulator-only test fixtures. Never submit a real card number
+to THAAP. PaymentMethod creation accepts each value transiently, stores only
+safe tokenized metadata, and the processor catalog resolves the stored
+`card_bin:card_last4` pair.
+
+| Test card | Fixture | Processor response | Verification / 3DS result | PaymentAttempt | Manual PaymentIntent |
+| --- | --- | --- | --- | --- | --- |
+| `4999990000000001` | `approved` | `APPROVED` | CVC/AVS pass; 3DS not required | `AUTHORIZED` | `REQUIRES_CAPTURE` |
+| `4999990000000002` | `issuer_decline` | `ISSUER_DECLINE` | CVC/AVS pass | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000003` | `insufficient_funds` | `INSUFFICIENT_FUNDS` | CVC/AVS pass | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000004` | `suspected_fraud` | `SUSPECTED_FRAUD` | CVC/AVS pass | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000005` | `cvc_failure` | `CVC_FAILURE` | CVC fails | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000006` | `avs_line1_failure` | `AVS_LINE1_FAILURE` | AVS line1 fails | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000007` | `avs_postal_failure` | `AVS_POSTAL_FAILURE` | AVS postal fails | `DECLINED` | `REQUIRES_PAYMENT_METHOD` |
+| `4999990000000008` | `three_ds_required` | `THREE_DS_REQUIRED` | 3DS required | `REQUIRES_ACTION` | `REQUIRES_ACTION` |
+| Any other valid simulator card, including `4242424242424242` | `unknown_default_approval` | `APPROVED` | CVC/AVS pass; 3DS not required | `AUTHORIZED` | `REQUIRES_CAPTURE` |
+
+The `SUSPECTED_FRAUD` response is issuer/processor truth, not a THAAP fraud
+decision. Until Phase 3 activates real rules, the independently persisted
+FraudDecision remains `ALLOW` with `RULES_NOT_ENABLED` for every fixture.
 
 ## Failure Modes
 
@@ -84,6 +109,7 @@ one FraudDecision and one FeatureSnapshot per successful confirm attempt.
 
 ## What Remains To Build
 
-Automatic capture, manual capture, cancel/void, refunds, ledger entries,
-processor events, audit logs, real rules, and model scoring are intentionally
-deferred to their owner chapters.
+The canonical Phase 2 processor, capture, cancel/void, full-refund, ledger,
+audit, and webhook boundaries are complete. Real fraud rules, 3DS challenge
+completion, disputes, partial money accounting, real PSP integration, and
+model scoring remain owned by later phases.

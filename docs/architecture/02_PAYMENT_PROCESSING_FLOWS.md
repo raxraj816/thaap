@@ -587,7 +587,8 @@ The exact accounting model can evolve, but each transaction group must balance f
 
 ## 17. Processor Simulator Outcomes
 
-Required deterministic outcomes:
+Chapter 20 centralizes the implemented deterministic outcomes in one immutable
+catalog keyed by safe stored BIN-plus-last4 metadata:
 
 - approval
 - issuer decline
@@ -597,8 +598,10 @@ Required deterministic outcomes:
 - AVS line1 failure
 - AVS postal code failure
 - 3DS required
-- 3DS success
-- 3DS failure
+
+Any other valid simulator card follows explicit default approval. 3DS success
+and failure require a later challenge-completion boundary and are not represented
+as if they already occurred.
 
 Simulator response should include:
 
@@ -611,6 +614,12 @@ Simulator response should include:
 - 3DS result
 - reason code
 - latency simulation, optional
+
+The public fixture table lives in
+[`PROCESSOR_AUTHORIZATION.md`](../learning/concepts/PROCESSOR_AUTHORIZATION.md).
+A processor `SUSPECTED_FRAUD` decline is issuer/network evidence; it does not
+become a THAAP FraudDecision. Phase 3 owns the first real `BLOCK`,
+`REQUEST_3DS`, and `REVIEW` decisions.
 
 ## 18. Failure Modes
 

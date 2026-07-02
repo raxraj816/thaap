@@ -96,6 +96,24 @@ response statuses, and verification results under
 one-minute retry and proves two attempts share one immutable event and apply
 exactly one durable callback effect.
 
+Run the Chapter 20 complete deterministic processor-catalog demo:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+scripts/demo-chapter-20-processor-catalog.py
+```
+
+The runner accepts only a loopback API origin and rejects every HTTP redirect
+before a follow-up request can forward API or bootstrap credentials. It creates
+fresh merchant-owned objects through public APIs for mapped approval, six
+decline/verification outcomes, 3DS-required, and unknown-card default approval.
+It fails closed unless PaymentIntent, PaymentAttempt, Authorization,
+FraudDecision, FeatureSnapshot, zero-ledger, webhook-delivery, and read-only
+local PostgreSQL audit evidence agree. Its atomic owner-only report under
+`build/reports/processor-catalog/` identifies fixtures by safe labels and
+excludes submitted card values, buyer PII, API keys, signing secrets,
+idempotency material, and card fingerprints.
+
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash

@@ -347,3 +347,20 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Operational-signal proof must cross every supported operating mode, especially fail-safe disabled, degraded, and recovery modes, with tests showing both metric truth and absence of prohibited side effects.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-02
+
+## ER-0021
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 20
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-02
+- Escaped gate: Post-closure Chapter 20 final merge review
+- Invariant: The loopback-only Chapter 20 demo never creates a follow-up request after an HTTP redirect, so API keys and the admin bootstrap token cannot leave the validated origin through redirect handling.
+- Finding: `urllib.request.urlopen` followed redirects automatically and copied custom request headers to the redirected request; a loopback response could therefore forward `X-Api-Key` and `X-Admin-Bootstrap-Token` to a different origin despite the initial URL validation.
+- Why prior review missed it: The origin tests validated only the caller-supplied URL string and never crossed that boundary with the HTTP client's effective-destination behavior or a real redirecting server.
+- Resolution evidence: `ApiClient` now uses a dedicated `RejectRedirectHandler` that raises before a redirected request is created. `test_api_client_rejects_every_redirect_without_forwarding_credentials` sends credential-bearing requests through real loopback servers for 301, 302, 303, 307, and 308 and proves the redirect target receives zero requests. A post-fix fresh PostgreSQL V1-to-V9 Chapter 20 run also reconciles all nine outcomes and publishes a sanitized owner-only report through the hardened client.
+- Process correction: Any client described as loopback-only or origin-restricted must inventory redirects as a separate effective-destination boundary and prove with real servers that authentication headers and bodies are never forwarded.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-02

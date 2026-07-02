@@ -12,9 +12,13 @@ chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 
 ## Current Status
 
-Chapter 19 is complete after the 2026-07-02 final pre-merge recovery covering
-request-target encoding, response-head grammar, timeout conversion, migration,
-signature freshness, readiness enforcement, and observability interleavings.
+Chapter 20 is complete and the canonical Phase 2 simulator boundary is closed.
+The deterministic processor catalog, capture, cancel/void, full refund, ledger,
+audit, and signed at-least-once webhook paths now have one integrated
+pre-implementation proof matrix and closure dossier. Chapter 19 remains
+complete after the 2026-07-02 final pre-merge recovery covering request-target
+encoding, response-head grammar, timeout conversion, migration, signature
+freshness, readiness enforcement, and observability interleavings.
 Confirm now produces deterministic processor
 authorization outcomes, durable fraud lineage, and safe audit records;
 `AUTOMATIC` capture completes atomically during approved confirm, `MANUAL`
@@ -192,6 +196,12 @@ scenarios through public APIs:
 - `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
   once, retries with the same event and payload, succeeds, and leaves payment
   truth unchanged.
+- The immutable Chapter 20 processor catalog names mapped approval, six
+  decline/verification outcomes, 3DS-required, and explicit unknown-card
+  default approval without coupling processor truth to FraudDecision truth.
+- `scripts/demo-chapter-20-processor-catalog.py` drives all nine outcome
+  partitions through loopback public APIs, reconciles processor/fraud/audit/
+  webhook/ledger evidence, and writes only sanitized atomic evidence.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
   -> payment method -> PaymentIntent -> confirm -> fetch attempt/fraud detail
   demo against a running API.
