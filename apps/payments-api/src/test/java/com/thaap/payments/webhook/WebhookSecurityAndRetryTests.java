@@ -18,7 +18,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -113,6 +115,7 @@ class WebhookSecurityAndRetryTests {
                         + ",\"createdAt\":\"2026-06-28T10:15:30Z\""
                         + ",\"apiVersion\":\"v1\""
                         + ",\"merchantId\":\"00000000-0000-0000-0000-000000000019\""
+                        + ",\"trafficOrigin\":\"MERCHANT_API\""
                         + ",\"data\":{\"object\":{\"id\":\"00000000-0000-0000-0000-000000000119\""
                         + ",\"type\":\"REFUND\"}}}");
         JsonNode payload = OBJECT_MAPPER.readTree(event.getPayload());
@@ -121,12 +124,15 @@ class WebhookSecurityAndRetryTests {
         assertThat(payload.get("createdAt").asText()).isEqualTo("2026-06-28T10:15:30Z");
         assertThat(payload.get("apiVersion").asText()).isEqualTo("v1");
         assertThat(payload.get("merchantId").asText()).isEqualTo(merchantId.toString());
+        assertThat(payload.get("trafficOrigin").asText()).isEqualTo("MERCHANT_API");
         assertThat(payload.path("data").path("object").get("id").asText())
                 .isEqualTo(resourceId.toString());
         assertThat(payload.path("data").path("object").get("type").asText()).isEqualTo("REFUND");
         List<String> fieldNames = new ArrayList<>();
         payload.fieldNames().forEachRemaining(fieldNames::add);
-        assertThat(fieldNames).containsExactly("id", "type", "createdAt", "apiVersion", "merchantId", "data");
+        assertThat(fieldNames).containsExactly(
+                "id", "type", "createdAt", "apiVersion", "merchantId",
+                "trafficOrigin", "data");
         assertThat(event.getPayloadSha256()).isEqualTo(SecretHasher.sha256(event.getPayload()));
         assertThat(event.getPayload()).doesNotContain(
                 "email", "phone", "card", "pan", "cvv", "fingerprint",
@@ -794,16 +800,21 @@ class WebhookSecurityAndRetryTests {
     @Test
     void enabledExecutionFailsClosedWhenPersistedEndpointKeyVersionIsUnavailable() {
         WebhookEndpointRepository endpointRepository = mock(WebhookEndpointRepository.class);
-        when(endpointRepository.findDistinctSecretKeyVersions(WebhookEndpointStatus.ACTIVE))
-                .thenReturn(java.util.List.of("retired-v0"));
+        Instant validationTime = Instant.parse("2026-06-28T10:00:00Z");
+        when(endpointRepository.findRequiredSecretKeyVersions(validationTime))
+                .thenReturn(java.util.List.of(
+                        "retired-current-v0",
+                        "retired-previous-v0",
+                        "retired-replay-v0"));
         WebhookExecutionConfiguration configuration = new WebhookExecutionConfiguration(
                 true, new WebhookSecretCipher(ENCODED_KEY, "current-v1", new SecureRandom()),
                 new WebhookTargetPolicy(true, Set.of()), endpointRepository,
+                Clock.fixed(validationTime, ZoneOffset.UTC),
                 Duration.ofSeconds(30), Duration.ofSeconds(2), Duration.ofSeconds(5));
 
         assertThatThrownBy(configuration::validate)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("retired-v0");
+                .hasMessageContaining("retired-");
     }
 
     @Test

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,9 +47,11 @@ public class WebhookController {
     @PostMapping("/webhook_endpoints")
     @ResponseStatus(HttpStatus.CREATED)
     public WebhookEndpointResponse createEndpoint(MerchantContext merchantContext,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateWebhookEndpointRequest request, HttpServletRequest httpServletRequest) {
         WebhookEndpointService.EndpointSecretResult result = endpointService.create(
-                merchantContext, request.url(), request.enabledEvents(), requestIdFrom(httpServletRequest));
+                merchantContext, idempotencyKey, request.url(), request.enabledEvents(),
+                requestIdFrom(httpServletRequest));
         return WebhookEndpointResponse.from(result);
     }
 
@@ -126,12 +129,15 @@ public class WebhookController {
 
     public record WebhookEndpointResponse(UUID id, UUID merchantId, String url,
             WebhookEndpointStatus operationalStatus, boolean active, String signingSecretPrefix,
+            String previousSigningSecretPrefix, Instant previousSigningSecretExpiresAt,
             String signingSecret, Set<String> enabledEvents) {
 
         static WebhookEndpointResponse from(WebhookEndpointService.EndpointSecretResult result) {
             WebhookEndpoint endpoint = result.endpoint();
             return new WebhookEndpointResponse(endpoint.getId(), endpoint.getMerchantId(), endpoint.getUrl(),
                     endpoint.getOperationalStatus(), endpoint.isActive(), endpoint.getSigningSecretPrefix(),
+                    endpoint.getPreviousSigningSecretPrefix(),
+                    endpoint.getPreviousSigningSecretExpiresAt(),
                     result.rawSigningSecret(), result.enabledEvents());
         }
 
@@ -139,6 +145,8 @@ public class WebhookController {
             WebhookEndpoint endpoint = result.endpoint();
             return new WebhookEndpointResponse(endpoint.getId(), endpoint.getMerchantId(), endpoint.getUrl(),
                     endpoint.getOperationalStatus(), endpoint.isActive(), endpoint.getSigningSecretPrefix(),
+                    endpoint.getPreviousSigningSecretPrefix(),
+                    endpoint.getPreviousSigningSecretExpiresAt(),
                     null, result.enabledEvents());
         }
     }
@@ -159,12 +167,13 @@ public class WebhookController {
     }
 
     public record WebhookDeliveryDetailResponse(WebhookDeliveryResponse delivery, UUID eventId,
-            String eventType, UUID resourceId, String resourceType, String apiVersion, Instant occurredAt) {
+            String eventType, UUID resourceId, String resourceType, String apiVersion,
+            com.thaap.payments.tenant.TrafficOrigin trafficOrigin, Instant occurredAt) {
 
         static WebhookDeliveryDetailResponse from(WebhookDelivery delivery, WebhookEvent event) {
             return new WebhookDeliveryDetailResponse(WebhookDeliveryResponse.from(delivery), event.getId(),
                     event.getEventType(), event.getResourceId(), event.getResourceType(), event.getApiVersion(),
-                    event.getOccurredAt());
+                    event.getTrafficOrigin(), event.getOccurredAt());
         }
     }
 

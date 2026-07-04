@@ -169,6 +169,7 @@ class RefundRollbackTests {
 
         mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, apiKey)
+                        .header("Idempotency-Key", "webhook-refund-rollback-" + suffix)
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

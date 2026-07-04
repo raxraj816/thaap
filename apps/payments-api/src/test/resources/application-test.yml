@@ -26,6 +26,8 @@ management:
 thaap:
   admin:
     bootstrap-token: test-admin-bootstrap-token
+  scenario-runner:
+    token: test-scenario-runner-token
   security:
     hash-pepper: test-hash-pepper-for-sensitive-value-contracts
   fraud:
@@ -35,6 +37,7 @@ thaap:
     execution-enabled: false
     secret-encryption-key: dGVzdC13ZWJob29rLWtleS0zMi1ieXRlcy0xMjM0NTY=
     secret-key-version: test-v1
+    secret-rotation-grace: 15m
     secret-decryption-keys:
     allowed-hosts:
     batch-size: 20
@@ -43,4 +46,7 @@ thaap:
     request-timeout: 5s
     target-resolution-timeout: 2s
     resolver-threads: 2
-    poll-delay: 1s
+    # Contract tests invoke scheduler behavior directly. A long test-only delay
+    # prevents cached Spring contexts from polling a Testcontainers database
+    # after that class-owned container has shut down.
+    poll-delay: 24h

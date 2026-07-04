@@ -12,6 +12,7 @@ public class DatabaseCleaner {
             "webhook_deliveries",
             "webhook_events",
             "webhook_endpoint_event_subscriptions",
+            "webhook_endpoint_creation_records",
             "ledger_entries",
             "refunds",
             "authorization_voids",
@@ -39,5 +40,11 @@ public class DatabaseCleaner {
         for (var table : TABLES) {
             jdbcTemplate.update("DELETE FROM " + table);
         }
+        jdbcTemplate.update("""
+                UPDATE webhook_dispatch_cursor
+                SET last_merchant_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE singleton_id = 1
+                """);
     }
 }

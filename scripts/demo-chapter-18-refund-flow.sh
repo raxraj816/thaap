@@ -96,7 +96,8 @@ payment_method_id="$(json_get "$payment_method_response" "id")"
 
 post_json "/webhook_endpoints" \
   "{\"url\":\"https://chapter18-${RUN_ID}.example/webhooks\"}" \
-  -H "X-Api-Key: ${api_key}" >/dev/null
+  -H "X-Api-Key: ${api_key}" \
+  -H "Idempotency-Key: chapter18-${RUN_ID}-webhook-endpoint" >/dev/null
 
 payment_intent_response="$(post_json "/payment_intents" \
   "{\"customerId\":\"${customer_id}\",\"amount\":4200,\"currency\":\"USD\",\"captureMethod\":\"AUTOMATIC\"}" \

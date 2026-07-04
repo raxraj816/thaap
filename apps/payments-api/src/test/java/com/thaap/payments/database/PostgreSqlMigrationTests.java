@@ -17,7 +17,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -27,7 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class PostgreSqlMigrationTests {
 
     @Container
-    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -504,6 +504,153 @@ class PostgreSqlMigrationTests {
                       AND table_name = 'webhook_endpoints'
                       AND column_name = 'operational_status'
                     """, Integer.class, schema)).isZero();
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v13RepairsPreviouslyAppliedWebhookAttemptSchemaWithoutLosingSendTruth() {
+        String schema = "v13_attempt_repair_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "12");
+
+        try {
+            upgradeJdbcTemplate.execute("""
+                    ALTER TABLE %s.webhook_delivery_attempts
+                    DROP CONSTRAINT ck_webhook_delivery_attempts_dispatch_truth
+                    """.formatted(schema));
+            upgradeJdbcTemplate.execute("""
+                    ALTER TABLE %s.webhook_delivery_attempts
+                    DROP COLUMN dispatch_started_at
+                    """.formatted(schema));
+            upgradeJdbcTemplate.execute("""
+                    ALTER TABLE %s.webhook_delivery_attempts
+                    ALTER COLUMN http_request_sent SET NOT NULL
+                    """.formatted(schema));
+            UUID merchantId = UUID.randomUUID();
+            UUID endpointId = UUID.randomUUID();
+            UUID eventId = UUID.randomUUID();
+            UUID resourceId = UUID.randomUUID();
+            UUID deliveryId = UUID.randomUUID();
+            UUID attemptId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    ) VALUES (?, 'v13-repair', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "v13-repair-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints (
+                        id, merchant_id, url, operational_status,
+                        signing_secret_prefix, signing_secret_hash,
+                        signing_secret_ciphertext, signing_secret_nonce,
+                        signing_secret_key_version, signing_secret_generation,
+                        created_at
+                    ) VALUES (
+                        ?, ?, 'https://repair.example/webhook', 'ACTIVE',
+                        'whsec_', ?, 'ciphertext', 'nonce', 'v1', ?,
+                        CURRENT_TIMESTAMP
+                    )
+                    """.formatted(schema), endpointId, merchantId,
+                    "v13-secret-" + endpointId, UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_events (
+                        id, merchant_id, event_type, resource_id, resource_type,
+                        api_version, payload, payload_sha256, occurred_at,
+                        created_at, traffic_origin
+                    ) VALUES (
+                        ?, ?, 'refund.created', ?, 'REFUND', 'v1', '{}',
+                        ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'MERCHANT_API'
+                    )
+                    """.formatted(schema), eventId, merchantId, resourceId, "0".repeat(64));
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, webhook_event_id,
+                        event_type, resource_id, status, attempt_count,
+                        delivered_at, created_at
+                    ) VALUES (
+                        ?, ?, ?, ?, 'refund.created', ?, 'SUCCEEDED', 1,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
+                    """.formatted(schema), deliveryId, merchantId, endpointId,
+                    eventId, resourceId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_delivery_attempts (
+                        id, merchant_id, webhook_delivery_id, attempt_number,
+                        outcome, http_request_sent, response_status, started_at,
+                        completed_at, latency_ms
+                    ) VALUES (
+                        ?, ?, ?, 1, 'SUCCEEDED', TRUE, 204,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+                    )
+                    """.formatted(schema), attemptId, merchantId, deliveryId);
+
+            migrateSchema(upgradeDataSource, schema, "13");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT dispatch_started_at IS NOT NULL
+                    FROM %s.webhook_delivery_attempts
+                    WHERE id = ?
+                    """.formatted(schema), Boolean.class, attemptId)).isTrue();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = ?
+                      AND table_name = 'webhook_delivery_attempts'
+                      AND column_name = 'http_request_sent'
+                    """, String.class, schema)).isEqualTo("YES");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v14MakesPreviouslyStrandedEndpointCreationReservationsReclaimable() {
+        String schema = "v14_creation_lease_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "13");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID recordId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    ) VALUES (?, 'v14-creation-lease', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "v14-creation-lease-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_creation_records (
+                        id, merchant_id, idempotency_key_hash, request_hash, status,
+                        created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, ?, ?, 'IN_PROGRESS',
+                        CURRENT_TIMESTAMP - INTERVAL '2 minutes',
+                        CURRENT_TIMESTAMP - INTERVAL '2 minutes',
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), recordId, merchantId,
+                    "1".repeat(64), "2".repeat(64));
+
+            migrateSchema(upgradeDataSource, schema, "14");
+
+            Map<String, Object> leased = upgradeJdbcTemplate.queryForMap("""
+                    SELECT lease_token, lease_expires_at
+                    FROM %s.webhook_endpoint_creation_records
+                    WHERE id = ?
+                    """.formatted(schema), recordId);
+            assertThat(leased.get("lease_token")).isEqualTo(recordId);
+            assertThat(leased.get("lease_expires_at")).isNotNull();
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.webhook_endpoint_creation_records
+                    SET lease_token = NULL,
+                        lease_expires_at = NULL
+                    WHERE id = ?
+                    """.formatted(schema), recordId))
+                    .hasMessageContaining("ck_webhook_endpoint_creation_lease");
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }

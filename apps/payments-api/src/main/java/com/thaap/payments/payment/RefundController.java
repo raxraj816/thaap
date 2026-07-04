@@ -100,7 +100,8 @@ public class RefundController {
                 paymentIntent.getId(), refund.getId(), refund.getAmount(), refund.getCurrency());
         paymentIntent.refund(request.amount());
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
-                merchantContext.merchantId(), "refund.created", refund.getId());
+                merchantContext.merchantId(), "refund.created", refund.getId(),
+                paymentIntent.getTrafficOrigin());
         recordRefundAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, refund,
                 ledgerResult);
         return ResponseEntity.status(HttpStatus.CREATED).body(RefundResponse.from(refund));

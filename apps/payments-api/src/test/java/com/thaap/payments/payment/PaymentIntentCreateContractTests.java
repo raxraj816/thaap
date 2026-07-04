@@ -29,7 +29,9 @@ class PaymentIntentCreateContractTests {
     private static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     private static final String REQUEST_ID = "X-Request-Id";
     private static final String ADMIN_BOOTSTRAP_TOKEN = "X-Admin-Bootstrap-Token";
+    private static final String SCENARIO_RUNNER_TOKEN = "X-Thaap-Scenario-Runner-Token";
     private static final String TEST_ADMIN_BOOTSTRAP_TOKEN = "test-admin-bootstrap-token";
+    private static final String TEST_SCENARIO_RUNNER_TOKEN = "test-scenario-runner-token";
 
     private MockMvc mockMvc;
 
@@ -86,6 +88,7 @@ class PaymentIntentCreateContractTests {
         assertThat(response.get("description").asText()).isEqualTo("Initial checkout authorization");
         assertThat(response.get("metadata").get("cart_id").asText()).isEqualTo("cart_123");
         assertThat(response.get("metadata").get("order_id").asText()).isEqualTo("order_456");
+        assertThat(response.get("trafficOrigin").asText()).isEqualTo("MERCHANT_API");
         assertThat(response.get("createdAt").asText()).isNotBlank();
         assertThat(response.get("updatedAt").asText()).isNotBlank();
         assertThat(response.has("requestHash")).isFalse();
@@ -120,6 +123,57 @@ class PaymentIntentCreateContractTests {
         assertThat(delivery.get("EVENT_TYPE")).isEqualTo("payment_intent.created");
         assertThat(delivery.get("STATUS")).isEqualTo("PENDING");
         assertThat(delivery.get("ATTEMPT_COUNT")).isEqualTo(0);
+    }
+
+    @Test
+    void trustedScenarioCredentialAssignsOriginAndMerchantMetadataCannotForgeIt() throws Exception {
+        MerchantAccess merchant = createMerchant("origin-merchant");
+        UUID customerId = createCustomer(merchant, "origin@example.com");
+        String body = """
+                {
+                  "customerId": "%s",
+                  "amount": 1200,
+                  "currency": "USD",
+                  "metadata": {"syntheticOrigin": "THAAP_LOCAL_GENERATOR"}
+                }
+                """.formatted(customerId);
+
+        String ordinaryBody = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "origin-ordinary")
+                        .contentType(APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode ordinary = objectMapper.readTree(ordinaryBody);
+        assertThat(ordinary.get("trafficOrigin").asText()).isEqualTo("MERCHANT_API");
+
+        String syntheticBody = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(SCENARIO_RUNNER_TOKEN, TEST_SCENARIO_RUNNER_TOKEN)
+                        .header(IDEMPOTENCY_KEY, "origin-synthetic")
+                        .contentType(APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode synthetic = objectMapper.readTree(syntheticBody);
+        assertThat(synthetic.get("trafficOrigin").asText()).isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT traffic_origin
+                FROM payment_intents
+                WHERE id = ?
+                """, String.class, UUID.fromString(synthetic.get("id").asText())))
+                .isEqualTo("SYNTHETIC_SCENARIO");
+
+        mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(SCENARIO_RUNNER_TOKEN, "wrong-runner-token")
+                        .header(IDEMPOTENCY_KEY, "origin-forged")
+                        .contentType(APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+        assertThat(countRows("payment_intents")).isEqualTo(2);
+        assertThat(countRows("idempotency_records")).isEqualTo(2);
     }
 
     @Test
@@ -410,6 +464,7 @@ class PaymentIntentCreateContractTests {
     private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
+                        .header("Idempotency-Key", "webhook-" + merchant.id())
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

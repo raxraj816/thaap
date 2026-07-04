@@ -72,25 +72,31 @@ public class WebhookSecretCipher {
     }
 
     public String decrypt(WebhookEndpoint endpoint) {
-        requireConfigured();
         if (endpoint.getSigningSecretCiphertext() == null
                 || endpoint.getSigningSecretNonce() == null
                 || endpoint.getSigningSecretKeyVersion() == null) {
             throw new WebhookSecretException("Webhook endpoint has no encrypted signing secret",
                     WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
         }
-        byte[] decryptionKey = decryptionKeys.get(endpoint.getSigningSecretKeyVersion());
+        return decrypt(new WebhookEncryptedSecret(endpoint.getSigningSecretCiphertext(),
+                endpoint.getSigningSecretNonce(), endpoint.getSigningSecretKeyVersion()),
+                endpoint.getMerchantId(), endpoint.getId());
+    }
+
+    public String decrypt(WebhookEncryptedSecret encryptedSecret, UUID merchantId, UUID endpointId) {
+        requireConfigured();
+        byte[] decryptionKey = decryptionKeys.get(encryptedSecret.keyVersion());
         if (decryptionKey == null) {
             throw new WebhookSecretException("Webhook endpoint secret key version is unavailable",
                     WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
         }
         try {
-            byte[] nonce = Base64.getDecoder().decode(endpoint.getSigningSecretNonce());
-            byte[] ciphertext = Base64.getDecoder().decode(endpoint.getSigningSecretCiphertext());
+            byte[] nonce = Base64.getDecoder().decode(encryptedSecret.nonce());
+            byte[] ciphertext = Base64.getDecoder().decode(encryptedSecret.ciphertext());
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(decryptionKey, "AES"),
                     new GCMParameterSpec(GCM_TAG_BITS, nonce));
-            cipher.updateAAD(aad(endpoint.getMerchantId(), endpoint.getId()));
+            cipher.updateAAD(aad(merchantId, endpointId));
             return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
         } catch (AEADBadTagException exception) {
             throw new WebhookSecretException("Webhook signing secret authentication failed",

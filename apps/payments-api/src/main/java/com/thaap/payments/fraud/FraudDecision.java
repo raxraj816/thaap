@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
 
 @Entity
 @Table(name = "fraud_decisions",
@@ -75,6 +76,10 @@ public class FraudDecision {
     @Column(name = "reason_codes", nullable = false)
     private List<FraudDecisionReasonCode> reasonCodes;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "traffic_origin", nullable = false, length = 32)
+    private TrafficOrigin trafficOrigin;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -84,6 +89,13 @@ public class FraudDecision {
     public FraudDecision(UUID merchantId, UUID paymentAttemptId, ConfirmDecision decision, long latencyMs,
             Instant decisionStartedAt, Instant decisionCompletedAt, FeatureFreshnessStatus featureFreshnessStatus,
             long maxFeatureAgeMs) {
+        this(merchantId, paymentAttemptId, decision, latencyMs, decisionStartedAt, decisionCompletedAt,
+                featureFreshnessStatus, maxFeatureAgeMs, TrafficOrigin.MERCHANT_API);
+    }
+
+    public FraudDecision(UUID merchantId, UUID paymentAttemptId, ConfirmDecision decision, long latencyMs,
+            Instant decisionStartedAt, Instant decisionCompletedAt, FeatureFreshnessStatus featureFreshnessStatus,
+            long maxFeatureAgeMs, TrafficOrigin trafficOrigin) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.paymentAttemptId = paymentAttemptId;
@@ -98,6 +110,7 @@ public class FraudDecision {
         this.featureFreshnessStatus = featureFreshnessStatus;
         this.maxFeatureAgeMs = maxFeatureAgeMs;
         this.reasonCodes = List.copyOf(decision.reasonCodes());
+        this.trafficOrigin = trafficOrigin;
         this.createdAt = Instant.now();
     }
 
@@ -159,5 +172,9 @@ public class FraudDecision {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public TrafficOrigin getTrafficOrigin() {
+        return trafficOrigin;
     }
 }

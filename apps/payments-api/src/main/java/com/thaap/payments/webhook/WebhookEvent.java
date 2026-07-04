@@ -7,6 +7,9 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 
 @Entity
 @Table(name = "webhook_events", indexes = {
@@ -38,6 +41,10 @@ public class WebhookEvent {
     @Column(name = "payload_sha256", nullable = false, length = 64)
     private String payloadSha256;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "traffic_origin", nullable = false, length = 32)
+    private TrafficOrigin trafficOrigin;
+
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 
@@ -49,6 +56,12 @@ public class WebhookEvent {
 
     public WebhookEvent(UUID id, UUID merchantId, WebhookEventType eventType, UUID resourceId, String payload,
             String payloadSha256, Instant occurredAt) {
+        this(id, merchantId, eventType, resourceId, payload, payloadSha256, occurredAt,
+                TrafficOrigin.MERCHANT_API);
+    }
+
+    public WebhookEvent(UUID id, UUID merchantId, WebhookEventType eventType, UUID resourceId, String payload,
+            String payloadSha256, Instant occurredAt, TrafficOrigin trafficOrigin) {
         this.id = id;
         this.merchantId = merchantId;
         this.eventType = eventType.wireValue();
@@ -57,6 +70,7 @@ public class WebhookEvent {
         this.apiVersion = "v1";
         this.payload = payload;
         this.payloadSha256 = payloadSha256;
+        this.trafficOrigin = trafficOrigin;
         this.occurredAt = occurredAt;
         this.createdAt = occurredAt;
     }
@@ -99,5 +113,9 @@ public class WebhookEvent {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public TrafficOrigin getTrafficOrigin() {
+        return trafficOrigin;
     }
 }

@@ -77,6 +77,14 @@ public class WebhookMetrics {
                 .record(nonNegative(queueAge));
     }
 
+    public void recordClaimThrottled(String scope) {
+        Counter.builder("thaap.webhook.claim.throttled")
+                .tag("scope", scope)
+                .description("Webhook claim budgets reached during a scheduler poll")
+                .register(meterRegistry)
+                .increment();
+    }
+
     public void setDueDeliveries(long count) {
         dueDeliveries.set(Math.max(0, count));
     }

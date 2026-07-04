@@ -11,6 +11,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -51,6 +52,10 @@ public class PaymentIntent {
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, String> metadata;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "traffic_origin", nullable = false, length = 32)
+    private TrafficOrigin trafficOrigin;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -70,6 +75,12 @@ public class PaymentIntent {
 
     public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency, CaptureMethod captureMethod,
             String description, Map<String, String> metadata) {
+        this(merchantId, customerId, amount, currency, captureMethod, description, metadata,
+                TrafficOrigin.MERCHANT_API);
+    }
+
+    public PaymentIntent(UUID merchantId, UUID customerId, long amount, String currency, CaptureMethod captureMethod,
+            String description, Map<String, String> metadata, TrafficOrigin trafficOrigin) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.customerId = customerId;
@@ -79,6 +90,7 @@ public class PaymentIntent {
         this.status = PaymentIntentStatus.REQUIRES_CONFIRMATION;
         this.description = description;
         this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        this.trafficOrigin = trafficOrigin;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -117,6 +129,10 @@ public class PaymentIntent {
 
     public Map<String, String> getMetadata() {
         return metadata;
+    }
+
+    public TrafficOrigin getTrafficOrigin() {
+        return trafficOrigin;
     }
 
     public Instant getCreatedAt() {

@@ -5,7 +5,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,13 +31,30 @@ public class WebhookDeliveryExecutor {
     private final WebhookHttpTransport httpTransport;
     private final WebhookMetrics metrics;
     private final Clock clock;
+    private final int maxClaimsPerMerchantPerPoll;
+    private final int maxClaimsPerEndpointPerPoll;
 
+    @Autowired
     public WebhookDeliveryExecutor(WebhookDeliveryClaimService claimService,
             WebhookDeliveryFinalizationService finalizationService,
             WebhookDeliveryRepository deliveryRepository,
             WebhookEndpointSecretService endpointSecretService, WebhookSigner signer,
             WebhookTargetPolicy targetPolicy, WebhookHttpTransport httpTransport,
-            WebhookMetrics metrics, Clock clock) {
+            WebhookMetrics metrics, Clock clock,
+            @Value("${thaap.webhook.max-claims-per-merchant-per-poll:5}")
+            int maxClaimsPerMerchantPerPoll,
+            @Value("${thaap.webhook.max-claims-per-endpoint-per-poll:2}")
+            int maxClaimsPerEndpointPerPoll) {
+        if (maxClaimsPerMerchantPerPoll < 1 || maxClaimsPerMerchantPerPoll > 100) {
+            throw new IllegalArgumentException(
+                    "Webhook per-merchant claim limit must be between 1 and 100");
+        }
+        if (maxClaimsPerEndpointPerPoll < 1
+                || maxClaimsPerEndpointPerPoll > maxClaimsPerMerchantPerPoll) {
+            throw new IllegalArgumentException(
+                    "Webhook per-endpoint claim limit must be positive and no greater "
+                            + "than the per-merchant limit");
+        }
         this.claimService = claimService;
         this.finalizationService = finalizationService;
         this.deliveryRepository = deliveryRepository;
@@ -40,6 +64,18 @@ public class WebhookDeliveryExecutor {
         this.httpTransport = httpTransport;
         this.metrics = metrics;
         this.clock = clock;
+        this.maxClaimsPerMerchantPerPoll = maxClaimsPerMerchantPerPoll;
+        this.maxClaimsPerEndpointPerPoll = maxClaimsPerEndpointPerPoll;
+    }
+
+    WebhookDeliveryExecutor(WebhookDeliveryClaimService claimService,
+            WebhookDeliveryFinalizationService finalizationService,
+            WebhookDeliveryRepository deliveryRepository,
+            WebhookEndpointSecretService endpointSecretService, WebhookSigner signer,
+            WebhookTargetPolicy targetPolicy, WebhookHttpTransport httpTransport,
+            WebhookMetrics metrics, Clock clock) {
+        this(claimService, finalizationService, deliveryRepository, endpointSecretService,
+                signer, targetPolicy, httpTransport, metrics, clock, 5, 2);
     }
 
     public int processDueDeliveries(Instant now, int batchSize) {
@@ -47,13 +83,29 @@ public class WebhookDeliveryExecutor {
             throw new IllegalArgumentException("Webhook processing batch size must be between 1 and 100");
         }
         int processed = 0;
+        Map<UUID, Integer> merchantClaims = new HashMap<>();
+        Map<UUID, Integer> endpointClaims = new HashMap<>();
+        Set<UUID> saturatedMerchants = new HashSet<>();
+        Set<UUID> saturatedEndpoints = new HashSet<>();
         for (int index = 0; index < batchSize; index++) {
             Instant claimAt = laterOf(now, clock.instant());
-            List<WebhookDeliveryClaim> claims = claimService.claimDue(claimAt, 1);
+            List<WebhookDeliveryClaim> claims = claimService.claimDue(
+                    claimAt, 1, saturatedMerchants, saturatedEndpoints);
             if (claims.isEmpty()) {
                 break;
             }
-            processClaim(claims.getFirst());
+            WebhookDeliveryClaim claim = claims.getFirst();
+            int merchantCount = merchantClaims.merge(claim.merchantId(), 1, Integer::sum);
+            if (merchantCount == maxClaimsPerMerchantPerPoll
+                    && saturatedMerchants.add(claim.merchantId())) {
+                metrics.recordClaimThrottled("merchant");
+            }
+            int endpointCount = endpointClaims.merge(claim.endpointId(), 1, Integer::sum);
+            if (endpointCount == maxClaimsPerEndpointPerPoll
+                    && saturatedEndpoints.add(claim.endpointId())) {
+                metrics.recordClaimThrottled("endpoint");
+            }
+            processClaim(claim);
             processed++;
         }
         refreshDueDeliveries(laterOf(now, clock.instant()));
@@ -69,7 +121,11 @@ public class WebhookDeliveryExecutor {
         metrics.recordQueueAge(claim.eventType(), Duration.between(claim.deliveryCreatedAt(), attemptStartedAt));
         try {
             requirePayloadIntegrity(claim);
-            String rawSecret = endpointSecretService.loadForDelivery(claim.merchantId(), claim.endpointId());
+            String rawSecret = claim.signingSecretGeneration() == null
+                    ? endpointSecretService.loadForDelivery(claim.merchantId(), claim.endpointId())
+                    : endpointSecretService.loadForDelivery(
+                            claim.merchantId(), claim.endpointId(),
+                            claim.signingSecretGeneration(), clock.instant());
             ValidatedWebhookTarget target = targetPolicy.validate(claim.endpointUrl());
             Instant preparationStartedAt = laterOf(attemptStartedAt, clock.instant());
             if (!claimService.prepareForDispatch(claim, preparationStartedAt)) {
@@ -77,9 +133,14 @@ public class WebhookDeliveryExecutor {
                         claim.deliveryId(), claim.eventId(), claim.attemptNumber());
                 return;
             }
+            WebhookSecretUseWindow secretUseWindow =
+                    endpointSecretService.authorizeGenerationForUse(
+                            claim.merchantId(), claim.endpointId(),
+                            claim.signingSecretGeneration());
+            Instant signatureTime = laterOf(preparationStartedAt, clock.instant());
+            secretUseWindow.requireUsableAt(signatureTime);
             WebhookSignature signature;
             try {
-                Instant signatureTime = laterOf(preparationStartedAt, clock.instant());
                 signature = signer.sign(rawSecret, claim.payload(), signatureTime);
             } catch (RuntimeException exception) {
                 LOGGER.error("Webhook signing failed after dispatch preparation; recording known no-send "

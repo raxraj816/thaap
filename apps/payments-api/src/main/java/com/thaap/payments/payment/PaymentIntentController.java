@@ -137,10 +137,10 @@ public class PaymentIntentController {
         }
         PaymentIntent paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
                 request.customerId(), request.amount(), request.currency(), request.normalizedCaptureMethod(),
-                request.description(), request.normalizedMetadata()));
+                request.description(), request.normalizedMetadata(), merchantContext.trafficOrigin()));
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_intent.created",
-                paymentIntent.getId());
+                paymentIntent.getId(), paymentIntent.getTrafficOrigin());
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentIntentResponse.from(paymentIntent));
     }
 
@@ -178,7 +178,7 @@ public class PaymentIntentController {
 
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
         PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
-                paymentMethod.getId(), idempotencyKey, attemptNumber));
+                paymentMethod.getId(), idempotencyKey, attemptNumber, paymentIntent.getTrafficOrigin()));
         FeatureSnapshotDraft featureSnapshotDraft = buildFeatureSnapshot(paymentIntent, paymentAttempt, paymentMethod);
         Instant decisionStartedAt = Instant.now();
         ConfirmDecision decision = confirmDecisionEngine.decide(new ConfirmDecisionRequest(merchantContext.merchantId(),
@@ -202,7 +202,7 @@ public class PaymentIntentController {
                 authorization);
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_attempt.created",
-                paymentAttempt.getId());
+                paymentAttempt.getId(), paymentAttempt.getTrafficOrigin());
         if (authorization.getStatus() == AuthorizationStatus.APPROVED
                 && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
             captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
@@ -226,6 +226,7 @@ public class PaymentIntentController {
         features.put("payment_intent_id", paymentIntent.getId().toString());
         features.put("payment_attempt_id", paymentAttempt.getId().toString());
         features.put("payment_method_id", paymentMethod.getId().toString());
+        features.put("traffic_origin", paymentIntent.getTrafficOrigin().name());
         requireFeatureSnapshotWithinStorageGuard(features);
         long maxFeatureAgeMs = 0L;
         return new FeatureSnapshotDraft(features, computedAt, computedAt, maxFeatureAgeMs,
@@ -239,12 +240,13 @@ public class PaymentIntentController {
         // A later failure rolls these writes back together instead of leaving partial confirm evidence.
         FraudDecision fraudDecision = fraudDecisionRepository.save(new FraudDecision(merchantContext.merchantId(),
                 paymentAttempt.getId(), decision, latencyMs, decisionStartedAt, decisionCompletedAt,
-                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.maxFeatureAgeMs()));
+                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.maxFeatureAgeMs(),
+                paymentAttempt.getTrafficOrigin()));
         featureSnapshotRepository.save(new FeatureSnapshot(merchantContext.merchantId(), fraudDecision.getId(),
                 paymentAttempt.getId(), featureSnapshotDraft.features(), featureSnapshotDraft.computedAt(),
                 featureSnapshotDraft.oldestFeatureTimestamp(), featureSnapshotDraft.maxFeatureAgeMs(),
                 featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.staleFeatureNames(),
-                featureSnapshotDraft.missingFeatureNames()));
+                featureSnapshotDraft.missingFeatureNames(), paymentAttempt.getTrafficOrigin()));
         return fraudDecision;
     }
 
@@ -384,7 +386,7 @@ public class PaymentIntentController {
         paymentIntent.capture();
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_intent.captured",
-                paymentIntent.getId());
+                paymentIntent.getId(), paymentIntent.getTrafficOrigin());
         recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult,
                 captureTrigger);
     }
@@ -414,7 +416,7 @@ public class PaymentIntentController {
         paymentIntent.cancel();
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_intent.canceled",
-                paymentIntent.getId());
+                paymentIntent.getId(), paymentIntent.getTrafficOrigin());
         recordCancelAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization,
                 authorizationVoid);
         return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
@@ -513,12 +515,13 @@ public class PaymentIntentController {
 
     public record PaymentIntentResponse(UUID id, UUID merchantId, UUID customerId, long amount, String currency,
             CaptureMethod captureMethod, PaymentIntentStatus status, String description, Map<String, String> metadata,
-            Instant createdAt, Instant updatedAt) {
+            com.thaap.payments.tenant.TrafficOrigin trafficOrigin, Instant createdAt, Instant updatedAt) {
         static PaymentIntentResponse from(PaymentIntent paymentIntent) {
             return new PaymentIntentResponse(paymentIntent.getId(), paymentIntent.getMerchantId(),
                     paymentIntent.getCustomerId(), paymentIntent.getAmount(), paymentIntent.getCurrency(),
                     paymentIntent.getCaptureMethod(), paymentIntent.getStatus(), paymentIntent.getDescription(),
-                    paymentIntent.getMetadata(), paymentIntent.getCreatedAt(), paymentIntent.getUpdatedAt());
+                    paymentIntent.getMetadata(), paymentIntent.getTrafficOrigin(), paymentIntent.getCreatedAt(),
+                    paymentIntent.getUpdatedAt());
         }
     }
 

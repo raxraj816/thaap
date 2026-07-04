@@ -153,7 +153,11 @@ Chapter 19 implements the complete bounded V1 delivery loop:
 - endpoint creation and rotation reveal a signing key once
 - raw signing keys are AES-256-GCM encrypted under a separate configured key
 - key-encryption-key rollover keeps versioned decrypt keys, fails closed on
-  unreadable active versions, and lazily re-encrypts old ciphertext
+  unreadable active current, unexpired previous, or unexpired creation-replay
+  versions, and lazily re-encrypts old ciphertext
+- endpoint-create idempotency reservations use fenced expiring leases, so a
+  process death can be reclaimed without stealing active ownership or minting
+  a second endpoint/secret
 - event subscriptions select only relevant active endpoints
 - payment mutations persist one immutable event and endpoint deliveries
 - a PostgreSQL lease worker claims each numbered attempt immediately before
@@ -164,6 +168,9 @@ Chapter 19 implements the complete bounded V1 delivery loop:
   existing escapes
 - signature time is read after dispatch preparation so database lock wait does
   not consume the merchant freshness tolerance
+- a previous-generation use window is checked against that exact signature
+  timestamp, so loading a secret before expiry cannot authorize signing after
+  expiry
 - payload bytes are produced by a JSON serializer, not manual string
   concatenation, so future event values cannot break the merchant-verifiable
   body
@@ -256,6 +263,29 @@ Chapter 19 supports:
 
 The merchant should verify signatures before trusting the webhook body.
 
+Chapter 21 adds product-safe endpoint operations:
+
+- endpoint creation requires a tenant-scoped `Idempotency-Key`
+- the same key and request replays the original endpoint and encrypted
+  reveal-once response for 24 hours, unless a later rotation superseded it
+- the same tenant cannot create two endpoint rows for the same exact URL;
+  another tenant may use that URL independently
+- rotation returns a new current secret while retaining the previous encrypted
+  generation for a default 15-minute grace window
+- deliveries bind to the secret generation present when they are claimed;
+  an old claimed generation works strictly before its expiry and fails at or
+  after expiry
+- a second rotation is rejected while a previous-generation overlap is active
+- merchants should accept both revealed secrets during the reported
+  `previousSigningSecretExpiresAt` window, deduplicate by authenticated event
+  ID, deploy the new verifier before expiry, and remove the old verifier at
+  expiry
+- a durable database cursor rotates merchant and endpoint selection, while
+  configurable per-poll limits default to five claims per merchant and two per
+  endpoint
+- `thaap.webhook.claim.throttled{scope=merchant|endpoint}` reports bounded
+  budget pressure without tenant, endpoint, URL, or secret dimensions
+
 A one-way signing-secret hash is useful for checking a presented secret, but it
 cannot produce an HMAC with the original secret. Using the stored hash itself as
 the signing key would let a database-only attacker forge webhooks. The implemented
@@ -264,11 +294,11 @@ configured key-encryption key.
 
 ## What Remains To Build
 
-The bounded V1 is complete. Named later slices own merchant-triggered replay,
-endpoint verification handshakes, overlapping signing-secret windows,
-per-endpoint rate controls, managed egress, multi-region scaling, and the
-general domain outbox/Kafka boundary. Those capabilities should extend stable
-event identity and the at-least-once contract rather than replacing them.
+The bounded delivery and endpoint-operations loop is complete. Named later
+slices still own merchant-triggered replay, endpoint verification handshakes,
+managed egress, multi-region scaling, and the general domain outbox/Kafka
+boundary. Those capabilities should extend stable event identity and the
+at-least-once contract rather than replacing them.
 
 ## Mental Model To Keep
 

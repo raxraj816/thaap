@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import stat
 import sys
@@ -9,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 
 SCRIPT_PATH = pathlib.Path(__file__).with_name(
@@ -144,6 +146,82 @@ class Chapter20ProcessorCatalogTests(unittest.TestCase):
             target_server.server_close()
             source_thread.join()
             target_thread.join()
+
+    def test_api_client_ignores_environment_proxy_without_forwarding_credentials(
+        self,
+    ) -> None:
+        proxy_requests: list[dict[str, str | None]] = []
+        direct_requests: list[str] = []
+
+        class ProxyHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                proxy_requests.append(
+                    {
+                        "apiKey": self.headers.get("X-Api-Key"),
+                        "adminToken": self.headers.get(
+                            "X-Admin-Bootstrap-Token"
+                        ),
+                    }
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        proxy_server = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+
+        class DirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                direct_requests.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"UP"}')
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        direct_server = ThreadingHTTPServer(("127.0.0.1", 0), DirectHandler)
+        proxy_thread = threading.Thread(
+            target=proxy_server.serve_forever, daemon=True
+        )
+        direct_thread = threading.Thread(
+            target=direct_server.serve_forever, daemon=True
+        )
+        proxy_thread.start()
+        direct_thread.start()
+        proxy_url = f"http://127.0.0.1:{proxy_server.server_port}"
+        proxy_environment = {
+            "HTTP_PROXY": proxy_url,
+            "http_proxy": proxy_url,
+            "NO_PROXY": "",
+            "no_proxy": "",
+        }
+
+        try:
+            with mock.patch.dict(os.environ, proxy_environment), mock.patch.object(
+                chapter20.urllib.request, "proxy_bypass", return_value=False
+            ):
+                client = chapter20.ApiClient(
+                    f"http://127.0.0.1:{direct_server.server_port}"
+                )
+                response = client.get(
+                    "/actuator/health",
+                    api_key="api-secret",
+                )
+            self.assertEqual(response, {"status": "UP"})
+            self.assertEqual(direct_requests, ["/actuator/health"])
+            self.assertEqual(proxy_requests, [])
+        finally:
+            proxy_server.shutdown()
+            direct_server.shutdown()
+            proxy_server.server_close()
+            direct_server.server_close()
+            proxy_thread.join()
+            direct_thread.join()
 
     def test_sensitive_report_scan_rejects_card_credentials_and_idempotency(self) -> None:
         benign = {"outcomes": [{"fixtureId": "approved"}]}

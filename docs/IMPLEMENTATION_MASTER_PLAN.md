@@ -1821,26 +1821,16 @@ Phase 1 closure chapter:
      arguments, and synthetic customer phones are deterministic valid E.164
      values.
 
-   Explicit deferral:
+   Resolved Chapter 16 debt:
 
-   - `[TD-0001]` Authoritative server-side `synthetic_origin` classification is owned by
-     **Phase 4.5: Product-Grade Risk Operations**, implementation slice
-     **Developer Scenario Runner And Traffic-Origin Governance**. The primary
-     technical DRI is **Payments Core** for the trusted schema/API boundary;
-     **Risk Operations** owns scenario-runner policy and analytics exclusion
-     requirements. The current payment schema has no trusted origin boundary,
-     and merchant metadata cannot become an authorization or training-data
-     trust signal. Resolution is required before Phase 4.5 enables a shared
-     non-local scenario runner; the same field must be available before Phase 7
-     builds training/evaluation datasets.
-   - `[TD-0002]` Resumable interrupted runs are owned by **Phase 7: ML Baseline**,
-     implementation slice **Synthetic Generator V2 Run Orchestration**. The
-     primary technical DRI is **ML/Data Platform**, with Payments Core
-     responsible for preserving idempotent public mutation APIs. The current
-     local run is bounded and carries a collision-resistant run ID, but THAAP
-     has no durable generator-run state, cleanup API, or safe resume protocol.
-     Resolution is required before Phase 7 introduces scheduled generation,
-     dataset-scale volume, automatic retry, or long-running generator jobs.
+   - `[TD-0001]` was resolved in Chapter 21B. A dedicated authenticated runner
+     credential assigns immutable `SYNTHETIC_SCENARIO` origin, which propagates
+     through payment, attempt, fraud decision, feature snapshot, webhook event,
+     API, and generated evidence. Metadata remains non-authoritative.
+   - `[TD-0002]` was resolved in Chapter 21C. The loopback runner now owns an
+     owner-only SQLite run journal with stable run/step identities, exclusive
+     leases, restart-safe completed-step replay, run-scoped API idempotency,
+     and explicit abandonment for ambiguous non-idempotent steps.
 
 ### Phase 2: Processor, Capture, Refund, Ledger, Webhooks
 
@@ -2039,7 +2029,8 @@ Detailed Phase 2 chapter plan:
      cancel.
    - `scripts/demo-chapter-17-flow.sh` fails closed unless automatic capture,
      manual void, and ledger invariants agree, and rejects non-loopback targets
-     until `TD-0001` provides trusted shared-environment traffic origin.
+     unless an authenticated scenario-runner credential assigns trusted
+     synthetic origin.
 
    Scope boundaries:
 
@@ -2554,8 +2545,8 @@ Detailed Phase 2 chapter plan:
    - Add `POST /webhook_endpoints/{id}/rotate_secret` and
      `POST /webhook_endpoints/{id}/disable`. Rotation returns a new secret once;
      if that response is lost, the merchant rotates again rather than relying on
-     THAAP to reproduce a previously revealed secret. Product-grade endpoint
-     creation idempotency is deferred under `TD-0005`.
+     THAAP to reproduce a previously revealed secret. Chapter 21 later resolved
+     endpoint creation replay under `TD-0005`.
    - Replace unbounded `GET /webhook_deliveries` with a bounded, deterministic
      page ordered by newest creation time and stable ID. Traverse older pages
      with the paired `beforeCreatedAt` and `beforeId` cursor.
@@ -2714,16 +2705,11 @@ Detailed Phase 2 chapter plan:
      Events And Analytics**. They start when cross-process consumers are
      introduced and complete only when domain state and outbox commit
      atomically, publication is retryable, and consumer replay is safe.
-   - Merchant-triggered replay, dead-letter queue operations, endpoint
-     verification handshakes, overlapping old/new signing-secret windows
-     (`TD-0003`), per-merchant/per-endpoint delivery fairness controls
-     (`TD-0004`), and endpoint creation idempotency (`TD-0005`) are owned by
-     **Phase 4.5: Product-Grade Risk Operations**, implementation slice
-     **Developer/API Console Webhook Operations**. Start that slice before
-     shared non-local merchant onboarding; prove authorization, tenant
-     isolation, auditability, replay deduplication, verification,
-     rotation-window expiry, bounded rate behavior, and safe endpoint-creation
-     retry semantics.
+   - Merchant-triggered replay, dead-letter queue operations, and endpoint
+     verification handshakes remain owned by **Phase 4.5: Product-Grade Risk
+     Operations**, implementation slice **Developer/API Console Webhook
+     Operations**. Chapter 21 has already supplied the creation idempotency,
+     rotation-overlap, and fair bounded scheduling substrate.
    - High-scale distributed queueing and managed egress proxy infrastructure are
      owned by **Phase 9: Agents, Hardening, Scale**, implementation slice
      **Webhook Worker Scaling And Egress Hardening**. Start when measured queue
@@ -2736,21 +2722,16 @@ Detailed Phase 2 chapter plan:
      truth. Reconsider only in the Phase 4.5 webhook-operations slice with
      strict truncation, retention, redaction, and access-control proof.
 
-   Debt disposition:
+   Resolved Chapter 19 debt:
 
-   - `TD-0003` captures the bounded Chapter 19 secret-rotation semantics gap:
-     an already-claimed worker can sign with a secret loaded before a concurrent
-     rotation commits. The current local/test V1 wedge remains safe, but shared
-     non-local onboarding must implement and prove old/new signing-secret
-     overlap windows before treating rotation as a merchant operations playbook.
-   - `TD-0004` captures shared-environment webhook delivery fairness and rate
-     controls. Chapter 19 bounds total local worker behavior, but external
-     merchant onboarding needs proof that one noisy tenant or endpoint cannot
-     starve others.
-   - `TD-0005` captures endpoint creation idempotency. Chapter 19 lets merchants
-     disable duplicate endpoints, but public/shared onboarding needs a safe
-     retry contract that avoids accidental duplicate active endpoints without
-     leaking or replaying one-time secret material incorrectly.
+   - `TD-0003` was resolved in Chapter 21E with claim-bound secret generations,
+     encrypted current/previous material, an explicit expiry boundary, and
+     merchant verification guidance.
+   - `TD-0004` was resolved in Chapter 21F with a durable merchant/endpoint
+     round-robin cursor, configurable per-poll budgets, and bounded metrics.
+   - `TD-0005` was resolved in Chapter 21D with tenant-scoped idempotency-key
+     hashing, encrypted response replay, changed-request conflict, and exact
+     tenant-scoped URL identity.
    - No DNS-rebinding or endpoint-disable debt is accepted by this plan. Target
      policy validates every resolved address and the transport connects to the
      prevalidated address; endpoint disable is proven at the pre-dispatch
@@ -2862,7 +2843,126 @@ Done when:
   replayable through public APIs with processor, fraud-lineage, audit, webhook,
   and ledger evidence.
 
+### Phase 2.5: Previous-Phase Debt Retirement
+
+Phase 3 does not begin while debt originating in Chapters 16 or 19 remains
+open. This phase retires the five registered previous-phase debts at their real
+payment, security, data-lineage, orchestration, and scheduling boundaries. Debt
+IDs remain immutable in the register after resolution.
+
+1. Chapter 21: Previous-Phase Debt Retirement And Zero-Debt Entry Gate.
+
+   Status: complete.
+
+   Proof artifacts:
+
+   - `docs/reviews/CHAPTER_21_INVARIANT_PROOF_MATRIX.md`
+   - `docs/reviews/CHAPTER_21_CLOSURE_DOSSIER.md` at completion
+
+   Chapter 21A: Test and dependency lifecycle hygiene.
+
+   - Prevent scheduled webhook polling from surviving a test database's
+     lifecycle and emitting false teardown failures.
+   - Resolve build/runtime compatibility warnings when THAAP owns the boundary,
+     or record executable evidence that a warning is dependency-owned and does
+     not weaken payment, fraud, migration, DNS, or test truth.
+   - Run every PostgreSQL migration and forced-interleaving test without skips.
+
+   Chapter 21B: Trusted synthetic traffic origin (`TD-0001`).
+
+   - Introduce an authenticated server-assigned traffic-origin boundary.
+   - Merchants cannot promote ordinary API traffic into trusted synthetic
+     traffic through metadata, headers, or request fields.
+   - Propagate immutable origin through PaymentIntent, PaymentAttempt,
+     FraudDecision, FeatureSnapshot, webhook events, and generated evidence so
+     Phase 3 feature lineage and later datasets can distinguish synthetic from
+     ordinary merchant traffic.
+   - Prove tenant isolation, spoof resistance, rollback, migration, and
+     sanitized API/report behavior.
+
+   Chapter 21C: Resumable synthetic generator runs (`TD-0002`).
+
+   - Add durable operator-local GeneratorRun and scenario-step/checkpoint state
+     for the loopback-only generator. The journal owns references to every
+     tenant created by the run; public payment objects remain tenant-scoped.
+   - A seeded run has stable scenario identity and stable public-API idempotency
+     keys across process restart.
+   - Resume only incomplete steps; completed steps are reconciled rather than
+     replayed into duplicate payment, attempt, fraud, ledger, or webhook truth.
+   - Terminal failure and explicit abandonment remain durable and safe; bounded
+     concurrency cannot create two active owners for one run.
+   - `ER-0024` and `ER-0028` reopened closure: credentialed clients now ignore
+     environment proxies as well as redirects, and a sanitized resource ledger
+     retains actionable cleanup references after secret-bearing checkpoints
+     are erased.
+
+   Chapter 21D: Webhook endpoint creation idempotency (`TD-0005`).
+
+   - Bind endpoint creation to merchant, operation, idempotency key, and
+     normalized request identity.
+   - Same-key replay returns the original endpoint and usable original
+     one-time-secret response; changed requests conflict; cross-tenant key
+     reuse remains isolated.
+   - Duplicate URL behavior is explicit, audited, and cannot accidentally
+     create duplicate active delivery streams after an ambiguous timeout.
+   - `ER-0027` added V14 fenced reservation leases: fail-stop `IN_PROGRESS`
+     rows become reclaimable, active ownership cannot be stolen, and a
+     deterministic PostgreSQL interleaving converges to one endpoint/secret.
+
+   Chapter 21E: Webhook signing-secret rotation overlap (`TD-0003`).
+
+   - Retain current and previous encrypted signing material with explicit
+     version and expiry, never raw secret persistence.
+   - A delivery already claimed under the previous generation remains
+     verifiable for the bounded overlap; new claims use the current generation.
+   - Previous material is rejected after expiry, rotation and disable preserve
+     lock ordering, and API/audit/log surfaces remain secret-safe.
+   - `ER-0025` binds expiry to the exact signature timestamp after dispatch
+     preparation. `ER-0026` makes startup inventory every still-decryptable
+     current, previous, and endpoint-creation replay ciphertext key version.
+
+   Chapter 21F: Webhook delivery fairness and rate controls (`TD-0004`).
+
+   - Claiming prevents one merchant or endpoint backlog from starving another.
+   - Per-merchant and per-endpoint limits are bounded, configurable, and
+     observable without high-cardinality or secret-bearing dimensions.
+   - Forced PostgreSQL orderings prove fairness controls do not duplicate
+     claims, bypass disable, lose lease recovery, or strand due work.
+
+   Chapter 21G: Integrated zero-debt closure.
+
+   - `TD-0001` through `TD-0005` are `RESOLVED` with schema, implementation,
+     test, demo, and operational evidence; the debt register has zero
+     non-resolved entries.
+   - Every Chapter 21 matrix entry passes a plan-to-implementation traceability
+     review and a temporally separate hostile failure-sequence review.
+   - Fresh H2 and PostgreSQL migrations, complete backend/Python suites,
+     synthetic resume evidence, webhook operations evidence, and sanitized
+     public-API demos pass.
+   - The hostile end-to-end re-review records and resolves `ER-0024` through
+     `ER-0028`; full proof passes 240 backend tests and 60 repository Python
+     tests.
+   - The Chapter 21 closure dossier recommends `MERGE`, and README and
+     architecture sources agree. Branch integration into `develop` remains the
+     normal post-review Git action and is not part of implementation truth.
+
+Done when:
+
+- No debt originating in a previous phase remains `OPEN` or `IN_PROGRESS`.
+- Synthetic origin is authoritative and reaches decision-time lineage.
+- Interrupted generator runs resume without duplicate product truth.
+- Endpoint creation safely replays after ambiguous client outcomes.
+- Signing-secret rotation has an executable old/new verification window.
+- Webhook scheduling proves cross-merchant fairness under production-database
+  concurrency.
+- Test and dependency lifecycle output contains no THAAP-owned false failures.
+- Chapter 21's matrix, dossier, learning artifacts, demos, and commit-readiness
+  gate all pass.
+
 ### Phase 3: Fraud Decision MVP
+
+Entry gate: Chapter 21 and Phase 2.5 must be complete with zero non-resolved
+previous-phase debt before Phase 3 implementation begins.
 
 Build:
 
@@ -2952,10 +3052,9 @@ Build:
 - **Developer/API Console Webhook Operations** owner slice:
   - Product DRI: **Developer Experience**.
   - Technical DRI: **Payments Core**.
-  - Add merchant-triggered delivery replay, dead-letter inspection, endpoint
-    verification handshakes, overlapping old/new signing-secret rotation
-    windows (`TD-0003`), per-merchant/per-endpoint delivery fairness controls
-    (`TD-0004`), and endpoint creation idempotency (`TD-0005`).
+  - Add merchant-triggered delivery replay, dead-letter inspection, and
+    endpoint verification handshakes on the Chapter 21 idempotency, rotation,
+    and fairness substrate (`TD-0003`, `TD-0004`, `TD-0005` resolved).
   - Start before shared non-local merchant onboarding, after Chapter 19 proves
     immutable event envelopes, at-least-once delivery, tenant isolation,
     signing, retry, and safe attempt evidence.
@@ -2967,8 +3066,8 @@ Build:
   (`TD-0001`):
   - Primary technical DRI: **Payments Core**.
   - Product/consumer DRI: **Risk Operations**.
-  - Add a server-assigned, tenant-scoped traffic-origin classification that
-    distinguishes live, simulator/test, and synthetic scenario traffic.
+  - Extend the Chapter 21 server-assigned, tenant-scoped traffic-origin
+    classification into console controls and analytics policy.
   - Only an authenticated scenario-runner/test-mode boundary may assign
     synthetic origin; merchant-supplied metadata is never authoritative.
   - Propagate origin through PaymentIntent, PaymentAttempt, FraudDecision,
@@ -3038,16 +3137,15 @@ Done when:
 Build:
 
 - Synthetic data generator v2 with richer fraud patterns and labels.
-- **Synthetic Generator V2 Run Orchestration** owner slice (`TD-0002`):
+- **Synthetic Generator V2 Run Orchestration** owner slice (`TD-0002`
+  resolved by the Chapter 21 local-run substrate):
   - Primary technical DRI: **ML/Data Platform**.
   - Payments Core dependency owner: **Payments Core**, for idempotent public
     mutation APIs and trusted traffic-origin propagation.
-  - Add durable `GeneratorRun` state, scenario/step checkpoints, terminal
-    success/failure status, and safe failure diagnostics.
-  - Resume with stable per-step idempotency keys, or clean up explicitly when a
-    scenario family cannot be resumed without creating false payment truth.
-  - Support bounded retry and concurrency without duplicating merchants,
-    PaymentIntents, PaymentAttempts, FraudDecisions, or labels.
+  - Promote the proven local run journal into scheduled/dataset-scale
+    orchestration only when Phase 7 requires shared workers.
+  - Preserve stable per-step idempotency, explicit cleanup disposition, and
+    duplicate-free payment/fraud/label truth from Chapter 21.
 - Exploratory data analysis report.
 - Data quality report for labels, imbalance, missingness, leakage risks, and segment coverage.
 - Training dataset builder.

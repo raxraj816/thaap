@@ -13,6 +13,17 @@ chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 ## Current Status
 
 Chapter 20 is complete and the canonical Phase 2 simulator boundary is closed.
+Chapter 21 is complete, and Phase 2.5 is complete. `TD-0001` through `TD-0005` are resolved,
+the technical debt register has zero non-resolved entries, and the Phase 3
+entry gate is open. Trusted synthetic origin, restart-safe generator runs,
+idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
+claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation
+recovery all have executable evidence. The final hostile re-review also proves
+that credentialed Python clients ignore environment proxies, webhook secret
+expiry is enforced at the exact signature timestamp, startup inventories every
+required current/previous/replay KEK, and generator abandonment retains only
+sanitized cleanup references. Full proof passes 240 backend and 60 repository
+Python tests.
 The deterministic processor catalog, capture, cancel/void, full refund, ledger,
 audit, and signed at-least-once webhook paths now have one integrated
 pre-implementation proof matrix and closure dossier. Chapter 19 remains
@@ -207,9 +218,10 @@ scenarios through public APIs:
   demo against a running API.
 - `scripts/generate-synthetic-scenarios.py` creates deterministic approved,
   retryable-decline, and basic card-testing scenario families through the public
-  API against loopback targets only. It fails closed on unexpected ledger,
-  authorization, or fraud-lineage truth and writes a sanitized, atomic summary
-  artifact under `build/reports/`.
+  API against loopback targets only. Its owner-only run journal resumes safe
+  checkpoints with stable idempotency, requires explicit abandonment for
+  ambiguous non-idempotent work, rejects redirects before credential
+  forwarding, and writes a sanitized atomic summary.
 - Chapter 14 clean local demo evidence is recorded in
   `docs/learning/daily/2026-06-26-chapter-14-demo.md`.
 - Lifecycle contract tests prove cancel is allowed from uncaptured states,

@@ -3,6 +3,7 @@ package com.thaap.payments.webhook;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -20,7 +21,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
@@ -33,7 +36,8 @@ class WebhookDeliveryExecutorUnitTests {
         ExecutorFixture fixture = fixture();
         WebhookDeliveryClaim first = claim(1);
         WebhookDeliveryClaim second = claim(1);
-        when(fixture.claimService().claimDue(any(Instant.class), eq(1)))
+        when(fixture.claimService().claimDue(
+                any(Instant.class), eq(1), eq(Set.of()), eq(Set.of())))
                 .thenReturn(List.of(first))
                 .thenReturn(List.of(second))
                 .thenReturn(List.of());
@@ -56,11 +60,80 @@ class WebhookDeliveryExecutorUnitTests {
                 .isEqualTo(2);
 
         InOrder order = inOrder(fixture.claimService(), fixture.transport());
-        order.verify(fixture.claimService()).claimDue(any(Instant.class), eq(1));
+        order.verify(fixture.claimService()).claimDue(
+                any(Instant.class), eq(1), eq(Set.of()), eq(Set.of()));
         order.verify(fixture.transport()).send(any(WebhookHttpRequest.class));
-        order.verify(fixture.claimService()).claimDue(any(Instant.class), eq(1));
+        order.verify(fixture.claimService()).claimDue(
+                any(Instant.class), eq(1), eq(Set.of()), eq(Set.of()));
         order.verify(fixture.transport()).send(any(WebhookHttpRequest.class));
-        order.verify(fixture.claimService()).claimDue(any(Instant.class), eq(1));
+        order.verify(fixture.claimService()).claimDue(
+                any(Instant.class), eq(1), eq(Set.of()), eq(Set.of()));
+    }
+
+    @Test
+    void perPollBudgetsExcludeSaturatedMerchantAndEndpointWithoutStoppingOtherTenants()
+            throws Exception {
+        WebhookDeliveryClaimService claimService = mock(WebhookDeliveryClaimService.class);
+        WebhookDeliveryFinalizationService finalizationService =
+                mock(WebhookDeliveryFinalizationService.class);
+        WebhookDeliveryRepository deliveryRepository = mock(WebhookDeliveryRepository.class);
+        WebhookEndpointSecretService endpointSecretService =
+                mock(WebhookEndpointSecretService.class);
+        WebhookSigner signer = mock(WebhookSigner.class);
+        WebhookTargetPolicy targetPolicy = mock(WebhookTargetPolicy.class);
+        WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
+        WebhookMetrics metrics = mock(WebhookMetrics.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-28T10:00:00Z"), ZoneOffset.UTC);
+        WebhookDeliveryExecutor executor = new WebhookDeliveryExecutor(
+                claimService, finalizationService, deliveryRepository,
+                endpointSecretService, signer, targetPolicy, transport, metrics,
+                clock, 1, 1);
+        WebhookDeliveryClaim noisy = claim(1);
+        WebhookDeliveryClaim quiet = claim(1);
+        AtomicInteger invocation = new AtomicInteger();
+        when(claimService.claimDue(
+                any(Instant.class), eq(1), anySet(), anySet()))
+                .thenAnswer(call -> {
+                    Set<UUID> merchantExclusions =
+                            Set.copyOf(call.<Set<UUID>>getArgument(2));
+                    Set<UUID> endpointExclusions =
+                            Set.copyOf(call.<Set<UUID>>getArgument(3));
+                    return switch (invocation.getAndIncrement()) {
+                        case 0 -> {
+                            assertThat(merchantExclusions).isEmpty();
+                            assertThat(endpointExclusions).isEmpty();
+                            yield List.of(noisy);
+                        }
+                        case 1 -> {
+                            assertThat(merchantExclusions).containsExactly(noisy.merchantId());
+                            assertThat(endpointExclusions).containsExactly(noisy.endpointId());
+                            yield List.of(quiet);
+                        }
+                        default -> {
+                            assertThat(merchantExclusions)
+                                    .containsExactlyInAnyOrder(
+                                            noisy.merchantId(), quiet.merchantId());
+                            assertThat(endpointExclusions)
+                                    .containsExactlyInAnyOrder(
+                                            noisy.endpointId(), quiet.endpointId());
+                            yield List.of();
+                        }
+                    };
+                });
+        when(endpointSecretService.loadForDelivery(any(UUID.class), any(UUID.class)))
+                .thenReturn("whsec_test");
+        when(targetPolicy.validate(any(String.class))).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"),
+                InetAddress.getByName("127.0.0.1"), 80));
+        when(claimService.prepareForDispatch(
+                any(WebhookDeliveryClaim.class), any(Instant.class))).thenReturn(false);
+
+        assertThat(executor.processDueDeliveries(
+                Instant.parse("2026-06-28T10:00:00Z"), 3)).isEqualTo(2);
+
+        verify(metrics, org.mockito.Mockito.times(2)).recordClaimThrottled("merchant");
+        verify(metrics, org.mockito.Mockito.times(2)).recordClaimThrottled("endpoint");
+        verifyNoInteractions(transport, finalizationService);
     }
 
     @Test
@@ -156,6 +229,49 @@ class WebhookDeliveryExecutorUnitTests {
         verify(fixture.signer()).sign("whsec_test", claim.payload(), afterLockWait);
         verify(fixture.transport()).send(org.mockito.ArgumentMatchers.argThat(request ->
                 request.signatureHeader().startsWith("t=" + afterLockWait.getEpochSecond() + ",")));
+    }
+
+    @Test
+    void previousGenerationIsRejectedWhenDispatchWaitCrossesItsExpiry() throws Exception {
+        Clock clock = mock(Clock.class);
+        Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
+        Instant beforeExpiry = claimedAt.plusSeconds(899);
+        Instant atExpiry = claimedAt.plusSeconds(900);
+        when(clock.instant())
+                .thenReturn(beforeExpiry)
+                .thenReturn(beforeExpiry)
+                .thenReturn(atExpiry)
+                .thenReturn(atExpiry);
+        ExecutorFixture fixture = fixture(clock);
+        WebhookDeliveryClaim claim = claimWithGeneration(1);
+        when(fixture.endpointSecretService().loadForDelivery(
+                claim.merchantId(), claim.endpointId(),
+                claim.signingSecretGeneration(), beforeExpiry))
+                .thenReturn("whsec_previous");
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), eq(beforeExpiry))).thenReturn(true);
+        when(fixture.endpointSecretService().authorizeGenerationForUse(
+                claim.merchantId(), claim.endpointId(),
+                claim.signingSecretGeneration()))
+                .thenReturn(WebhookSecretUseWindow.bounded(atExpiry));
+        when(fixture.finalizationService().failTerminally(
+                eq(claim), eq(atExpiry),
+                eq(WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE,
+                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.endpointSecretService()).authorizeGenerationForUse(
+                claim.merchantId(), claim.endpointId(),
+                claim.signingSecretGeneration());
+        verifyNoInteractions(fixture.signer(), fixture.transport());
+        verify(fixture.finalizationService()).failTerminally(
+                claim, atExpiry, WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
     }
 
     @Test
@@ -322,7 +438,9 @@ class WebhookDeliveryExecutorUnitTests {
     @Test
     void dueGaugeReportsRemainingEligibleBacklog() {
         ExecutorFixture fixture = fixture();
-        when(fixture.claimService().claimDue(any(Instant.class), eq(1))).thenReturn(List.of());
+        when(fixture.claimService().claimDue(
+                any(Instant.class), eq(1), eq(Set.of()), eq(Set.of())))
+                .thenReturn(List.of());
         when(fixture.deliveryRepository().countDue(any(Instant.class))).thenReturn(7L);
 
         assertThat(fixture.executor().processDueDeliveries(
@@ -376,6 +494,9 @@ class WebhookDeliveryExecutorUnitTests {
         WebhookDeliveryFinalizationService finalizationService = mock(WebhookDeliveryFinalizationService.class);
         WebhookDeliveryRepository deliveryRepository = mock(WebhookDeliveryRepository.class);
         WebhookEndpointSecretService endpointSecretService = mock(WebhookEndpointSecretService.class);
+        when(endpointSecretService.authorizeGenerationForUse(
+                any(UUID.class), any(UUID.class), any()))
+                .thenReturn(WebhookSecretUseWindow.unbounded());
         WebhookSigner signer = mock(WebhookSigner.class);
         WebhookTargetPolicy targetPolicy = mock(WebhookTargetPolicy.class);
         WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
@@ -394,6 +515,16 @@ class WebhookDeliveryExecutorUnitTests {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 "refund.created", "http://127.0.0.1/webhook", payload, SecretHasher.sha256(payload),
                 UUID.randomUUID(), attemptNumber, claimedAt, claimedAt.minusSeconds(5));
+    }
+
+    private WebhookDeliveryClaim claimWithGeneration(int attemptNumber) {
+        String payload = "{\"id\":\"" + UUID.randomUUID() + "\"}";
+        Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
+        return new WebhookDeliveryClaim(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "refund.created", "http://127.0.0.1/webhook", payload, SecretHasher.sha256(payload),
+                UUID.randomUUID(), attemptNumber, UUID.randomUUID(),
+                claimedAt, claimedAt.minusSeconds(5));
     }
 
     private record ExecutorFixture(

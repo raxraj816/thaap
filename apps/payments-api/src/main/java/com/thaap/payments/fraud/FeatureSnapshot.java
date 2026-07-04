@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
 
 @Entity
 @Table(name = "feature_snapshots",
@@ -74,6 +75,10 @@ public class FeatureSnapshot {
     @Column(name = "missing_feature_names", nullable = false)
     private List<String> missingFeatureNames;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "traffic_origin", nullable = false, length = 32)
+    private TrafficOrigin trafficOrigin;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -83,6 +88,15 @@ public class FeatureSnapshot {
     public FeatureSnapshot(UUID merchantId, UUID fraudDecisionId, UUID paymentAttemptId, Map<String, Object> features,
             Instant computedAt, Instant oldestFeatureTimestamp, long maxFeatureAgeMs,
             FeatureFreshnessStatus freshnessStatus, List<String> staleFeatureNames, List<String> missingFeatureNames) {
+        this(merchantId, fraudDecisionId, paymentAttemptId, features, computedAt, oldestFeatureTimestamp,
+                maxFeatureAgeMs, freshnessStatus, staleFeatureNames, missingFeatureNames,
+                TrafficOrigin.MERCHANT_API);
+    }
+
+    public FeatureSnapshot(UUID merchantId, UUID fraudDecisionId, UUID paymentAttemptId, Map<String, Object> features,
+            Instant computedAt, Instant oldestFeatureTimestamp, long maxFeatureAgeMs,
+            FeatureFreshnessStatus freshnessStatus, List<String> staleFeatureNames, List<String> missingFeatureNames,
+            TrafficOrigin trafficOrigin) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.fraudDecisionId = fraudDecisionId;
@@ -95,6 +109,7 @@ public class FeatureSnapshot {
         this.freshnessStatus = freshnessStatus;
         this.staleFeatureNames = List.copyOf(staleFeatureNames);
         this.missingFeatureNames = List.copyOf(missingFeatureNames);
+        this.trafficOrigin = trafficOrigin;
         this.createdAt = Instant.now();
     }
 
@@ -148,5 +163,9 @@ public class FeatureSnapshot {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public TrafficOrigin getTrafficOrigin() {
+        return trafficOrigin;
     }
 }

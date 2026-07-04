@@ -364,3 +364,122 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Any client described as loopback-only or origin-restricted must inventory redirects as a separate effective-destination boundary and prove with real servers that authentication headers and bodies are never forwarded.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-02
+
+## ER-0022
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 19
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-04
+- Escaped gate: Chapter 21 live upgrade and synthetic-run recovery review
+- Invariant: Every supported already-migrated database must start under the current webhook attempt entity without discarding or inventing dispatch evidence.
+- Finding: A previously applied V9 database had `http_request_sent` but no `dispatch_started_at`; clean-schema tests passed because the mutable Java V9 migration now creates the newer shape, while Hibernate validation rejected the real upgraded database.
+- Why prior review missed it: Migration proof recreated historical version 9 from the current Java migration implementation instead of retaining a fixture for the schema shape that had actually shipped. Java migration content changes were therefore invisible to Flyway history and to clean-database verification.
+- Resolution evidence: V13 additively creates the missing column, makes tri-state send evidence nullable, backfills known-send rows from their authoritative attempt start timestamp, and installs the current dispatch-truth constraint. `v13RepairsPreviouslyAppliedWebhookAttemptSchemaWithoutLosingSendTruth` reconstructs the shipped shape in PostgreSQL, migrates it, and proves preserved send evidence and nullable tri-state semantics. The real local V9-to-V13 database then passed Flyway and Hibernate validation before the Chapter 21 public-API crash/resume demo.
+- Process correction: Every Java migration schema change now requires a new additive migration; upgrade tests must include immutable shipped-schema fixtures rather than rebuilding every historical state from mutable migration source.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-04
+
+## ER-0023
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 16
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-04
+- Escaped gate: Chapter 21 final hostile effective-destination review
+- Invariant: The loopback-only synthetic scenario generator never creates a follow-up request after an HTTP redirect, so merchant API keys, the admin bootstrap token, and the scenario-runner credential cannot leave the validated origin.
+- Finding: The generator validated only its initial loopback base URL and then used `urllib.request.urlopen`, whose default redirect handling could create a request to another origin carrying privileged request headers.
+- Why prior review missed it: Chapter 16 proved caller-supplied origin validation but did not inventory the HTTP client's effective destination. Chapter 20 later fixed the same boundary in its separate demo client, but that process correction was not applied repository-wide to the older generator.
+- Resolution evidence: The generator `ApiClient` now owns a fail-closed `RejectRedirectHandler`. `test_api_client_rejects_every_redirect_without_forwarding_credentials` sends API, admin, and scenario-runner credentials through real source and target loopback servers for 301, 302, 303, 307, and 308 and proves the target receives zero requests.
+- Process correction: Every credential-bearing, origin-restricted repository client must pair initial-origin validation with an explicit redirect policy and real-server effective-destination regression proof; fixing one client does not close sibling clients.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-04
+
+## ER-0024
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 16
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Phase 2.5 end-to-end security review
+- Invariant: Credential-bearing loopback clients communicate directly with the validated loopback origin and cannot delegate API, admin, or scenario-runner credentials to an environment-configured proxy.
+- Finding: Both Python clients rejected redirects but still inherited `HTTP_PROXY` and related environment configuration through the default opener, so the effective network destination could differ from the validated loopback origin.
+- Why prior review missed it: The effective-destination inventory covered caller input and redirects but omitted proxy resolution. Existing real-server tests proved only that redirect targets received nothing; they did not install a hostile proxy and force proxy selection.
+- Resolution evidence: Both clients now build an opener with an explicit empty `ProxyHandler` before the rejecting redirect handler. `test_api_client_ignores_environment_proxy_for_loopback_credentials` in both Python suites forces `proxy_bypass` false, installs real direct and proxy servers, and proves the direct server receives the request while the proxy receives zero requests.
+- Process correction: Origin-restricted client reviews must enumerate caller URL, redirect, environment proxy, DNS resolution, and connection target as separate effective-destination boundaries and prove each credential-bearing path.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0025
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Phase 2.5 end-to-end secret-lifecycle review
+- Invariant: A previous webhook signing-secret generation is usable only when the exact signature timestamp is strictly before its expiry.
+- Finding: The executor loaded a still-valid previous secret and could wait across its expiry before generating the signature, allowing a delivery to be signed after the advertised verification window had closed.
+- Why prior review missed it: Before/at/after expiry tests exercised secret loading at one instant but did not force the dispatch path to cross expiry between authorization and signature timestamp capture.
+- Resolution evidence: `WebhookEndpointSecretService` now returns a `WebhookSecretUseWindow`; the executor authorizes the generation under the endpoint lock, obtains the exact signature timestamp after dispatch preparation, and validates that timestamp before signing. `previousGenerationIsRejectedWhenDispatchWaitCrossesItsExpiry` fixes the clock at the exact expiry and proves terminal `SIGNING_SECRET_UNAVAILABLE` with no signer or transport call.
+- Process correction: Time-bounded credential proof must bind authorization to the exact use instant and include forced clock movement or a boundary timestamp between load and cryptographic use.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0026
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Phase 2.5 end-to-end key-rotation review
+- Invariant: Startup fails closed if any ciphertext the running product may still decrypt references an unavailable webhook key-encryption-key version.
+- Finding: Startup validation inspected only active endpoints' current signing-secret ciphertext and ignored unexpired previous-secret ciphertext plus unexpired completed endpoint-creation replay ciphertext.
+- Why prior review missed it: The key inventory was derived from the primary endpoint column rather than from every product path that can request decryption after startup.
+- Resolution evidence: `findRequiredSecretKeyVersions` now unions active current ciphertext, active unexpired previous ciphertext, and unexpired generation-matching completed creation replay ciphertext. `requiredKeyInventoryIncludesCurrentPreviousAndReplayCiphertext` proves inclusion and expiry removal, while startup security tests prove every returned missing version blocks application startup.
+- Process correction: KEK readiness checks must be derived from a complete decryptability inventory covering primary, overlap, replay, recovery, and migration-held ciphertext—not a single entity field.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0027
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Phase 2.5 end-to-end crash-recovery review
+- Invariant: A process death after durable endpoint-create reservation cannot permanently strand an idempotency key, and recovery cannot steal an active owner's reservation.
+- Finding: Endpoint creation reserved an `IN_PROGRESS` row in `REQUIRES_NEW`, but the row had no lease owner or expiry; a process death before completion left every retry returning conflict forever.
+- Why prior review missed it: Rollback tests covered ordinary exceptions in the surviving process but omitted fail-stop process death after the independent reservation committed.
+- Resolution evidence: V14 adds owner tokens and lease expiries, backfills historical `IN_PROGRESS` rows as immediately reclaimable, and constrains state/lease consistency. H2 tests prove active ownership cannot be stolen and expired ownership is reclaimed. `expiredCreationReservationReclaimSerializesAndReplaysOneEndpoint` forces PostgreSQL row-lock waiting and proves two contenders converge to one endpoint and one replayed secret. `v14MakesPreviouslyStrandedEndpointCreationReservationsReclaimable` proves the shipped upgrade path.
+- Process correction: Every independently committed `IN_PROGRESS` protocol must define owner identity, expiry, reclaim semantics, fencing, and a process-death test at the commit boundary.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0028
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Phase 2.5 end-to-end generator-recovery review
+- Invariant: Abandoning an ambiguous generator run erases credentials while retaining sanitized tenant/resource references needed for operator reconciliation and cleanup.
+- Finding: Abandonment cleared every checkpoint response, including the only durable copy of safe merchant and resource identifiers, so the required cleanup disposition had no actionable resource inventory.
+- Why prior review missed it: Redaction proof checked secret removal and terminal state but did not separately freeze the operator promise that sanitized cleanup references survive.
+- Resolution evidence: The generator now persists safe IDs in a separate `generator_resources` table before failpoint/checkpoint transitions and backfills references from older completed checkpoints. The ambiguous non-idempotent abandonment test proves merchant identity survives, API keys do not, and all secret-bearing checkpoint responses are cleared.
+- Process correction: Recovery journals must classify fields as secret-bearing payload, durable safe reference, or derived summary; erasure tests must prove both confidentiality and retained operability.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05

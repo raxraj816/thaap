@@ -201,7 +201,9 @@ class RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
 class ApiClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-        self.opener = urllib.request.build_opener(RejectRedirectHandler())
+        self.opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), RejectRedirectHandler()
+        )
 
     def get(self, path: str, api_key: str | None = None) -> Any:
         headers = {"Accept": "application/json"}
@@ -515,6 +517,7 @@ def run(args: argparse.Namespace) -> pathlib.Path:
             "enabledEvents": ["payment_attempt.created"],
         },
         api_key=api_key,
+        idempotency_key=f"chapter20-{run_id}-webhook-endpoint",
         request_id=f"chapter20-{run_id}-webhook",
     )
     if endpoint.get("signingSecret") is None:

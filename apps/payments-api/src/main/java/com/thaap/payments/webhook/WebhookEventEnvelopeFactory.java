@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,17 +23,22 @@ public class WebhookEventEnvelopeFactory {
     }
 
     public WebhookEvent create(UUID merchantId, WebhookEventType eventType, UUID resourceId, Instant occurredAt) {
+        return create(merchantId, eventType, resourceId, occurredAt, TrafficOrigin.MERCHANT_API);
+    }
+
+    public WebhookEvent create(UUID merchantId, WebhookEventType eventType, UUID resourceId, Instant occurredAt,
+            TrafficOrigin trafficOrigin) {
         Instant canonicalOccurredAt = occurredAt.truncatedTo(ChronoUnit.MICROS);
         UUID eventId = UUID.randomUUID();
-        String payload = payload(eventId, merchantId, eventType, resourceId, canonicalOccurredAt);
+        String payload = payload(eventId, merchantId, eventType, resourceId, canonicalOccurredAt, trafficOrigin);
         return new WebhookEvent(eventId, merchantId, eventType, resourceId, payload,
-                SecretHasher.sha256(payload), canonicalOccurredAt);
+                SecretHasher.sha256(payload), canonicalOccurredAt, trafficOrigin);
     }
 
     private String payload(UUID eventId, UUID merchantId, WebhookEventType eventType, UUID resourceId,
-            Instant occurredAt) {
+            Instant occurredAt, TrafficOrigin trafficOrigin) {
         WebhookEventPayload payload = new WebhookEventPayload(eventId, eventType.wireValue(),
-                occurredAt.toString(), "v1", merchantId,
+                occurredAt.toString(), "v1", merchantId, trafficOrigin,
                 new WebhookEventPayloadData(new WebhookEventPayloadObject(
                         resourceId, eventType.resourceType().name())));
         try {
@@ -48,13 +54,14 @@ public class WebhookEventEnvelopeFactory {
         }
     }
 
-    @JsonPropertyOrder({"id", "type", "createdAt", "apiVersion", "merchantId", "data"})
+    @JsonPropertyOrder({"id", "type", "createdAt", "apiVersion", "merchantId", "trafficOrigin", "data"})
     private record WebhookEventPayload(
             UUID id,
             String type,
             String createdAt,
             String apiVersion,
             UUID merchantId,
+            TrafficOrigin trafficOrigin,
             WebhookEventPayloadData data) {
     }
 

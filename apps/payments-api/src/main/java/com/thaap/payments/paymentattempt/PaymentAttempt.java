@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
+import com.thaap.payments.tenant.TrafficOrigin;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -63,6 +64,10 @@ public class PaymentAttempt {
     @Column(name = "three_ds_status")
     private ThreeDsStatus threeDsStatus;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "traffic_origin", nullable = false, length = 32)
+    private TrafficOrigin trafficOrigin;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -74,6 +79,12 @@ public class PaymentAttempt {
 
     public PaymentAttempt(UUID merchantId, UUID paymentIntentId, UUID paymentMethodId, String idempotencyKey,
             int attemptNumber) {
+        this(merchantId, paymentIntentId, paymentMethodId, idempotencyKey, attemptNumber,
+                TrafficOrigin.MERCHANT_API);
+    }
+
+    public PaymentAttempt(UUID merchantId, UUID paymentIntentId, UUID paymentMethodId, String idempotencyKey,
+            int attemptNumber, TrafficOrigin trafficOrigin) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.paymentIntentId = paymentIntentId;
@@ -81,6 +92,7 @@ public class PaymentAttempt {
         this.idempotencyKey = idempotencyKey;
         this.status = PaymentAttemptStatus.CREATED;
         this.attemptNumber = attemptNumber;
+        this.trafficOrigin = trafficOrigin;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -123,6 +135,10 @@ public class PaymentAttempt {
 
     public ThreeDsStatus getThreeDsStatus() {
         return threeDsStatus;
+    }
+
+    public TrafficOrigin getTrafficOrigin() {
+        return trafficOrigin;
     }
 
     public void attachFraudDecision(UUID fraudDecisionId) {
