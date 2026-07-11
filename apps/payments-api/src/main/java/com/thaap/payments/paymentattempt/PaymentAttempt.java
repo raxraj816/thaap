@@ -141,6 +141,14 @@ public class PaymentAttempt {
         return trafficOrigin;
     }
 
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
     public void attachFraudDecision(UUID fraudDecisionId) {
         if (status != PaymentAttemptStatus.CREATED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

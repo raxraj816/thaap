@@ -10,6 +10,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
+import com.thaap.payments.fraud.FeatureValue;
+import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -58,6 +60,9 @@ class PaymentIntentConfirmContractTests {
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
+
+    @Autowired
+    private FeatureValueRepository featureValueRepository;
 
     @BeforeEach
     void cleanDatabase() {
@@ -119,7 +124,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(fraudDecision.get("DECISION_STARTED_AT")).isNotNull();
         assertThat(fraudDecision.get("DECISION_COMPLETED_AT")).isNotNull();
         assertThat(fraudDecision.get("FEATURE_FRESHNESS_STATUS")).isEqualTo("FRESH");
-        assertThat(fraudDecision.get("MAX_FEATURE_AGE_MS")).isEqualTo(0L);
+        assertThat((Long) fraudDecision.get("MAX_FEATURE_AGE_MS")).isGreaterThanOrEqualTo(0L);
         assertThat(fraudDecision.get("REASON_CODES")).isEqualTo("[\"RULES_NOT_ENABLED\"]");
         assertThat(fraudDecision.get("CREATED_AT")).isNotNull();
 
@@ -128,15 +133,38 @@ class PaymentIntentConfirmContractTests {
         assertThat(featureSnapshot.get("MERCHANT_ID")).isEqualTo(merchant.id());
         assertThat(featureSnapshot.get("PAYMENT_ATTEMPT_ID")).isEqualTo(paymentAttemptId);
         assertThat(featureSnapshot.get("FEATURE_VERSION")).isEqualTo("features_v1");
-        assertThat(featuresJson).contains("\"payment_amount\":1200");
-        assertThat(featuresJson).contains("\"payment_currency\":\"USD\"");
-        assertThat(featuresJson).contains("\"card_bin\":\"499999\"");
+        assertThat(featuresJson).contains("\"payment.amount_minor\":1200");
+        assertThat(featuresJson).contains("\"payment.currency\":\"USD\"");
+        assertThat(featuresJson).contains("\"card.country\":\"US\"");
+        assertThat(featuresJson).doesNotContain("499999");
         assertThat(featuresJson).doesNotContain("4999990000000001");
         assertThat(featuresJson.getBytes(StandardCharsets.UTF_8).length)
                 .isLessThanOrEqualTo(PaymentIntentController.DEFAULT_MAX_FEATURE_SNAPSHOT_JSON_BYTES);
         assertThat(featureSnapshot.get("FRESHNESS_STATUS")).isEqualTo("FRESH");
         assertThat(featureSnapshot.get("STALE_FEATURE_NAMES")).isEqualTo("[]");
         assertThat(featureSnapshot.get("MISSING_FEATURE_NAMES")).isEqualTo("[]");
+
+        List<FeatureValue> featureValues = featureValueRepository.findPointInTimeForDecision(
+                merchant.id(), fraudDecisionId);
+        assertThat(featureValues).extracting(FeatureValue::getFeatureCode).containsExactly(
+                "card.country",
+                "card.funding",
+                "payment.amount_minor",
+                "payment.attempt_number",
+                "payment.capture_method",
+                "payment.currency",
+                "traffic.origin");
+        assertThat(featureValues).allSatisfy(featureValue -> {
+            assertThat(featureValue.getMerchantId()).isEqualTo(merchant.id());
+            assertThat(featureValue.getPaymentAttemptId()).isEqualTo(paymentAttemptId);
+            assertThat(featureValue.getFeatureVersion()).isEqualTo("v1");
+            assertThat(featureValue.getTrafficOrigin().name()).isEqualTo("MERCHANT_API");
+            assertThat(featureValue.getObservedAt()).isBeforeOrEqualTo(
+                    ((java.time.OffsetDateTime) fraudDecision.get("DECISION_STARTED_AT")).toInstant());
+            assertThat(featureValue.getObservedAt()).isBeforeOrEqualTo(featureValue.getComputedAt());
+        });
+        assertThat(featureValues).extracting(FeatureValue::typedValue).containsExactly(
+                "US", "CREDIT", 1200L, 1L, "MANUAL", "USD", "MERCHANT_API");
 
         var authorization = authorizationForAttempt(paymentAttemptId);
         assertThat(authorization.get("MERCHANT_ID")).isEqualTo(merchant.id());
@@ -162,6 +190,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
+        assertThat(countRows("feature_values")).isEqualTo(7);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countAuditLogsByAction("payment_intent.confirmed")).isEqualTo(1);
@@ -324,6 +353,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(featureSnapshotForDecision(fraudDecisionId).get("FEATURE_VERSION")).isEqualTo("features_v1");
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
+        assertThat(countRows("feature_values")).isEqualTo(7);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(countAuditLogsByAction("authorization.declined")).isEqualTo(1);
@@ -376,6 +406,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
+        assertThat(countRows("feature_values")).isEqualTo(7);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
@@ -403,6 +434,55 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_CAPTURE");
+    }
+
+    @Test
+    void legacyStubDecisionRemainsReadableWithoutTypedBackfillOrResponseShapeBreak() throws Exception {
+        MerchantAccess merchant = createMerchant("legacy-decision-merchant");
+        UUID customerId = createCustomer(merchant, "legacy@example.com");
+        UUID paymentMethodId = createPaymentMethod(merchant, customerId, "legacy-decision-method");
+        UUID paymentIntentId = createPaymentIntent(merchant, customerId, "legacy-decision-intent", 1200);
+        UUID attemptId = UUID.randomUUID();
+        UUID decisionId = UUID.randomUUID();
+        UUID snapshotId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO payment_attempts
+                    (id, merchant_id, payment_intent_id, payment_method_id, idempotency_key, status,
+                     attempt_number, fraud_decision_id, traffic_origin, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'legacy-confirm', 'CREATED', 1, ?, 'MERCHANT_API',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, attemptId, merchant.id(), paymentIntentId, paymentMethodId, decisionId);
+        jdbcTemplate.update("""
+                INSERT INTO fraud_decisions
+                    (id, merchant_id, payment_attempt_id, risk_score, risk_level, action, model_version,
+                     ruleset_version, latency_ms, decision_started_at, decision_completed_at,
+                     feature_freshness_status, max_feature_age_ms, reason_codes, traffic_origin, created_at)
+                VALUES (?, ?, ?, 0.0000, 'LOW', 'ALLOW', NULL, 'rules_stub_v1', 0,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'FRESH', 0,
+                        '["RULES_NOT_ENABLED"]', 'MERCHANT_API', CURRENT_TIMESTAMP)
+                """, decisionId, merchant.id(), attemptId);
+        jdbcTemplate.update("""
+                INSERT INTO feature_snapshots
+                    (id, merchant_id, fraud_decision_id, payment_attempt_id, feature_version, features_json,
+                     computed_at, oldest_feature_timestamp, max_feature_age_ms, freshness_status,
+                     stale_feature_names, missing_feature_names, traffic_origin, created_at)
+                VALUES (?, ?, ?, ?, 'features_v1',
+                        '{"payment_amount":1200,"payment_currency":"USD","card_bin":"499999"}',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'FRESH', '[]', '[]',
+                        'MERCHANT_API', CURRENT_TIMESTAMP)
+                """, snapshotId, merchant.id(), decisionId, attemptId);
+
+        String response = mockMvc.perform(get("/fraud/decisions/{id}", decisionId)
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode detail = objectMapper.readTree(response);
+        assertThat(detail.get("decision").get("rulesetVersion").asText()).isEqualTo("rules_stub_v1");
+        assertThat(detail.get("decision").get("reasonCodes").get(0).asText()).isEqualTo("RULES_NOT_ENABLED");
+        assertThat(detail.get("featureSnapshot").get("features").get("payment_amount").asLong()).isEqualTo(1200L);
+        assertThat(detail.get("featureSnapshot").get("features").get("card_bin").asText()).isEqualTo("499999");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM feature_values WHERE payment_attempt_id = ?
+                """, Integer.class, attemptId)).isZero();
     }
 
     @Test

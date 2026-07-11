@@ -286,7 +286,7 @@ Foreign keys include `merchant_id` wherever tenant lineage crosses tables.
 - `max_age_ms`, nullable
 - `created_at`
 - unique `(feature_code, feature_version)`
-- unique `(id, feature_code, feature_version)` for composite lineage
+- unique `(id, feature_code, feature_version, value_type)` for composite lineage
 
 Definitions are global, application-owned, immutable reference data. They
 contain no merchant data.
@@ -302,12 +302,18 @@ contain no merchant data.
 - `traffic_origin`
 - unique `(merchant_id, payment_attempt_id, feature_code, feature_version)`
 - same-tenant foreign key to PaymentAttempt
+- composite foreign key to FeatureDefinition across ID, code, version, and
+  value type
 - check constraint matching `value_type` to exactly one populated value column
 - check `observed_at <= computed_at`
 
 The application also enforces `observed_at <= decision_started_at`; migration
 and service tests prove the boundary because that timestamp lives on another
 table.
+
+Online evaluation consumes one immutable `DecisionFeatureContext` built from
+the same typed values used for FeatureSnapshot and FeatureValue persistence.
+The engine input contains no parallel entity-derived card or resource fields.
 
 ### 8.3 `fraud_rules`
 

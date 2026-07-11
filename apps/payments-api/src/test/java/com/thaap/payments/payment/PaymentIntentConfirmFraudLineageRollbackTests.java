@@ -15,11 +15,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.fraud.FeatureSnapshot;
 import com.thaap.payments.fraud.FeatureSnapshotRepository;
+import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.processor.ProcessorAdapter;
 import com.thaap.payments.support.DatabaseCleaner;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -61,13 +65,16 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
     @MockitoBean
     private ProcessorAdapter processorAdapter;
 
+    @MockitoBean
+    private FeatureValueRepository featureValueRepository;
+
     @BeforeEach
     void cleanDatabase() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(requestIdFilter)
                 .build();
         databaseCleaner.clean();
-        reset(featureSnapshotRepository, processorAdapter);
+        reset(featureSnapshotRepository, featureValueRepository, processorAdapter);
     }
 
     @Test
@@ -92,6 +99,41 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
         assertThat(countRows("payment_attempts")).isZero();
         assertThat(countRows("fraud_decisions")).isZero();
         assertThat(countRows("feature_snapshots")).isZero();
+        assertThat(countRows("feature_values")).isZero();
+        assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("audit_logs")).isZero();
+        assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
+    void failureAtEveryFeatureValuePositionRollsBackAllLineageAndKeepsConfirmRetryable(int failingPosition)
+            throws Exception {
+        when(featureSnapshotRepository.save(any(FeatureSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AtomicInteger position = new AtomicInteger();
+        when(featureValueRepository.save(any())).thenAnswer(invocation -> {
+            if (position.getAndIncrement() == failingPosition) {
+                throw new IllegalStateException("feature value unavailable");
+            }
+            return invocation.getArgument(0);
+        });
+        MerchantAccess merchant = createMerchant("merchant-feature-value-failure");
+        UUID customerId = createCustomer(merchant, "buyer-values@example.com");
+        UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-value-failure");
+        UUID paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-value-failure", 1200);
+
+        mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "confirm-value-failure")
+                        .contentType(APPLICATION_JSON)
+                        .content(confirmBody(paymentMethodId)))
+                .andExpect(status().isInternalServerError());
+
+        verifyNoInteractions(processorAdapter);
+        assertThat(countRows("payment_attempts")).isZero();
+        assertThat(countRows("fraud_decisions")).isZero();
+        assertThat(countRows("feature_snapshots")).isZero();
+        assertThat(countRows("feature_values")).isZero();
         assertThat(countRows("authorizations")).isZero();
         assertThat(countRows("audit_logs")).isZero();
         assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");

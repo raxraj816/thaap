@@ -1,6 +1,7 @@
 package com.thaap.payments.fraud;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
@@ -11,7 +12,9 @@ import java.util.TreeMap;
 public class FeatureMapConverter implements AttributeConverter<Map<String, Object>, String> {
 
     // JPA converters are not Spring-managed here, so this mapper intentionally keeps DB JSON stable and local.
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules()
+            .enable(DeserializationFeature.USE_LONG_FOR_INTS)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
     private static final TypeReference<Map<String, Object>> FEATURE_MAP_TYPE = new TypeReference<>() {
     };
 

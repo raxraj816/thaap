@@ -32,7 +32,7 @@ class FraudJsonConverterTests {
         Map<String, Object> restored = featureMapConverter.convertToEntityAttribute(serialized);
 
         assertThat(serialized).isEqualTo("{\"a_feature\":42,\"z_feature\":\"last\"}");
-        assertThat(restored).containsEntry("a_feature", 42).containsEntry("z_feature", "last");
+        assertThat(restored).containsEntry("a_feature", 42L).containsEntry("z_feature", "last");
     }
 
     @Test

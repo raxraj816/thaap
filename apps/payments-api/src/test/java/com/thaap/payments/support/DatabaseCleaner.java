@@ -18,8 +18,6 @@ public class DatabaseCleaner {
             "refunds",
             "authorization_voids",
             "authorizations",
-            "feature_snapshots",
-            "fraud_decisions",
             "merchant_creation_identities",
             "merchant_creation_records",
             "idempotency_records",
@@ -40,6 +38,21 @@ public class DatabaseCleaner {
     }
 
     public void clean() {
+        String databaseProduct = jdbcTemplate.execute(
+                (org.springframework.jdbc.core.ConnectionCallback<String>) connection ->
+                        connection.getMetaData().getDatabaseProductName());
+        if ("H2".equals(databaseProduct)) {
+            jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY FALSE");
+            try {
+                jdbcTemplate.execute("TRUNCATE TABLE feature_values");
+                jdbcTemplate.execute("TRUNCATE TABLE feature_snapshots");
+                jdbcTemplate.execute("TRUNCATE TABLE fraud_decisions");
+            } finally {
+                jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE");
+            }
+        } else {
+            jdbcTemplate.execute("TRUNCATE TABLE feature_values, feature_snapshots, fraud_decisions");
+        }
         for (var table : TABLES) {
             jdbcTemplate.update("DELETE FROM " + table);
         }

@@ -108,4 +108,8 @@ public class PaymentMethod {
     public String getCardCountry() {
         return cardCountry;
     }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
 }

@@ -115,6 +115,21 @@ local PostgreSQL audit evidence agree. Its atomic owner-only report under
 excludes submitted card values, buyer PII, API keys, signing secrets,
 idempotency material, and card fingerprints.
 
+Run the Chapter 22 typed point-in-time lineage demo after starting local
+PostgreSQL and the API:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+scripts/demo-chapter-22-feature-lineage.py
+```
+
+The runner accepts only a loopback API origin, ignores environment proxies,
+and rejects redirects. It creates and confirms a manual-capture payment through
+public APIs, checks exact idempotent replay and the safe lexical decision
+snapshot, then performs a read-only query against the local `thaap-postgres`
+container to reconcile all seven typed values and their point-in-time
+predicate. It prints only non-secret resource IDs and bounded outcomes.
+
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash

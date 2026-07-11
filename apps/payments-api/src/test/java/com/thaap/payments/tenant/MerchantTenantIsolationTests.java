@@ -14,6 +14,7 @@ import com.thaap.payments.rules.FraudRule;
 import com.thaap.payments.rules.FraudRuleRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.webhook.WebhookEventType;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -367,6 +368,15 @@ class MerchantTenantIsolationTests {
         var fraudDecisionDetail = getObject("/fraud/decisions/" + fraudDecisionId, merchantA);
         assertThat(fraudDecisionDetail.get("featureSnapshot").get("featureVersion").asText())
                 .isEqualTo("features_v1");
+        JsonNode features = fraudDecisionDetail.get("featureSnapshot").get("features");
+        List<String> featureNames = new java.util.ArrayList<>();
+        features.fieldNames().forEachRemaining(featureNames::add);
+        assertThat(featureNames).containsExactly(
+                "card.country", "card.funding", "payment.amount_minor", "payment.attempt_number",
+                "payment.capture_method", "payment.currency", "traffic.origin");
+        assertThat(features.toString()).doesNotContain(
+                "card_bin", "card_last4", "fingerprint", "customer", "payment_intent_id",
+                "payment_attempt_id", "payment_method_id", "metadata", "description", "idempotency");
         mockMvc.perform(get("/fraud/decisions/{id}", fraudDecisionId)
                         .header(API_KEY, merchantB.apiKey()))
                 .andExpect(status().isNotFound());

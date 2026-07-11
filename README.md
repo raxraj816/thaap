@@ -31,10 +31,19 @@ independent Chapter 21 recovery packets now carry complete transition tables,
 mandatory closure questions, narrow implementation checkpoints, and later
 hostile-proof checkpoints; the Phase 3 entry gate is satisfied.
 The Phase 3 detailed implementation plan now sequences Chapters 22–25.
-Chapter 22's proof matrix and closure dossier were created before
-implementation. Founder/domain review has frozen the matrix; the dossier
-intentionally remains `IN_PROGRESS` with a `DO_NOT_MERGE` recommendation until
-executable proof is complete. Phase 3 fraud behavior is not yet implemented.
+Chapter 22 is complete: V18/V19 add an immutable seven-feature V1 catalogue,
+typed per-attempt FeatureValues, point-in-time query support, composite tenant
+and traffic-origin lineage, startup catalogue validation, and append-only
+decision-time evidence. Confirm materializes and flushes the complete lineage
+before processor authorization while preserving exact idempotent replay and
+the existing allow-only `rules_stub_v1` behavior. A post-closure repair now
+binds definition value type into the PostgreSQL lineage identity, makes the
+exact safe `DecisionFeatureContext` the engine's only input, and proves a real
+flush constraint failure rolls back before processor work and permits one
+coherent retry. The pre-implementation matrix, later hostile passes,
+PostgreSQL migrations/interleavings, live public-API demo, and closure dossier
+all pass. Chapter 23 deterministic fraud behavior is not
+yet implemented; `BLOCK`, fraud `REQUEST_3DS`, and `REVIEW` are not claimed.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation

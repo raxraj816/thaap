@@ -3041,14 +3041,20 @@ Chapter sequence:
 3. Chapter 24 — Manual Review Intake And Merchant Cancellation.
 4. Chapter 25 — Integrated Fraud Decision MVP Closure.
 
-Current state: detailed plan and Chapter 22 promise freeze are approved;
-Chapter 22 implementation is next.
-No Phase 3 implementation is claimed yet.
+Current state: Chapter 22 is complete. Typed, immutable V1 feature lineage and
+point-in-time offline joins now exist without changing the inherited allow-only
+confirm behavior. The post-closure ER-0043/ER-0044/ER-0045 repair binds
+definition type at PostgreSQL, gives the engine only the exact governed
+`DecisionFeatureContext`, and proves real flush-failure rollback/retry before
+processor work. Chapter 23 deterministic rules and coherent `BLOCK` and fraud
+`REQUEST_3DS` transitions are next. Phase 3 is not complete.
 
 1. Chapter 22: Feature Contract And Point-In-Time Lineage.
 
-   Status: ready to implement; pre-implementation matrix is `FROZEN` and closure
-   dossier remains `IN_PROGRESS`/`DO_NOT_MERGE` pending executable proof.
+   Status: complete; the pre-implementation matrix is `VERIFIED`, every entry
+   is `PASS`, and the closure dossier is `READY_TO_MERGE`/`MERGE` after focused
+   proof, two hostile passes, PostgreSQL migration/concurrency/flush-failure
+   evidence, exact engine/snapshot/value agreement, and a live public-API demo.
 
    Replace ad hoc snapshot construction with typed, versioned FeatureDefinition
    and FeatureValue lineage while preserving the existing allow-only processor
@@ -3057,7 +3063,7 @@ No Phase 3 implementation is claimed yet.
 
 2. Chapter 23: Deterministic Rules, Block, And Fraud Step-Up.
 
-   Status: planned; starts only after Chapter 22 closure.
+   Status: next; Chapter 22's feature-lineage dependency is closed.
 
    Install immutable `rules_v1`, preserve every match and non-match, aggregate
    deterministically, and make `ALLOW`, `BLOCK`, and fraud-engine

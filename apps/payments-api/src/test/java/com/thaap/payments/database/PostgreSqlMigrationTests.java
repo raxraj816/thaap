@@ -95,6 +95,12 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("feature_snapshots", "features_json")).isTrue();
         assertThat(indexExists("fraud_decisions", "uk_fraud_decisions_attempt")).isTrue();
         assertThat(indexExists("feature_snapshots", "uk_feature_snapshots_decision")).isTrue();
+        assertThat(columnExists("feature_definitions", "feature_code")).isTrue();
+        assertThat(columnExists("feature_definitions", "value_type")).isTrue();
+        assertThat(columnExists("feature_values", "feature_definition_id")).isTrue();
+        assertThat(columnExists("feature_values", "observed_at")).isTrue();
+        assertThat(indexExists("feature_values", "uk_feature_values_attempt_feature")).isTrue();
+        assertThat(indexExists("feature_values", "idx_feature_values_point_in_time")).isTrue();
         assertThat(columnExists("audit_logs", "merchant_id")).isTrue();
         assertThat(columnExists("audit_logs", "action")).isTrue();
         assertThat(columnExists("audit_logs", "request_id")).isTrue();
@@ -897,6 +903,100 @@ class PostgreSqlMigrationTests {
                     webhookIdentityHash, webhookCreationRecordId))
                     .hasMessageContaining(
                             "uk_webhook_endpoint_creation_identity_merchant_hash");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void chapter21ToChapter22UpgradePreservesHistoricalStubDecisionAndSeedsImmutableCatalogue() {
+        String schema = "chapter22_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "17");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID customerId = UUID.randomUUID();
+            UUID paymentMethodId = UUID.randomUUID();
+            UUID paymentIntentId = UUID.randomUUID();
+            UUID paymentAttemptId = UUID.randomUUID();
+            UUID decisionId = UUID.randomUUID();
+            UUID snapshotId = UUID.randomUUID();
+            String historicalSnapshot = "{\"card_bin\":\"499999\",\"payment_amount\":1200}";
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                    VALUES (?, 'chapter22-upgrade', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "chapter22-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.customers (id, merchant_id, email_hash, created_at)
+                    VALUES (?, ?, 'chapter22-email', CURRENT_TIMESTAMP)
+                    """.formatted(schema), customerId, merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.payment_methods
+                        (id, merchant_id, customer_id, type, token, card_fingerprint, card_bin, card_last4,
+                         card_funding, card_country, created_at)
+                    VALUES (?, ?, ?, 'CARD', 'tok-old', 'fp-old', '499999', '0001', 'CREDIT', 'US',
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), paymentMethodId, merchantId, customerId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.payment_intents
+                        (id, merchant_id, customer_id, amount, currency, capture_method, status, metadata,
+                         traffic_origin, created_at, updated_at)
+                    VALUES (?, ?, ?, 1200, 'USD', 'MANUAL', 'PROCESSING', '{}', 'MERCHANT_API',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """.formatted(schema), paymentIntentId, merchantId, customerId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.payment_attempts
+                        (id, merchant_id, payment_intent_id, payment_method_id, idempotency_key, status,
+                         attempt_number, fraud_decision_id, traffic_origin, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'historical-confirm', 'READY_FOR_PROCESSOR', 1, ?, 'MERCHANT_API',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """.formatted(schema), paymentAttemptId, merchantId, paymentIntentId, paymentMethodId, decisionId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.fraud_decisions
+                        (id, merchant_id, payment_attempt_id, risk_score, risk_level, action, model_version,
+                         ruleset_version, latency_ms, decision_started_at, decision_completed_at,
+                         feature_freshness_status, max_feature_age_ms, reason_codes, traffic_origin, created_at)
+                    VALUES (?, ?, ?, 0.0000, 'LOW', 'ALLOW', NULL, 'rules_stub_v1', 0,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'FRESH', 0,
+                            '["RULES_NOT_ENABLED"]', 'MERCHANT_API', CURRENT_TIMESTAMP)
+                    """.formatted(schema), decisionId, merchantId, paymentAttemptId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.feature_snapshots
+                        (id, merchant_id, fraud_decision_id, payment_attempt_id, feature_version, features_json,
+                         computed_at, oldest_feature_timestamp, max_feature_age_ms, freshness_status,
+                         stale_feature_names, missing_feature_names, traffic_origin, created_at)
+                    VALUES (?, ?, ?, ?, 'features_v1', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'FRESH',
+                            '[]', '[]', 'MERCHANT_API', CURRENT_TIMESTAMP)
+                    """.formatted(schema), snapshotId, merchantId, decisionId, paymentAttemptId, historicalSnapshot);
+
+            migrateSchema(upgradeDataSource, schema, "19");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT ruleset_version FROM %s.fraud_decisions WHERE id = ?
+                    """.formatted(schema), String.class, decisionId)).isEqualTo("rules_stub_v1");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT features_json FROM %s.feature_snapshots WHERE id = ?
+                    """.formatted(schema), String.class, snapshotId)).isEqualTo(historicalSnapshot);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.feature_values
+                    """.formatted(schema), Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.feature_definitions WHERE feature_version = 'v1'
+                    """.formatted(schema), Integer.class)).isEqualTo(7);
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.feature_definitions SET value_type = 'STRING'
+                    WHERE feature_code = 'payment.amount_minor'
+                    """.formatted(schema))).hasMessageContaining("feature lineage is immutable");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.feature_definitions
+                        (id, feature_code, entity_type, value_type, owner, feature_version,
+                         description, created_at)
+                    VALUES (?, 'unsafe.extra', 'PAYMENT_ATTEMPT', 'STRING', 'TEST', 'v1', 'unsafe',
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID())).hasMessageContaining("feature lineage is immutable");
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }

@@ -704,24 +704,30 @@ ReplayEngine is required before activating major rule, threshold, or model chang
 `FeatureDefinition`
 
 - `id`
-- `featureName`
+- `featureCode`
 - `entityType`
 - `valueType`
 - `owner`
-- `version`
+- `featureVersion`
 - `description`
+- optional positive `maxAgeMs`
 - `createdAt`
+
+Definitions are seeded reference data. The code/version and full
+ID/code/version lineage are unique, and database triggers reject inserts,
+updates, and deletes outside migrations.
 
 `FeatureValue`
 
 - `id`
-- `entityType`
-- `entityId`
-- `featureName`
-- `valueJson`
-- `featureTimestamp`
+- `merchantId` and `paymentAttemptId`
+- `featureDefinitionId`, `featureCode`, and `featureVersion`
+- `valueType`
+- exactly one of `longValue`, `stringValue`, `booleanValue`, or `decimalValue`
+- `observedAt`
 - `computedAt`
-- `featureVersion`
+- trusted `trafficOrigin`
+- `createdAt`
 
 Purpose:
 
@@ -733,11 +739,25 @@ Purpose:
 Point-in-time join rule:
 
 ```text
-For PaymentAttempt event_time T:
-use latest FeatureValue for the entity where featureTimestamp <= T.
+For PaymentAttempt decision_started_at T:
+use only same-tenant FeatureValues for that attempt where observed_at <= T.
 ```
 
-`FeatureSnapshot` remains the immutable exact feature set used for a FraudDecision.
+Composite foreign keys bind merchant, attempt, origin, and the immutable
+definition identity `(id, featureCode, featureVersion, valueType)`. A
+type/value check requires exactly the column named by `valueType`; the
+four-column definition foreign key separately prevents a structurally valid
+typed column from disagreeing with its definition. `observedAt <= computedAt`
+is enforced in SQL, while the
+cross-table `observedAt <= decisionStartedAt` rule is enforced during
+materialization and repeated by the canonical point-in-time query. V19 rejects
+updates to FeatureValue, FeatureSnapshot, and FraudDecision evidence.
+
+`FeatureSnapshot` remains the immutable exact feature set used for a
+FraudDecision. Chapter 22 writes its keys in lexical order and configures JSON
+round trips to preserve LONG and DECIMAL domain types. The same immutable
+`DecisionFeatureContext` is passed to the decision engine and persisted into
+the snapshot; a parallel entity-derived decision input does not exist.
 
 ### 11.2 Dataset Source
 
