@@ -35,6 +35,9 @@ public class WebhookEndpointCreationRecord {
     @Column(name = "request_hash", nullable = false, length = 64)
     private String requestHash;
 
+    @Column(name = "request_hash_key_version", nullable = false, length = 32)
+    private String requestHashKeyVersion;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private WebhookEndpointCreationStatus status;
@@ -74,10 +77,18 @@ public class WebhookEndpointCreationRecord {
 
     public WebhookEndpointCreationRecord(UUID merchantId, String idempotencyKeyHash, String requestHash,
             UUID leaseToken, Instant leaseExpiresAt, Instant now, Instant expiresAt) {
+        this(merchantId, idempotencyKeyHash, requestHash, "v1",
+                leaseToken, leaseExpiresAt, now, expiresAt);
+    }
+
+    public WebhookEndpointCreationRecord(UUID merchantId, String idempotencyKeyHash,
+            String requestHash, String requestHashKeyVersion,
+            UUID leaseToken, Instant leaseExpiresAt, Instant now, Instant expiresAt) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.idempotencyKeyHash = idempotencyKeyHash;
         this.requestHash = requestHash;
+        this.requestHashKeyVersion = requestHashKeyVersion;
         this.status = WebhookEndpointCreationStatus.IN_PROGRESS;
         this.leaseToken = leaseToken;
         this.leaseExpiresAt = leaseExpiresAt;
@@ -125,10 +136,21 @@ public class WebhookEndpointCreationRecord {
                 && leaseExpiresAt.isAfter(now);
     }
 
+    public boolean isExpired(Instant now) {
+        return !expiresAt.isAfter(now);
+    }
+
     public boolean isOwnedInProgress(UUID expectedLeaseToken) {
         return status == WebhookEndpointCreationStatus.IN_PROGRESS
                 && expectedLeaseToken != null
                 && expectedLeaseToken.equals(leaseToken);
+    }
+
+    public void requireOwnedInProgress(UUID expectedLeaseToken) {
+        if (!isOwnedInProgress(expectedLeaseToken)) {
+            throw new IllegalStateException(
+                    "Webhook endpoint creation reservation ownership changed");
+        }
     }
 
     public UUID getId() {
@@ -145,6 +167,10 @@ public class WebhookEndpointCreationRecord {
 
     public String getRequestHash() {
         return requestHash;
+    }
+
+    public String getRequestHashKeyVersion() {
+        return requestHashKeyVersion;
     }
 
     public WebhookEndpointCreationStatus getStatus() {
