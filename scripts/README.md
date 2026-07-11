@@ -147,10 +147,16 @@ authority.
 
 Each run is journaled in an owner-only SQLite file. Reuse `--run-id` to resume
 after interruption. Completed steps replay from checkpoints, mutation steps use
-stable run-scoped idempotency keys, and two processes cannot own one live run.
-If a crash makes a non-idempotent merchant/customer creation ambiguous, the run
-enters `NEEDS_CLEANUP` instead of repeating it. Record the operator disposition
-explicitly:
+stable run-scoped idempotency keys, persisted retry-safety classifications
+cannot be rewritten by a later binary, and two processes cannot own one live
+run. Merchant and customer creation now reconcile through server-side
+idempotency even if the process dies immediately after the API commits and
+before any local resource/checkpoint write. Every HTTP request heartbeats the
+run lease before and after its bounded network wait, and startup rejects a
+lease that does not exceed one request timeout, so slow verification reads
+cannot silently hand ownership to another process. A future or explicitly
+unsafe step with an ambiguous outcome still enters `NEEDS_CLEANUP` rather than
+being repeated. Record the operator disposition explicitly:
 
 ```bash
 scripts/generate-synthetic-scenarios.py \
@@ -162,6 +168,10 @@ scripts/generate-synthetic-scenarios.py \
 Abandonment erases secret-bearing checkpoint responses but retains a separate
 sanitized inventory of created merchant/resource IDs so the operator can
 reconcile or clean up durable product state without recovering API keys.
+Every resource-producing step persists an explicit immutable `resource_type`;
+resource lineage no longer depends on step-name suffixes. Older journals are
+additively backfilled, including interrupted steps and the tenant-isolation
+verifier merchant, before resume is allowed.
 
 Its JSON summary
 includes safe IDs, final statuses, fraud decision IDs, actual processor response
@@ -257,6 +267,8 @@ The non-trivial gate also runs:
 ```bash
 scripts/invariant-proof-check.py docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md
 scripts/escaped-review-check.py
+scripts/slice-review-check.py
+scripts/slice-review-check.py --require-verified
 scripts/chapter-closure-check.py \
   docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
   docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md

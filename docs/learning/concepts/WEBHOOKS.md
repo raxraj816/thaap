@@ -154,23 +154,28 @@ Chapter 19 implements the complete bounded V1 delivery loop:
 - raw signing keys are AES-256-GCM encrypted under a separate configured key
 - key-encryption-key rollover keeps versioned decrypt keys, fails closed on
   unreadable active current, unexpired previous, or unexpired creation-replay
-  versions, and lazily re-encrypts old ciphertext
+  versions even when delivery execution is disabled, and lazily re-encrypts
+  old ciphertext
 - endpoint-create idempotency reservations use fenced expiring leases, so a
   process death can be reclaimed without stealing active ownership or minting
-  a second endpoint/secret
+  a second endpoint/secret; the live owner locks its reservation before secret
+  generation or any endpoint, subscription, or audit mutation
 - event subscriptions select only relevant active endpoints
 - payment mutations persist one immutable event and endpoint deliveries
 - a PostgreSQL lease worker claims each numbered attempt immediately before
   dispatch without holding locks over HTTP
-- exact payload bytes are timestamped and signed with HMAC-SHA256
+- exact payload bytes are timestamped and signed with HMAC-SHA256 while the
+  endpoint row lock prevents a concurrent rotation from changing generation
+  status between authorization and cryptographic use
 - configured path/query values are serialized through the URI ASCII
   representation so Unicode becomes UTF-8 percent escapes without rewriting
   existing escapes
-- signature time is read after dispatch preparation so database lock wait does
-  not consume the merchant freshness tolerance
-- a previous-generation use window is checked against that exact signature
-  timestamp, so loading a secret before expiry cannot authorize signing after
-  expiry
+- dispatch preparation supplies only a timestamp lower bound; signature time
+  is captured after acquiring the endpoint lock, immediately before validation
+  and HMAC, so the lock wait cannot hide previous-secret expiry
+- generation validity is checked at that exact signature timestamp inside the
+  same transaction that decrypts and signs; current-to-previous rotation waits
+  for signing, and a previous generation is invalid exactly at expiry
 - payload bytes are produced by a JSON serializer, not manual string
   concatenation, so future event values cannot break the merchant-verifiable
   body
@@ -273,8 +278,11 @@ Chapter 21 adds product-safe endpoint operations:
 - rotation returns a new current secret while retaining the previous encrypted
   generation for a default 15-minute grace window
 - deliveries bind to the secret generation present when they are claimed;
-  an old claimed generation works strictly before its expiry and fails at or
-  after expiry
+  an old claimed generation works strictly before its expiry; at or after
+  expiry it produces no HTTP send and schedules a retry whose next claim binds
+  the current generation; if the final attempt first discovers the stale
+  snapshot, it rebinds current state in the same claim before its first HTTP
+  opportunity
 - a second rotation is rejected while a previous-generation overlap is active
 - merchants should accept both revealed secrets during the reported
   `previousSigningSecretExpiresAt` window, deduplicate by authenticated event
