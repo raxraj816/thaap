@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
+import com.thaap.payments.security.CorrelationValueHasher;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import java.util.UUID;
@@ -47,7 +48,7 @@ class CustomerAndPaymentMethodContractTests {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private SensitiveValueHasher sensitiveValueHasher;
+    private CorrelationValueHasher correlationValueHasher;
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -78,8 +79,10 @@ class CustomerAndPaymentMethodContractTests {
                 .getContentAsString();
         var json = objectMapper.readTree(response);
         var customerId = UUID.fromString(json.get("id").asText());
-        var expectedEmailHash = sensitiveValueHasher.hmacSha256Lowercase("customer.email", "Buyer@Example.COM");
-        var expectedPhoneHash = sensitiveValueHasher.hmacSha256Lowercase("customer.phone", "+15555550123");
+        var expectedEmailHash = correlationValueHasher.hmacSha256Lowercase(
+                "customer.email", "Buyer@Example.COM");
+        var expectedPhoneHash = correlationValueHasher.hmacSha256Lowercase(
+                "customer.phone", "+15555550123");
 
         assertThat(json.get("merchantId").asText()).isEqualTo(merchant.id().toString());
         assertThat(json.has("emailHash")).isFalse();
@@ -98,6 +101,30 @@ class CustomerAndPaymentMethodContractTests {
         assertThat(stored.get("PHONE_HASH")).isEqualTo(expectedPhoneHash);
         assertThat(stored).doesNotContainValue("Buyer@Example.COM");
         assertThat(stored).doesNotContainValue("+15555550123");
+    }
+
+    @Test
+    void fraudAndPiiCorrelationRemainStableAcrossReplayPepperRotation() {
+        CorrelationValueHasher stableCorrelation =
+                new CorrelationValueHasher("stable-correlation-pepper");
+        SensitiveValueHasher replayV1 =
+                new SensitiveValueHasher("replay-pepper-v1", "v1", "");
+        SensitiveValueHasher replayV2 =
+                new SensitiveValueHasher("replay-pepper-v2", "v2", "");
+
+        assertThat(replayV1.hmacSha256("idempotency.request", "same-request"))
+                .isNotEqualTo(replayV2.hmacSha256(
+                        "idempotency.request", "same-request"));
+        assertThat(stableCorrelation.hmacSha256(
+                        "payment_method.card_fingerprint", "4999990000000001"))
+                .isEqualTo(new CorrelationValueHasher("stable-correlation-pepper")
+                        .hmacSha256(
+                                "payment_method.card_fingerprint",
+                                "4999990000000001"));
+        assertThat(stableCorrelation.hmacSha256Lowercase(
+                        "customer.email", "Buyer@Example.COM"))
+                .isEqualTo(stableCorrelation.hmacSha256Lowercase(
+                        "customer.email", "buyer@example.com"));
     }
 
     @Test
@@ -129,6 +156,116 @@ class CustomerAndPaymentMethodContractTests {
     }
 
     @Test
+    void customerCreationIdempotencyReplaysOneTenantScopedCustomerAndRejectsChangedPii()
+            throws Exception {
+        MerchantAccess merchant = createMerchant("idempotent-customer-merchant");
+        String requestBody = """
+                {
+                  "email": "idempotent@example.com",
+                  "phone": "+15555550999"
+                }
+                """;
+
+        String firstResponse = mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "customer-create-replay")
+                        .contentType(APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String replayResponse = mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "customer-create-replay")
+                        .contentType(APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(replayResponse).isEqualTo(firstResponse);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM customers", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT response_body
+                FROM idempotency_records
+                WHERE merchant_id = ?
+                  AND idempotency_key = ?
+                """, String.class, merchant.id(), "customer-create-replay"))
+                .doesNotContain("idempotent@example.com")
+                .doesNotContain("+15555550999");
+
+        mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "customer-create-replay")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "changed@example.com",
+                                  "phone": "+15555550999"
+                                }
+                                """))
+                .andExpect(status().isConflict());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM customers", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void customerCreationIdempotencyKeyIsIsolatedAcrossMerchants() throws Exception {
+        MerchantAccess merchantA = createMerchant("customer-tenant-a");
+        MerchantAccess merchantB = createMerchant("customer-tenant-b");
+
+        String responseA = mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchantA.apiKey())
+                        .header(IDEMPOTENCY_KEY, "shared-customer-key")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"email": "tenant-a@example.com"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String responseB = mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchantB.apiKey())
+                        .header(IDEMPOTENCY_KEY, "shared-customer-key")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"email": "tenant-b@example.com"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(objectMapper.readTree(responseA).get("id").asText())
+                .isNotEqualTo(objectMapper.readTree(responseB).get("id").asText());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM customers", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void customerCreationRejectsMalformedIdempotencyKeys() throws Exception {
+        MerchantAccess merchant = createMerchant("blank-customer-key");
+
+        mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, " ")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"email": "blank-key@example.com"}
+                                """))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "x".repeat(256))
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"email": "oversized-key@example.com"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM customers", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_records", Integer.class)).isZero();
+    }
+
+    @Test
     void paymentMethodCreationStoresInternalFingerprintWithoutReturningIt() throws Exception {
         var merchant = createMerchant("merchant-a");
         var customerId = createCustomer(merchant, "buyer@example.com");
@@ -148,7 +285,7 @@ class CustomerAndPaymentMethodContractTests {
                 .getContentAsString();
         var json = objectMapper.readTree(response);
         var paymentMethodId = UUID.fromString(json.get("id").asText());
-        var expectedFingerprint = sensitiveValueHasher.hmacSha256("payment_method.card_fingerprint",
+        var expectedFingerprint = correlationValueHasher.hmacSha256("payment_method.card_fingerprint",
                 "4242424242424242");
 
         assertThat(json.get("merchantId").asText()).isEqualTo(merchant.id().toString());

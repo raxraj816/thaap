@@ -180,6 +180,13 @@ class DatabaseMigrationTests {
                   AND description = 'harden webhook delivery execution'
                   AND success = TRUE
                 """, Integer.class);
+        var replayIdentityRotationSchema = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '17'
+                  AND description = 'complete hmac rotation boundaries'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
@@ -190,6 +197,7 @@ class DatabaseMigrationTests {
         assertThat(legacyCaptureMethodHardening).isEqualTo(1);
         assertThat(refundLedgerSchema).isEqualTo(1);
         assertThat(webhookDeliverySchema).isEqualTo(1);
+        assertThat(replayIdentityRotationSchema).isEqualTo(1);
     }
 
     @Test

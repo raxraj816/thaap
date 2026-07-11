@@ -11,11 +11,16 @@ import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -48,6 +54,9 @@ class IdempotencyServiceTests {
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void cleanDatabase() {
@@ -78,6 +87,111 @@ class IdempotencyServiceTests {
     }
 
     @Test
+    void completedReservationReplaysAcrossHashPepperRotation() {
+        String oldPepper = "general-idempotency-old-pepper";
+        String newPepper = "general-idempotency-new-pepper";
+        SensitiveValueHasher oldHasher = new SensitiveValueHasher(
+                oldPepper, "general-v1", "");
+        IdempotencyService oldService = idempotencyService(oldHasher);
+        Merchant merchant = createMerchant("rotation-safe-idempotency");
+        MerchantContext context = context(merchant);
+        TestRequest request = new TestRequest("rotation-safe-request");
+        AtomicInteger supplierCalls = new AtomicInteger();
+
+        ResponseEntity<TestResponse> original = oldService.execute(
+                context, "rotation-safe-key", "test.create", request,
+                TestResponse.class, () -> {
+                    supplierCalls.incrementAndGet();
+                    return ResponseEntity.status(HttpStatus.CREATED)
+                            .body(new TestResponse("original"));
+                });
+
+        String previousKeyring = "general-v1="
+                + Base64.getEncoder().encodeToString(
+                        oldPepper.getBytes(StandardCharsets.UTF_8));
+        SensitiveValueHasher rotatedHasher = new SensitiveValueHasher(
+                newPepper, "general-v2", previousKeyring);
+        IdempotencyService rotatedService = idempotencyService(rotatedHasher);
+        ResponseEntity<TestResponse> replay = rotatedService.execute(
+                context, "rotation-safe-key", "test.create", request,
+                TestResponse.class, () -> {
+                    supplierCalls.incrementAndGet();
+                    return ResponseEntity.status(HttpStatus.CREATED)
+                            .body(new TestResponse("duplicate"));
+                });
+
+        assertThat(replay).isEqualTo(original);
+        assertThat(supplierCalls).hasValue(1);
+        assertThat(idempotencyRepository.findByMerchantIdAndKey(
+                        merchant.getId(), "rotation-safe-key"))
+                .get()
+                .extracting(IdempotencyRecord::getRequestHashKeyVersion)
+                .isEqualTo("general-v1");
+
+        IdempotencyKeyConfiguration missingOldKey =
+                new IdempotencyKeyConfiguration(
+                        idempotencyRepository,
+                        new SensitiveValueHasher(newPepper, "general-v2", ""),
+                        Clock.systemUTC());
+        assertThatThrownBy(missingOldKey::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("general-v1");
+    }
+
+    @Test
+    void expiredReplayCanRestartAfterItsHistoricalPepperIsRemoved()
+            throws Exception {
+        String oldPepper = "expired-idempotency-old-pepper";
+        SensitiveValueHasher oldHasher = new SensitiveValueHasher(
+                oldPepper, "expired-v1", "");
+        Merchant merchant = createMerchant("expired-key-retirement");
+        MerchantContext context = context(merchant);
+        TestRequest oldRequest = new TestRequest("old-request");
+        String serializedOldRequest = objectMapper.writeValueAsString(oldRequest);
+        Instant oldStartedAt = Instant.now().minus(2, ChronoUnit.DAYS);
+        UUID oldLeaseToken = UUID.randomUUID();
+        IdempotencyRecord expired = new IdempotencyRecord(
+                merchant.getId(), "reusable-expired-key", "test.old",
+                oldHasher.hmacSha256(
+                        "idempotency.request", serializedOldRequest, "expired-v1"),
+                "expired-v1", oldLeaseToken, oldStartedAt.plusSeconds(30),
+                oldStartedAt, oldStartedAt.plus(1, ChronoUnit.DAYS));
+        expired.complete(
+                oldLeaseToken, HttpStatus.CREATED.value(),
+                objectMapper.writeValueAsString(new TestResponse("old")),
+                oldStartedAt.plusSeconds(1),
+                Instant.now().minusSeconds(1));
+        idempotencyRepository.saveAndFlush(expired);
+
+        SensitiveValueHasher newHasher = new SensitiveValueHasher(
+                "expired-idempotency-new-pepper", "expired-v2", "");
+        IdempotencyKeyConfiguration retiredOldKey =
+                new IdempotencyKeyConfiguration(
+                        idempotencyRepository, newHasher, Clock.systemUTC());
+        retiredOldKey.afterPropertiesSet();
+
+        AtomicInteger supplierCalls = new AtomicInteger();
+        ResponseEntity<TestResponse> restarted = idempotencyService(newHasher).execute(
+                context, "reusable-expired-key", "test.new",
+                new TestRequest("new-request"), TestResponse.class, () -> {
+                    supplierCalls.incrementAndGet();
+                    return ResponseEntity.status(HttpStatus.CREATED)
+                            .body(new TestResponse("new"));
+                });
+
+        assertThat(restarted.getBody()).isEqualTo(new TestResponse("new"));
+        assertThat(supplierCalls).hasValue(1);
+        assertThat(idempotencyRepository.findById(expired.getId()))
+                .get()
+                .satisfies(record -> {
+                    assertThat(record.getOperation()).isEqualTo("test.new");
+                    assertThat(record.getRequestHashKeyVersion())
+                            .isEqualTo("expired-v2");
+                    assertThat(record.getExpiresAt()).isAfter(Instant.now());
+                });
+    }
+
+    @Test
     void sameKeyWithDifferentOperationConflictsEvenWhenBodyMatches() {
         var merchant = createMerchant("merchant-a");
         var context = context(merchant);
@@ -91,7 +205,7 @@ class IdempotencyServiceTests {
     }
 
     @Test
-    void inProgressReservationRejectsDuplicateRequestBeforeMutationRuns() throws Exception {
+    void inProgressReservationSerializesDuplicateAndReplaysWithoutSecondMutation() throws Exception {
         var merchant = createMerchant("merchant-a");
         var context = context(merchant);
         var request = new TestRequest("slow-request");
@@ -110,29 +224,24 @@ class IdempotencyServiceTests {
 
             assertThat(operationStarted.await(5, TimeUnit.SECONDS)).isTrue();
 
-            var duplicate = executor.submit(() -> {
-                try {
-                    idempotencyService.execute(context, "slow-key", "test.slow", request, TestResponse.class, () -> {
+            var duplicate = executor.submit(() ->
+                    idempotencyService.execute(
+                            context, "slow-key", "test.slow", request,
+                            TestResponse.class, () -> {
                         duplicateSupplierCalls.incrementAndGet();
                         return ResponseEntity.status(HttpStatus.CREATED).body(new TestResponse("duplicate"));
-                    });
-                    return null;
-                } catch (Throwable exception) {
-                    return exception;
-                }
-            });
+                    }));
 
-            var duplicateFailure = duplicate.get(5, TimeUnit.SECONDS);
-            assertThat(duplicateFailure)
-                    .isInstanceOf(ResponseStatusException.class)
-                    .extracting("statusCode")
-                    .isEqualTo(HttpStatus.CONFLICT);
-            assertThat(((ResponseStatusException) duplicateFailure).getReason())
-                    .isEqualTo("Idempotency key is already in progress");
+            assertThatThrownBy(() -> duplicate.get(200, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
             assertThat(duplicateSupplierCalls).hasValue(0);
 
             finishOperation.countDown();
-            assertThat(first.get(5, TimeUnit.SECONDS).getBody()).isEqualTo(new TestResponse("first"));
+            ResponseEntity<TestResponse> firstResponse = first.get(5, TimeUnit.SECONDS);
+            ResponseEntity<TestResponse> replayed = duplicate.get(5, TimeUnit.SECONDS);
+            assertThat(firstResponse.getBody()).isEqualTo(new TestResponse("first"));
+            assertThat(replayed.getBody()).isEqualTo(firstResponse.getBody());
+            assertThat(duplicateSupplierCalls).hasValue(0);
         } finally {
             finishOperation.countDown();
             executor.shutdownNow();
@@ -185,8 +294,11 @@ class IdempotencyServiceTests {
         var request = new TestRequest("manual-in-progress");
         var requestHash = requestHash(request);
 
-        idempotencyRepository.saveAndFlush(new IdempotencyRecord(merchant.getId(), "manual-key", "test.create",
-                requestHash, Instant.now().plus(1, ChronoUnit.DAYS)));
+        Instant now = Instant.now();
+        idempotencyRepository.saveAndFlush(new IdempotencyRecord(
+                merchant.getId(), "manual-key", "test.create", requestHash,
+                sensitiveValueHasher.currentKeyVersion(), UUID.randomUUID(),
+                now.plusSeconds(30), now, now.plus(1, ChronoUnit.DAYS)));
 
         var record = idempotencyRepository.findByMerchantIdAndKey(merchant.getId(), "manual-key").orElseThrow();
         assertThat(record.getOperation()).isEqualTo("test.create");
@@ -195,12 +307,43 @@ class IdempotencyServiceTests {
         assertThat(record.getHttpStatus()).isNull();
         assertThat(record.getResponseBody()).isNull();
         assertThat(record.getExpiresAt()).isAfter(Instant.now());
+        assertThat(record.getLeaseToken()).isNotNull();
+        assertThat(record.getLeaseExpiresAt()).isAfter(Instant.now());
+    }
+
+    @Test
+    void expiredReservationIsFencedReclaimedAndCompleted() throws Exception {
+        Merchant merchant = createMerchant("merchant-expired-reservation");
+        MerchantContext merchantContext = context(merchant);
+        TestRequest request = new TestRequest("expired-request");
+        Instant now = Instant.now();
+        IdempotencyRecord expired = new IdempotencyRecord(
+                merchant.getId(), "expired-key", "test.create", requestHash(request),
+                sensitiveValueHasher.currentKeyVersion(),
+                UUID.randomUUID(), now.minusSeconds(1), now.minusSeconds(60),
+                now.plus(1, ChronoUnit.DAYS));
+        idempotencyRepository.saveAndFlush(expired);
+
+        ResponseEntity<TestResponse> response = execute(
+                merchantContext, "expired-key", "test.create", request, "reclaimed");
+
+        assertThat(response.getBody()).isEqualTo(new TestResponse("reclaimed"));
+        IdempotencyRecord completed = idempotencyRepository.findById(expired.getId()).orElseThrow();
+        assertThat(completed.getStatus()).isEqualTo(IdempotencyStatus.COMPLETED);
+        assertThat(completed.getLeaseToken()).isNull();
+        assertThat(completed.getLeaseExpiresAt()).isNull();
     }
 
     private ResponseEntity<TestResponse> execute(MerchantContext context, String key, String operation,
             TestRequest request, String value) {
         return idempotencyService.execute(context, key, operation, request, TestResponse.class,
                 () -> ResponseEntity.status(HttpStatus.CREATED).body(new TestResponse(value)));
+    }
+
+    private IdempotencyService idempotencyService(SensitiveValueHasher hasher) {
+        return new IdempotencyService(
+                idempotencyRepository, objectMapper, hasher, transactionManager,
+                Clock.systemUTC(), Duration.ofSeconds(30));
     }
 
     private Merchant createMerchant(String name) {

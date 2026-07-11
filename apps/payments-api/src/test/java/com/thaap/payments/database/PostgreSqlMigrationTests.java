@@ -119,6 +119,21 @@ class PostgreSqlMigrationTests {
         assertThat(indexExists("refunds", "uk_refunds_payment_intent")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
+        assertThat(columnExists("idempotency_records", "lease_token")).isTrue();
+        assertThat(columnExists("idempotency_records", "lease_expires_at")).isTrue();
+        assertThat(columnExists("idempotency_records", "request_hash_key_version")).isTrue();
+        assertThat(columnExists("merchant_creation_records", "idempotency_key_hash")).isTrue();
+        assertThat(columnExists("merchant_creation_records", "merchant_id")).isTrue();
+        assertThat(columnExists("merchant_creation_records", "derivation_key_version")).isTrue();
+        assertThat(columnExists("merchant_creation_identities", "identity_hash")).isTrue();
+        assertThat(columnExists("merchant_creation_identities", "key_version")).isTrue();
+        assertThat(columnExists(
+                "webhook_endpoint_creation_records",
+                "request_hash_key_version")).isTrue();
+        assertThat(columnExists(
+                "webhook_endpoint_creation_identities", "identity_hash")).isTrue();
+        assertThat(columnExists(
+                "webhook_endpoint_creation_identities", "key_version")).isTrue();
         assertThat(columnExists("webhook_deliveries", "attempt_count")).isTrue();
         assertThat(columnExists("webhook_deliveries", "webhook_event_id")).isTrue();
         assertThat(columnExists("webhook_deliveries", "claim_token")).isTrue();
@@ -651,6 +666,237 @@ class PostgreSqlMigrationTests {
                     WHERE id = ?
                     """.formatted(schema), recordId))
                     .hasMessageContaining("ck_webhook_endpoint_creation_lease");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v15LeasesStrandedIdempotencyAndCreatesSecretSafeMerchantReservations() {
+        String schema = "v15_creation_idempotency_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "14");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID recordId = UUID.randomUUID();
+            UUID completedRecordId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    ) VALUES (?, 'v15-idempotency', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "v15-idempotency-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.idempotency_records (
+                        id, merchant_id, idempotency_key, operation, request_hash,
+                        status, created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, 'stranded-key', 'customers.create', ?, 'IN_PROGRESS',
+                        CURRENT_TIMESTAMP - INTERVAL '2 minutes',
+                        CURRENT_TIMESTAMP - INTERVAL '2 minutes',
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), recordId, merchantId, "1".repeat(64));
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.idempotency_records (
+                        id, merchant_id, idempotency_key, operation, request_hash,
+                        status, http_status, response_body,
+                        created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, 'completed-key', 'customers.create', ?,
+                        'COMPLETED', 201, '{"id":"safe-id"}',
+                        CURRENT_TIMESTAMP - INTERVAL '2 minutes',
+                        CURRENT_TIMESTAMP - INTERVAL '1 minute',
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), completedRecordId, merchantId, "2".repeat(64));
+
+            migrateSchema(upgradeDataSource, schema, "15");
+
+            Map<String, Object> leased = upgradeJdbcTemplate.queryForMap("""
+                    SELECT lease_token, lease_expires_at
+                    FROM %s.idempotency_records
+                    WHERE id = ?
+                    """.formatted(schema), recordId);
+            assertThat(leased.get("lease_token")).isEqualTo(recordId);
+            assertThat(leased.get("lease_expires_at")).isNotNull();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT lease_expires_at <= CURRENT_TIMESTAMP
+                    FROM %s.idempotency_records
+                    WHERE id = ?
+                    """.formatted(schema), Boolean.class, recordId)).isTrue();
+            Map<String, Object> completed = upgradeJdbcTemplate.queryForMap("""
+                    SELECT lease_token, lease_expires_at, response_body
+                    FROM %s.idempotency_records
+                    WHERE id = ?
+                    """.formatted(schema), completedRecordId);
+            assertThat(completed.get("lease_token")).isNull();
+            assertThat(completed.get("lease_expires_at")).isNull();
+            assertThat(completed.get("response_body")).isEqualTo("{\"id\":\"safe-id\"}");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = ?
+                      AND table_name = 'merchant_creation_records'
+                    """, Integer.class, schema)).isEqualTo(1);
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.idempotency_records
+                    SET lease_token = NULL,
+                        lease_expires_at = NULL
+                    WHERE id = ?
+                    """.formatted(schema), recordId))
+                    .hasMessageContaining("ck_idempotency_records_lease");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.idempotency_records
+                    SET lease_token = ?,
+                        lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '1 minute'
+                    WHERE id = ?
+                    """.formatted(schema), UUID.randomUUID(), completedRecordId))
+                    .hasMessageContaining("ck_idempotency_records_lease");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v16BackfillsVersionedMerchantCreationIdentityWithoutLosingReplayLineage() {
+        String schema = "v16_merchant_identity_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "15");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID recordId = UUID.randomUUID();
+            String identityHash = "a".repeat(64);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    ) VALUES (?, 'v16-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "v16-merchant-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchant_creation_records (
+                        id, idempotency_key_hash, request_hash, status, merchant_id,
+                        created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, ?, 'COMPLETED', ?,
+                        CURRENT_TIMESTAMP - INTERVAL '1 minute',
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), recordId, identityHash,
+                    "b".repeat(64), merchantId);
+
+            migrateSchema(upgradeDataSource, schema, "16");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT derivation_key_version
+                    FROM %s.merchant_creation_records
+                    WHERE id = ?
+                    """.formatted(schema), String.class, recordId)).isEqualTo("v1");
+            Map<String, Object> identity = upgradeJdbcTemplate.queryForMap("""
+                    SELECT identity_hash, key_version, merchant_creation_record_id
+                    FROM %s.merchant_creation_identities
+                    WHERE identity_hash = ?
+                    """.formatted(schema), identityHash);
+            assertThat(identity.get("identity_hash")).isEqualTo(identityHash);
+            assertThat(identity.get("key_version")).isEqualTo("v1");
+            assertThat(identity.get("merchant_creation_record_id")).isEqualTo(recordId);
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchant_creation_identities (
+                        identity_hash, key_version, merchant_creation_record_id, created_at
+                    ) VALUES (?, 'v2', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), identityHash, recordId))
+                    .hasMessageContaining("pk_merchant_creation_identities");
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v17BackfillsEveryLiveReplayHashVersionAndWebhookIdentityAlias() {
+        String schema = "v17_replay_identity_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "16");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID idempotencyRecordId = UUID.randomUUID();
+            UUID webhookCreationRecordId = UUID.randomUUID();
+            String webhookIdentityHash = "c".repeat(64);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (
+                        id, name, status, api_key_prefix, api_key_hash, created_at
+                    ) VALUES (?, 'v17-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "v17-merchant-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.idempotency_records (
+                        id, merchant_id, idempotency_key, operation, request_hash,
+                        status, lease_token, lease_expires_at,
+                        created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, 'legacy-key', 'customers.create', ?,
+                        'IN_PROGRESS', ?, CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP - INTERVAL '1 minute',
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), idempotencyRecordId, merchantId,
+                    "a".repeat(64), UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_creation_records (
+                        id, merchant_id, idempotency_key_hash, request_hash,
+                        status, lease_token, lease_expires_at,
+                        created_at, updated_at, expires_at
+                    ) VALUES (
+                        ?, ?, ?, ?,
+                        'IN_PROGRESS', ?, CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP - INTERVAL '1 minute',
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    )
+                    """.formatted(schema), webhookCreationRecordId, merchantId,
+                    webhookIdentityHash, "b".repeat(64), UUID.randomUUID());
+
+            migrateSchema(upgradeDataSource, schema, "17");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT request_hash_key_version
+                    FROM %s.idempotency_records
+                    WHERE id = ?
+                    """.formatted(schema), String.class, idempotencyRecordId))
+                    .isEqualTo("v1");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT request_hash_key_version
+                    FROM %s.webhook_endpoint_creation_records
+                    WHERE id = ?
+                    """.formatted(schema), String.class, webhookCreationRecordId))
+                    .isEqualTo("v1");
+            Map<String, Object> alias = upgradeJdbcTemplate.queryForMap("""
+                    SELECT merchant_id, identity_hash, key_version, creation_record_id
+                    FROM %s.webhook_endpoint_creation_identities
+                    WHERE creation_record_id = ?
+                    """.formatted(schema), webhookCreationRecordId);
+            assertThat(alias.get("merchant_id")).isEqualTo(merchantId);
+            assertThat(alias.get("identity_hash")).isEqualTo(webhookIdentityHash);
+            assertThat(alias.get("key_version")).isEqualTo("v1");
+            assertThat(alias.get("creation_record_id"))
+                    .isEqualTo(webhookCreationRecordId);
+
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_creation_identities (
+                        id, merchant_id, identity_hash, key_version,
+                        creation_record_id, created_at
+                    ) VALUES (?, ?, ?, 'v2', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID(), merchantId,
+                    webhookIdentityHash, webhookCreationRecordId))
+                    .hasMessageContaining(
+                            "uk_webhook_endpoint_creation_identity_merchant_hash");
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
