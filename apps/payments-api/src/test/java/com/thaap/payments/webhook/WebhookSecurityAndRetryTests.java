@@ -835,6 +835,21 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void disabledExecutionAcceptsCompleteAdministrationKeyInventoryWithoutWorkerSettings() {
+        WebhookEndpointRepository endpointRepository = mock(WebhookEndpointRepository.class);
+        Instant validationTime = Instant.parse("2026-06-28T10:00:00Z");
+        when(endpointRepository.findRequiredSecretKeyVersions(validationTime))
+                .thenReturn(java.util.List.of("current-v1"));
+        WebhookExecutionConfiguration configuration = new WebhookExecutionConfiguration(
+                false, new WebhookSecretCipher(ENCODED_KEY, "current-v1", new SecureRandom()),
+                new WebhookTargetPolicy(false, Set.of()), endpointRepository,
+                Clock.fixed(validationTime, ZoneOffset.UTC),
+                Duration.ZERO, Duration.ZERO, Duration.ZERO);
+
+        configuration.validate();
+    }
+
+    @Test
     void versionedKeyringDecryptsAndLazilyReencryptsWithCurrentKey() {
         String nextEncodedKey = Base64.getEncoder().encodeToString(
                 "next-webhook-key-32-bytes-123456".getBytes(java.nio.charset.StandardCharsets.UTF_8));

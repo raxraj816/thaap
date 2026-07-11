@@ -3,10 +3,10 @@
 - Parent chapter: 21
 - Review provenance: RETROACTIVE_RECOVERY
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX
-- Product implementation checkpoint: PENDING_COMMIT
-- Independent implementation review: PENDING
+- Product implementation checkpoint: 00e1607
+- Independent implementation review: PASS
 - Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: NOT_READY
+- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
 - Escaped findings: ER-0039
 
 ## Frozen promise
@@ -51,3 +51,10 @@ persisted version named by the ciphertext envelope.
 - `requiredKeyInventoryIncludesCurrentPreviousAndReplayCiphertext`
 
 Aggregate suite totals are regression context only.
+
+## Independent review result
+
+The review began from reachable capabilities, not the worker flag. Missing
+current/previous/replay KEKs fail before the disabled-mode return, while a
+complete persisted inventory starts without evaluating worker-only timeout or
+target settings. No unresolved severity-blocking partition remains.
