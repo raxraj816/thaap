@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 
 GENERATOR_VERSION = "synthetic_scenario_generator_v1"
@@ -28,6 +28,13 @@ DEFAULT_BASE_URL = "http://localhost:8080"
 DEFAULT_OUTPUT_ROOT = pathlib.Path("build/reports/synthetic-scenarios")
 DEFAULT_STATE_PATH = DEFAULT_OUTPUT_ROOT / "generator-runs.sqlite3"
 RUN_LEASE_SECONDS = 90
+RESOURCE_TYPES = frozenset({
+    "MERCHANT",
+    "CUSTOMER",
+    "PAYMENT_METHOD",
+    "PAYMENT_INTENT",
+    "PAYMENT_ATTEMPT",
+})
 ADMIN_TOKEN_ENVIRONMENT_VARIABLE = "THAAP_ADMIN_BOOTSTRAP_TOKEN"
 SCENARIO_RUNNER_TOKEN_ENVIRONMENT_VARIABLE = "THAAP_SCENARIO_RUNNER_TOKEN"
 FAIL_AFTER_STEP_ENVIRONMENT_VARIABLE = "THAAP_GENERATOR_FAIL_AFTER_STEP"
@@ -101,7 +108,8 @@ class GeneratorRunStore:
                 run_id TEXT NOT NULL,
                 step_key TEXT NOT NULL,
                 status TEXT NOT NULL,
-                retry_safe INTEGER NOT NULL,
+                retry_safe INTEGER NOT NULL CHECK (retry_safe IN (0, 1)),
+                resource_type TEXT,
                 response_json TEXT,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (run_id, step_key),
@@ -118,11 +126,38 @@ class GeneratorRunStore:
                 FOREIGN KEY (run_id) REFERENCES generator_runs (run_id)
             );
         """)
+        self._ensure_step_resource_type_column()
+        self._backfill_step_resource_types()
         self._backfill_resource_references()
+
+    def _ensure_step_resource_type_column(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute(
+                    "PRAGMA table_info(generator_steps)").fetchall()
+        }
+        if "resource_type" not in columns:
+            self.connection.execute(
+                    "ALTER TABLE generator_steps ADD COLUMN resource_type TEXT")
+
+    def _backfill_step_resource_types(self) -> None:
+        rows = self.connection.execute("""
+                SELECT run_id, step_key
+                FROM generator_steps
+                WHERE resource_type IS NULL
+                """).fetchall()
+        for row in rows:
+            resource_type = self._legacy_resource_type(row["step_key"])
+            if resource_type is not None:
+                self.connection.execute("""
+                        UPDATE generator_steps
+                        SET resource_type = ?
+                        WHERE run_id = ? AND step_key = ?
+                        """, (resource_type, row["run_id"], row["step_key"]))
 
     def _backfill_resource_references(self) -> None:
         rows = self.connection.execute("""
-                SELECT run_id, step_key, response_json
+                SELECT run_id, step_key, resource_type, response_json
                 FROM generator_steps
                 WHERE status = 'COMPLETED'
                   AND response_json IS NOT NULL
@@ -132,7 +167,15 @@ class GeneratorRunStore:
                 response = json.loads(row["response_json"])
             except (TypeError, json.JSONDecodeError):
                 continue
-            reference = self._resource_reference(row["step_key"], response)
+            resource_type = row["resource_type"] or self._legacy_resource_type(
+                    row["step_key"])
+            if row["resource_type"] is None and resource_type is not None:
+                self.connection.execute("""
+                        UPDATE generator_steps
+                        SET resource_type = ?
+                        WHERE run_id = ? AND step_key = ?
+                        """, (resource_type, row["run_id"], row["step_key"]))
+            reference = self._resource_reference(resource_type, response)
             if reference is None:
                 continue
             resource_type, resource_id, merchant_id = reference
@@ -189,20 +232,37 @@ class GeneratorRunStore:
             raise
 
     def execute_step(self, run_id: str, step_key: str, retry_safe: bool,
-                     operation) -> Any:
+                     operation, resource_type: str | None = None) -> Any:
+        if resource_type is not None and resource_type not in RESOURCE_TYPES:
+            raise ValueError(
+                    f"Generator step {step_key} has unsupported resource type "
+                    f"{resource_type}")
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             self._require_lease(run_id)
             row = self.connection.execute("""
-                    SELECT status, retry_safe, response_json
+                    SELECT status, retry_safe, resource_type, response_json
                     FROM generator_steps
                     WHERE run_id = ? AND step_key = ?
                     """, (run_id, step_key)).fetchone()
+            if row is not None:
+                persisted_retry_safe = row["retry_safe"]
+                if persisted_retry_safe not in (0, 1):
+                    raise RuntimeError(
+                            f"Generator step {step_key} has invalid durable retry classification")
+                if bool(persisted_retry_safe) != retry_safe:
+                    raise RuntimeError(
+                            f"Generator step {step_key} retry classification changed; "
+                            "resume with the generator version that created the run")
+                if row["resource_type"] != resource_type:
+                    raise RuntimeError(
+                            f"Generator step {step_key} resource type changed; "
+                            "resume with the generator version that created the run")
             if row is not None and row["status"] == "COMPLETED":
                 self._renew_lease(run_id)
                 self.connection.commit()
                 return json.loads(row["response_json"])
-            if row is not None and row["status"] == "STARTED" and not retry_safe:
+            if row is not None and row["status"] == "STARTED" and not bool(row["retry_safe"]):
                 self.connection.execute("""
                         UPDATE generator_runs
                         SET status = 'NEEDS_CLEANUP',
@@ -217,14 +277,15 @@ class GeneratorRunStore:
                         f"step {step_key}; abandon it with an explicit cleanup disposition")
             self.connection.execute("""
                     INSERT INTO generator_steps (
-                        run_id, step_key, status, retry_safe, response_json, updated_at
-                    ) VALUES (?, ?, 'STARTED', ?, NULL, ?)
+                        run_id, step_key, status, retry_safe, resource_type,
+                        response_json, updated_at
+                    ) VALUES (?, ?, 'STARTED', ?, ?, NULL, ?)
                     ON CONFLICT (run_id, step_key) DO UPDATE SET
                         status = 'STARTED',
-                        retry_safe = excluded.retry_safe,
                         response_json = NULL,
                         updated_at = excluded.updated_at
-                    """, (run_id, step_key, int(retry_safe), utc_now()))
+                    """, (run_id, step_key, int(retry_safe),
+                          resource_type, utc_now()))
             self._renew_lease(run_id)
             self.connection.commit()
         except BaseException:
@@ -233,10 +294,11 @@ class GeneratorRunStore:
             raise
 
         response = operation()
-        self._record_resource_reference(run_id, step_key, response)
         if self.fail_after_step == step_key:
             raise RuntimeError(
                     f"Injected generator crash after remote operation for step {step_key}")
+        self._record_resource_reference(
+                run_id, step_key, response, resource_type)
 
         self.connection.execute("BEGIN IMMEDIATE")
         try:
@@ -282,6 +344,16 @@ class GeneratorRunStore:
                 SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
                 WHERE run_id = ? AND lease_owner = ? AND status = 'RUNNING'
                 """, (utc_now(), run_id, self.owner))
+
+    def heartbeat(self, run_id: str) -> None:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            self._renew_lease(run_id)
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
 
     def abandon(self, run_id: str, cleanup_disposition: str) -> None:
         if not cleanup_disposition.strip():
@@ -336,16 +408,18 @@ class GeneratorRunStore:
         ]
 
     def _record_resource_reference(
-            self, run_id: str, step_key: str, response: Any) -> None:
-        reference = self._resource_reference(step_key, response)
+            self, run_id: str, step_key: str, response: Any,
+            resource_type: str | None) -> None:
+        reference = self._resource_reference(resource_type, response)
         if reference is None:
             return
         resource_type, resource_id, merchant_id = reference
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             self._require_lease(run_id)
-            if merchant_id is None:
-                merchant_id = self._merchant_id_for_step(run_id, step_key)
+            if resource_type != "MERCHANT" and merchant_id is None:
+                raise RuntimeError(
+                        f"Generator resource step {step_key} returned no merchant lineage")
             self.connection.execute("""
                     INSERT INTO generator_resources (
                         run_id, step_key, resource_type, resource_id,
@@ -363,43 +437,36 @@ class GeneratorRunStore:
             raise
 
     def _resource_reference(
-            self, step_key: str, response: Any
+            self, resource_type: str | None, response: Any
     ) -> tuple[str, str, str | None] | None:
-        if not isinstance(response, dict) or not response.get("id"):
-            return None
-        resource_type = None
-        if step_key.endswith(".merchant") or step_key == "merchant":
-            resource_type = "MERCHANT"
-        elif step_key.endswith(".customer") or step_key == "customer":
-            resource_type = "CUSTOMER"
-        elif step_key.endswith(".payment_method") or step_key == "payment-method":
-            resource_type = "PAYMENT_METHOD"
-        elif step_key.endswith(".payment_intent") or step_key == "payment-intent":
-            resource_type = "PAYMENT_INTENT"
-        elif step_key.endswith(".confirm") or step_key == "confirm":
-            resource_type = "PAYMENT_ATTEMPT"
         if resource_type is None:
             return None
+        if not isinstance(response, dict) or not response.get("id"):
+            raise RuntimeError(
+                    f"Generator {resource_type} step returned no resource ID")
         merchant_id = (
-            str(response["merchantId"])
+            str(response["id"])
+            if resource_type == "MERCHANT"
+            else str(response["merchantId"])
             if response.get("merchantId") is not None
-            else str(response["id"]) if resource_type == "MERCHANT" else None
+            else None
         )
         return resource_type, str(response["id"]), merchant_id
 
-    def _merchant_id_for_step(self, run_id: str, step_key: str) -> str | None:
-        parts = step_key.split(".")
-        if len(parts) < 3 or parts[0] != "scenario":
-            return None
-        merchant_step_key = f"scenario.{parts[1]}.merchant"
-        row = self.connection.execute("""
-                SELECT resource_id
-                FROM generator_resources
-                WHERE run_id = ?
-                  AND step_key = ?
-                  AND resource_type = 'MERCHANT'
-                """, (run_id, merchant_step_key)).fetchone()
-        return None if row is None else str(row["resource_id"])
+    def _legacy_resource_type(self, step_key: str) -> str | None:
+        if (step_key.endswith(".merchant")
+                or step_key == "merchant"
+                or step_key == "tenant_isolation.verifier_merchant"):
+            return "MERCHANT"
+        elif step_key.endswith(".customer") or step_key == "customer":
+            return "CUSTOMER"
+        elif step_key.endswith(".payment_method") or step_key == "payment-method":
+            return "PAYMENT_METHOD"
+        elif step_key.endswith(".payment_intent") or step_key == "payment-intent":
+            return "PAYMENT_INTENT"
+        elif step_key.endswith(".confirm") or step_key == "confirm":
+            return "PAYMENT_ATTEMPT"
+        return None
 
     def _validate_identity(self, row: sqlite3.Row, seed: str, base_url: str,
                            fingerprint: str) -> None:
@@ -457,9 +524,13 @@ class ScenarioPlan:
 
 
 class ApiClient:
-    def __init__(self, base_url: str, scenario_runner_token: str | None = None):
+    REQUEST_TIMEOUT_SECONDS = 30
+
+    def __init__(self, base_url: str, scenario_runner_token: str | None = None,
+                 lease_heartbeat: Callable[[], None] | None = None):
         self.base_url = base_url.rstrip("/")
         self.scenario_runner_token = scenario_runner_token
+        self.lease_heartbeat = lease_heartbeat
         self.opener = urllib.request.build_opener(
                 urllib.request.ProxyHandler({}), RejectRedirectHandler())
 
@@ -482,18 +553,27 @@ class ApiClient:
             request_headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
                 f"{self.base_url}{path}", data=encoded_body, headers=request_headers, method=method)
+        self._heartbeat()
         try:
-            with self.opener.open(request, timeout=30) as response:
-                status = response.status
-                payload = response.read().decode("utf-8")
-        except urllib.error.HTTPError as error:
-            status = error.code
-            payload = error.read().decode("utf-8")
+            try:
+                with self.opener.open(
+                        request, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:
+                    status = response.status
+                    payload = response.read().decode("utf-8")
+            except urllib.error.HTTPError as error:
+                status = error.code
+                payload = error.read().decode("utf-8")
+        finally:
+            self._heartbeat()
         if status != expected_status:
             raise RuntimeError(f"{method} {path} returned {status}, expected {expected_status}: {payload}")
         if not payload:
             return status, None
         return status, json.loads(payload)
+
+    def _heartbeat(self) -> None:
+        if self.lease_heartbeat is not None:
+            self.lease_heartbeat()
 
 
 def build_scenario_plan(seed: str) -> tuple[ScenarioPlan, ...]:
@@ -600,13 +680,21 @@ def run_generator(seed: str, base_url: str, admin_token: str,
     operation_identity = f"{seed}:{effective_run_id}"
     owns_store = run_store is None
     store = run_store or GeneratorRunStore(DEFAULT_STATE_PATH)
+    if store.lease_seconds <= ApiClient.REQUEST_TIMEOUT_SECONDS:
+        if owns_store:
+            store.close()
+        raise ValueError(
+                "Generator run lease must exceed the per-request network timeout")
     completed_summary = store.acquire(
             effective_run_id, seed, validated_base_url, fingerprint)
     if completed_summary is not None:
         if owns_store:
             store.close()
         return completed_summary
-    client = ApiClient(validated_base_url, scenario_runner_token)
+    client = ApiClient(
+            validated_base_url,
+            scenario_runner_token,
+            lease_heartbeat=lambda: store.heartbeat(effective_run_id))
     forbidden_values: list[str] = [admin_token, scenario_runner_token]
     scenario_summaries: list[dict[str, Any]] = []
     first_payment_refs: dict[str, str] | None = None
@@ -617,19 +705,25 @@ def run_generator(seed: str, base_url: str, admin_token: str,
 
         for scenario_index, scenario in enumerate(plan):
             merchant = store.execute_step(
-                    effective_run_id, f"scenario.{scenario_index}.merchant", False,
+                    effective_run_id, f"scenario.{scenario_index}.merchant", True,
                     lambda scenario=scenario, scenario_index=scenario_index: create_merchant(
                         client, admin_token,
                         f"{scenario.merchant_name} {effective_run_id[-12:]}",
-                        operation_identity, scenario_index))
+                        operation_identity, scenario_index),
+                    resource_type="MERCHANT")
             forbidden_values.append(merchant["apiKey"])
             customer = store.execute_step(
-                    effective_run_id, f"scenario.{scenario_index}.customer", False,
+                    effective_run_id, f"scenario.{scenario_index}.customer", True,
                     lambda scenario=scenario, scenario_index=scenario_index, merchant=merchant:
                         create_customer(
                             client, merchant["apiKey"], scenario.customer_email,
-                            scenario.customer_phone, operation_identity, scenario_index))
+                            scenario.customer_phone, operation_identity, scenario_index),
+                    resource_type="CUSTOMER")
             forbidden_values.extend([scenario.customer_email, scenario.customer_phone])
+            forbidden_values.extend([
+                idempotency_key(operation_identity, scenario_index, 0, "merchant"),
+                idempotency_key(operation_identity, scenario_index, 0, "customer"),
+            ])
             payment_summaries = []
 
             for payment_index, payment in enumerate(scenario.payments):
@@ -647,7 +741,8 @@ def run_generator(seed: str, base_url: str, admin_token: str,
                             create_payment_method(
                                 client, merchant["apiKey"], customer["id"],
                                 payment.card_number, operation_identity,
-                                scenario_index, payment_index))
+                                scenario_index, payment_index),
+                        resource_type="PAYMENT_METHOD")
                 payment_intent = store.execute_step(
                         effective_run_id, f"{step_prefix}.payment_intent", True,
                         lambda payment=payment, scenario=scenario,
@@ -656,7 +751,8 @@ def run_generator(seed: str, base_url: str, admin_token: str,
                             create_payment_intent(
                                 client, merchant["apiKey"], customer["id"], payment.amount,
                                 scenario.label, payment.label, effective_run_id,
-                                operation_identity, scenario_index, payment_index))
+                                operation_identity, scenario_index, payment_index),
+                        resource_type="PAYMENT_INTENT")
                 attempt = store.execute_step(
                         effective_run_id, f"{step_prefix}.confirm", True,
                         lambda scenario_index=scenario_index, payment_index=payment_index,
@@ -665,7 +761,8 @@ def run_generator(seed: str, base_url: str, admin_token: str,
                             confirm_payment_intent(
                                 client, merchant["apiKey"], payment_intent["id"],
                                 payment_method["id"], operation_identity,
-                                scenario_index, payment_index))
+                                scenario_index, payment_index),
+                        resource_type="PAYMENT_ATTEMPT")
                 _, fetched_intent = client.get(
                         f"/payment_intents/{payment_intent['id']}",
                         merchant_headers(merchant["apiKey"]))
@@ -798,6 +895,7 @@ def run_generator(seed: str, base_url: str, admin_token: str,
 def create_merchant(client: ApiClient, admin_token: str, name: str, seed: str, scenario_index: int) -> dict[str, Any]:
     _, response = client.post("/admin/merchants", {"name": name}, {
         "X-Admin-Bootstrap-Token": admin_token,
+        "Idempotency-Key": idempotency_key(seed, scenario_index, 0, "merchant"),
         "X-Request-Id": request_id(seed, scenario_index, "merchant"),
     }, expected_status=201)
     return response
@@ -807,6 +905,7 @@ def create_customer(client: ApiClient, api_key: str, email: str, phone: str, see
                     scenario_index: int) -> dict[str, Any]:
     _, response = client.post("/customers", {"email": email, "phone": phone}, {
         **merchant_headers(api_key),
+        "Idempotency-Key": idempotency_key(seed, scenario_index, 0, "customer"),
         "X-Request-Id": request_id(seed, scenario_index, "customer"),
     }, expected_status=201)
     return response
@@ -865,13 +964,15 @@ def run_tenant_isolation_checks(client: ApiClient, admin_token: str,
     if refs is None:
         return [{"name": "tenant_isolation_reference_exists", "status": "FAIL", "httpStatus": None}]
     verifier = run_store.execute_step(
-            run_id, "tenant_isolation.verifier_merchant", False,
+            run_id, "tenant_isolation.verifier_merchant", True,
             lambda: create_merchant(
                 client, admin_token,
                 f"Synthetic Isolation Verifier "
                 f"{safe_slug(operation_identity)} {run_id[-12:]}",
-                operation_identity, 90))
+                operation_identity, 90),
+            resource_type="MERCHANT")
     forbidden_values.append(verifier["apiKey"])
+    forbidden_values.append(idempotency_key(operation_identity, 90, 0, "merchant"))
     checks = [
         ("cross_merchant_payment_intent_read", f"/payment_intents/{refs['paymentIntentId']}"),
         ("cross_merchant_payment_attempt_read", f"/payment_attempts/{refs['paymentAttemptId']}"),

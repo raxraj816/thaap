@@ -7,10 +7,12 @@ import importlib.util
 import datetime as dt
 import os
 import pathlib
+import sqlite3
 import stat
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
@@ -260,6 +262,76 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
             proxy_thread.join()
             direct_thread.join()
 
+    def test_api_client_renews_run_ownership_across_slow_sequential_requests(self):
+        class SlowHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                time.sleep(0.45)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"UP"}')
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+        server_thread = threading.Thread(
+                target=server.serve_forever, daemon=True)
+        server_thread.start()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "runs.sqlite3"
+            owner = generator.GeneratorRunStore(path, lease_seconds=1)
+            contender = generator.GeneratorRunStore(path, lease_seconds=1)
+            try:
+                owner.acquire(
+                        "run-heartbeat", "seed",
+                        f"http://127.0.0.1:{server.server_port}",
+                        "fingerprint")
+                client = generator.ApiClient(
+                        f"http://127.0.0.1:{server.server_port}",
+                        lease_heartbeat=lambda: owner.heartbeat("run-heartbeat"))
+
+                for _ in range(3):
+                    status, body = client.get("/slow")
+                    self.assertEqual(200, status)
+                    self.assertEqual({"status": "UP"}, body)
+
+                with self.assertRaisesRegex(
+                        RuntimeError, "active in another process"):
+                    contender.acquire(
+                            "run-heartbeat", "seed",
+                            f"http://127.0.0.1:{server.server_port}",
+                            "fingerprint")
+            finally:
+                owner.release("run-heartbeat")
+                owner.close()
+                contender.close()
+                server.shutdown()
+                server.server_close()
+                server_thread.join()
+
+    def test_generator_rejects_a_lease_that_cannot_cover_one_network_request(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "runs.sqlite3"
+            store = generator.GeneratorRunStore(
+                    path,
+                    lease_seconds=generator.ApiClient.REQUEST_TIMEOUT_SECONDS)
+            try:
+                with self.assertRaisesRegex(
+                        ValueError, "must exceed the per-request network timeout"):
+                    generator.run_generator(
+                            "short-lease",
+                            "http://127.0.0.1:8080",
+                            "admin-token",
+                            "runner-token",
+                            "short-lease-run",
+                            store)
+                run_count = store.connection.execute(
+                        "SELECT COUNT(*) FROM generator_runs").fetchone()[0]
+                self.assertEqual(0, run_count)
+            finally:
+                store.close()
+
     def test_admin_token_is_read_from_environment_and_is_required(self):
         self.assertEqual("local-secret",
                 generator.admin_token_from_environment({"THAAP_ADMIN_BOOTSTRAP_TOKEN": "local-secret"}))
@@ -312,10 +384,12 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
 
                 first = store.execute_step(
                     "run-1", "merchant", False,
-                    lambda: calls.append("called") or {"id": "merchant-1"})
+                    lambda: calls.append("called") or {"id": "merchant-1"},
+                    resource_type="MERCHANT")
                 replay = store.execute_step(
                     "run-1", "merchant", False,
-                    lambda: calls.append("duplicate") or {"id": "merchant-2"})
+                    lambda: calls.append("duplicate") or {"id": "merchant-2"},
+                    resource_type="MERCHANT")
 
                 self.assertEqual({"id": "merchant-1"}, first)
                 self.assertEqual(first, replay)
@@ -338,7 +412,8 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ambiguous network result"):
                 first_store.execute_step(
                     "run-safe", "payment-intent", True,
-                    lambda: (_ for _ in ()).throw(RuntimeError("ambiguous network result")))
+                    lambda: (_ for _ in ()).throw(RuntimeError("ambiguous network result")),
+                    resource_type="PAYMENT_INTENT")
             first_store.release("run-safe")
             first_store.close()
 
@@ -348,11 +423,165 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                     "run-safe", "seed", "http://localhost:8080", "fingerprint"))
                 response = second_store.execute_step(
                     "run-safe", "payment-intent", True,
-                    lambda: {"id": "pi_stable_replay"})
-                self.assertEqual({"id": "pi_stable_replay"}, response)
+                    lambda: {
+                        "id": "pi_stable_replay",
+                        "merchantId": "merchant-safe",
+                    },
+                    resource_type="PAYMENT_INTENT")
+                self.assertEqual({
+                    "id": "pi_stable_replay",
+                    "merchantId": "merchant-safe",
+                }, response)
             finally:
                 second_store.release("run-safe")
                 second_store.close()
+
+    def test_persisted_retry_classification_cannot_be_rewritten_on_resume(self):
+        for persisted, resumed in ((False, True), (True, False)):
+            with self.subTest(persisted=persisted, resumed=resumed):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    path = pathlib.Path(temporary_directory) / "runs.sqlite3"
+                    first_store = generator.GeneratorRunStore(path)
+                    first_store.acquire(
+                            "run-classification", "seed",
+                            "http://localhost:8080", "fingerprint")
+                    with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+                        first_store.execute_step(
+                                "run-classification", "merchant", persisted,
+                                lambda: (_ for _ in ()).throw(
+                                        RuntimeError("ambiguous")))
+                    first_store.release("run-classification")
+                    first_store.close()
+
+                    second_store = generator.GeneratorRunStore(path)
+                    calls = []
+                    try:
+                        second_store.acquire(
+                                "run-classification", "seed",
+                                "http://localhost:8080", "fingerprint")
+                        with self.assertRaisesRegex(
+                                RuntimeError, "retry classification changed"):
+                            second_store.execute_step(
+                                    "run-classification", "merchant", resumed,
+                                    lambda: calls.append("must-not-run"))
+                        self.assertEqual([], calls)
+                        row = second_store.connection.execute("""
+                                SELECT retry_safe
+                                FROM generator_steps
+                                WHERE run_id = ? AND step_key = ?
+                                """, ("run-classification", "merchant")).fetchone()
+                        self.assertEqual(int(persisted), row["retry_safe"])
+                    finally:
+                        second_store.release("run-classification")
+                        second_store.close()
+
+    def test_persisted_resource_type_cannot_be_rewritten_on_resume(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "runs.sqlite3"
+            first_store = generator.GeneratorRunStore(path)
+            first_store.acquire(
+                    "run-resource-type", "seed",
+                    "http://localhost:8080", "fingerprint")
+            with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+                first_store.execute_step(
+                        "run-resource-type", "typed-step", True,
+                        lambda: (_ for _ in ()).throw(RuntimeError("ambiguous")),
+                        resource_type="MERCHANT")
+            first_store.release("run-resource-type")
+            first_store.close()
+
+            second_store = generator.GeneratorRunStore(path)
+            calls = []
+            try:
+                second_store.acquire(
+                        "run-resource-type", "seed",
+                        "http://localhost:8080", "fingerprint")
+                with self.assertRaisesRegex(
+                        RuntimeError, "resource type changed"):
+                    second_store.execute_step(
+                            "run-resource-type", "typed-step", True,
+                            lambda: calls.append("must-not-run"),
+                            resource_type="CUSTOMER")
+                self.assertEqual([], calls)
+                row = second_store.connection.execute("""
+                        SELECT resource_type
+                        FROM generator_steps
+                        WHERE run_id = ? AND step_key = ?
+                        """, ("run-resource-type", "typed-step")).fetchone()
+                self.assertEqual("MERCHANT", row["resource_type"])
+            finally:
+                second_store.release("run-resource-type")
+                second_store.close()
+
+    def test_legacy_journal_backfills_typed_completed_and_started_steps(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "legacy-runs.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.executescript("""
+                    CREATE TABLE generator_runs (
+                        run_id TEXT PRIMARY KEY,
+                        seed TEXT NOT NULL,
+                        base_url TEXT NOT NULL,
+                        plan_fingerprint TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        lease_owner TEXT,
+                        lease_expires_at REAL,
+                        cleanup_disposition TEXT,
+                        summary_json TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE generator_steps (
+                        run_id TEXT NOT NULL,
+                        step_key TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        retry_safe INTEGER NOT NULL,
+                        response_json TEXT,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (run_id, step_key)
+                    );
+                    INSERT INTO generator_runs (
+                        run_id, seed, base_url, plan_fingerprint, status,
+                        created_at, updated_at
+                    ) VALUES (
+                        'legacy-run', 'seed', 'http://localhost:8080',
+                        'fingerprint', 'RUNNING', 'now', 'now'
+                    );
+                    INSERT INTO generator_steps (
+                        run_id, step_key, status, retry_safe,
+                        response_json, updated_at
+                    ) VALUES (
+                        'legacy-run', 'scenario.0.merchant', 'COMPLETED', 1,
+                        '{"id":"legacy-merchant","apiKey":"must-not-enter-ledger"}',
+                        'now'
+                    );
+                    INSERT INTO generator_steps (
+                        run_id, step_key, status, retry_safe,
+                        response_json, updated_at
+                    ) VALUES (
+                        'legacy-run', 'tenant_isolation.verifier_merchant',
+                        'STARTED', 1, NULL, 'now'
+                    );
+                    """)
+            connection.commit()
+            connection.close()
+
+            store = generator.GeneratorRunStore(path)
+            try:
+                step_types = store.connection.execute("""
+                        SELECT step_key, resource_type
+                        FROM generator_steps
+                        ORDER BY step_key
+                        """).fetchall()
+                self.assertEqual([
+                    ("scenario.0.merchant", "MERCHANT"),
+                    ("tenant_isolation.verifier_merchant", "MERCHANT"),
+                ], [(row["step_key"], row["resource_type"]) for row in step_types])
+                references = store.list_resource_references("legacy-run")
+                self.assertEqual("legacy-merchant", references[0]["resourceId"])
+                self.assertNotIn("must-not-enter-ledger", repr(references))
+            finally:
+                store.close()
 
     def test_crash_after_remote_commit_retries_only_a_retry_safe_step(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -366,12 +595,16 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
 
             def idempotent_remote_create():
                 remote_truth["paymentIntentIds"].add("pi_stable")
-                return {"id": "pi_stable"}
+                return {
+                    "id": "pi_stable",
+                    "merchantId": "merchant-stable",
+                }
 
             with self.assertRaisesRegex(RuntimeError, "Injected generator crash"):
                 first_store.execute_step(
                     "run-after-commit", "payment-intent", True,
-                    idempotent_remote_create)
+                    idempotent_remote_create,
+                    resource_type="PAYMENT_INTENT")
             first_store.release("run-after-commit")
             first_store.close()
 
@@ -382,12 +615,104 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                     "http://localhost:8080", "fingerprint")
                 response = second_store.execute_step(
                     "run-after-commit", "payment-intent", True,
-                    idempotent_remote_create)
-                self.assertEqual({"id": "pi_stable"}, response)
+                    idempotent_remote_create,
+                    resource_type="PAYMENT_INTENT")
+                self.assertEqual({
+                    "id": "pi_stable",
+                    "merchantId": "merchant-stable",
+                }, response)
                 self.assertEqual({"pi_stable"}, remote_truth["paymentIntentIds"])
             finally:
                 second_store.release("run-after-commit")
                 second_store.close()
+
+    def test_merchant_and_customer_remote_commits_are_reconciled_before_local_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "runs.sqlite3"
+            remote_resources = {}
+
+            def remote_create(resource_type, idempotency_key, response):
+                return remote_resources.setdefault(
+                        (resource_type, idempotency_key), response)
+
+            for step_key, response in (
+                    ("scenario.0.merchant", {
+                        "id": "merchant-reconciled",
+                        "apiKey": "thaap_test_reconciled",
+                    }),
+                    ("scenario.0.customer", {
+                        "id": "customer-reconciled",
+                        "merchantId": "merchant-reconciled",
+                    }),
+            ):
+                resource_type = (
+                    "MERCHANT" if step_key.endswith(".merchant") else "CUSTOMER")
+                idempotency_key = f"stable-{step_key}"
+                first_store = generator.GeneratorRunStore(
+                        path, fail_after_step=step_key)
+                first_store.acquire(
+                        "run-resource-reconciliation", "seed",
+                        "http://localhost:8080", "fingerprint")
+                with self.assertRaisesRegex(RuntimeError, "Injected generator crash"):
+                    first_store.execute_step(
+                            "run-resource-reconciliation", step_key, True,
+                            lambda resource_type=step_key, key=idempotency_key,
+                            body=response: remote_create(resource_type, key, body),
+                            resource_type=resource_type)
+                self.assertNotIn(
+                        response["id"],
+                        repr(first_store.list_resource_references(
+                                "run-resource-reconciliation")))
+                first_store.release("run-resource-reconciliation")
+                first_store.close()
+
+                second_store = generator.GeneratorRunStore(path)
+                second_store.acquire(
+                        "run-resource-reconciliation", "seed",
+                        "http://localhost:8080", "fingerprint")
+                replay = second_store.execute_step(
+                        "run-resource-reconciliation", step_key, True,
+                        lambda resource_type=step_key, key=idempotency_key,
+                        body=response: remote_create(resource_type, key, body),
+                        resource_type=resource_type)
+                self.assertEqual(response, replay)
+                self.assertIn(
+                        response["id"],
+                        repr(second_store.list_resource_references(
+                                "run-resource-reconciliation")))
+                second_store.release("run-resource-reconciliation")
+                second_store.close()
+
+            self.assertEqual(2, len(remote_resources))
+
+    def test_merchant_and_customer_requests_send_stable_domain_separated_idempotency_keys(self):
+        class RecordingClient:
+            def __init__(self):
+                self.requests = []
+
+            def post(self, path, body, headers, expected_status):
+                self.requests.append((path, body, headers, expected_status))
+                return expected_status, {"id": f"resource-{len(self.requests)}"}
+
+        client = RecordingClient()
+
+        generator.create_merchant(
+                client, "admin-token", "Merchant", "stable-seed", 2)
+        generator.create_customer(
+                client, "api-key", "buyer@example.test", "+15555550123",
+                "stable-seed", 2)
+
+        merchant_key = client.requests[0][2]["Idempotency-Key"]
+        customer_key = client.requests[1][2]["Idempotency-Key"]
+        self.assertEqual(
+                generator.idempotency_key(
+                        "stable-seed", 2, 0, "merchant"),
+                merchant_key)
+        self.assertEqual(
+                generator.idempotency_key(
+                        "stable-seed", 2, 0, "customer"),
+                customer_key)
+        self.assertNotEqual(merchant_key, customer_key)
 
     def test_ambiguous_non_idempotent_step_requires_explicit_abandonment(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -400,11 +725,13 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                         "id": "merchant-retained",
                         "merchantId": "merchant-retained",
                         "apiKey": "secret-must-not-enter-resource-lineage",
-                    })
+                    },
+                    resource_type="MERCHANT")
             with self.assertRaises(RuntimeError):
                 first_store.execute_step(
                     "run-unsafe", "customer", False,
-                    lambda: (_ for _ in ()).throw(RuntimeError("connection closed")))
+                    lambda: (_ for _ in ()).throw(RuntimeError("connection closed")),
+                    resource_type="CUSTOMER")
             first_store.release("run-unsafe")
             first_store.close()
 
@@ -415,7 +742,8 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                 with self.assertRaises(generator.AmbiguousGeneratorStepError):
                     second_store.execute_step(
                         "run-unsafe", "customer", False,
-                        lambda: self.fail("ambiguous merchant creation must not repeat"))
+                        lambda: self.fail("ambiguous merchant creation must not repeat"),
+                        resource_type="CUSTOMER")
                 second_store.abandon("run-unsafe", "retain-generated-resources")
                 row = second_store.connection.execute("""
                         SELECT status, cleanup_disposition
@@ -457,13 +785,24 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                     lambda: {
                         "id": "merchant-safe",
                         "apiKey": "api-key-must-not-survive",
-                    })
+                    },
+                    resource_type="MERCHANT")
                 store.execute_step(
                     "run-resource-lineage", "scenario.0.customer", False,
                     lambda: {
                         "id": "customer-safe",
+                        "merchantId": "merchant-safe",
                         "email": "pii-must-not-survive@example.test",
-                    })
+                    },
+                    resource_type="CUSTOMER")
+                store.execute_step(
+                    "run-resource-lineage", "tenant_isolation.verifier_merchant",
+                    True,
+                    lambda: {
+                        "id": "verifier-merchant-safe",
+                        "apiKey": "verifier-api-key-must-not-survive",
+                    },
+                    resource_type="MERCHANT")
                 store.abandon(
                     "run-resource-lineage", "retain-generated-resources")
 
@@ -476,6 +815,9 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
                         customer_reference["merchantId"])
                 self.assertEqual("customer-safe",
                         customer_reference["resourceId"])
+                self.assertIn("verifier-merchant-safe", {
+                    reference["resourceId"] for reference in references
+                })
                 self.assertNotIn("api-key-must-not-survive", repr(references))
                 self.assertNotIn("pii-must-not-survive", repr(references))
             finally:
@@ -504,7 +846,8 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
             store.acquire("run-complete", "seed", "http://localhost:8080", "fingerprint")
             store.execute_step(
                 "run-complete", "merchant", False,
-                lambda: {"id": "merchant-1", "apiKey": "secret-value"})
+                lambda: {"id": "merchant-1", "apiKey": "secret-value"},
+                resource_type="MERCHANT")
             summary = {"runId": "run-complete", "status": "PASS"}
             store.complete("run-complete", summary)
             checkpoint = store.connection.execute("""
