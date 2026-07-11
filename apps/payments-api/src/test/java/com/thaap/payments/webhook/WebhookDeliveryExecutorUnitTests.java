@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -140,8 +141,14 @@ class WebhookDeliveryExecutorUnitTests {
     void unexpectedRuntimeFailureLeavesClaimForLeaseRecovery() {
         ExecutorFixture fixture = fixture();
         WebhookDeliveryClaim claim = claim(1);
-        when(fixture.endpointSecretService().loadForDelivery(claim.merchantId(), claim.endpointId()))
-                .thenThrow(new DataAccessResourceFailureException("temporary database failure"));
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"),
+                java.net.InetAddress.getLoopbackAddress(), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), any(Instant.class))).thenReturn(true);
+        doThrow(new DataAccessResourceFailureException("temporary database failure"))
+                .when(fixture.endpointSecretService()).signForDelivery(
+                eq(claim.merchantId()), eq(claim.endpointId()), any(),
+                eq(claim.payload()), any(Instant.class), eq(fixture.signer()));
 
         fixture.executor().processClaim(claim);
 
@@ -197,7 +204,7 @@ class WebhookDeliveryExecutorUnitTests {
     }
 
     @Test
-    void signatureTimestampIsMintedAfterDispatchPreparationCompletes() throws Exception {
+    void signingServiceReceivesDispatchPreparationAsTimestampLowerBound() throws Exception {
         Clock clock = mock(Clock.class);
         Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
         Instant afterLockWait = claimedAt.plusSeconds(301);
@@ -213,9 +220,9 @@ class WebhookDeliveryExecutorUnitTests {
                 URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
         when(fixture.claimService().prepareForDispatch(eq(claim), eq(claimedAt))).thenReturn(true);
         WebhookSignature signature = new WebhookSignature(
-                afterLockWait.getEpochSecond(), "a".repeat(64),
-                "t=" + afterLockWait.getEpochSecond() + ",v1=" + "a".repeat(64));
-        when(fixture.signer().sign("whsec_test", claim.payload(), afterLockWait))
+                claimedAt.getEpochSecond(), "a".repeat(64),
+                "t=" + claimedAt.getEpochSecond() + ",v1=" + "a".repeat(64));
+        when(fixture.signer().sign("whsec_test", claim.payload(), claimedAt))
                 .thenReturn(signature);
         when(fixture.transport().send(any(WebhookHttpRequest.class)))
                 .thenReturn(new WebhookHttpResponse(204));
@@ -226,52 +233,93 @@ class WebhookDeliveryExecutorUnitTests {
 
         fixture.executor().processClaim(claim);
 
-        verify(fixture.signer()).sign("whsec_test", claim.payload(), afterLockWait);
+        verify(fixture.endpointSecretService()).signForDelivery(
+                claim.merchantId(), claim.endpointId(), null, claim.payload(),
+                claimedAt, fixture.signer());
+        verify(fixture.signer()).sign("whsec_test", claim.payload(), claimedAt);
         verify(fixture.transport()).send(org.mockito.ArgumentMatchers.argThat(request ->
-                request.signatureHeader().startsWith("t=" + afterLockWait.getEpochSecond() + ",")));
+                request.signatureHeader().startsWith("t=" + claimedAt.getEpochSecond() + ",")));
     }
 
     @Test
-    void previousGenerationIsRejectedWhenDispatchWaitCrossesItsExpiry() throws Exception {
+    void expiredPreviousGenerationRetriesWithoutSigningOrSending() throws Exception {
         Clock clock = mock(Clock.class);
         Instant claimedAt = Instant.parse("2026-06-28T10:00:00Z");
         Instant beforeExpiry = claimedAt.plusSeconds(899);
         Instant atExpiry = claimedAt.plusSeconds(900);
         when(clock.instant())
                 .thenReturn(beforeExpiry)
-                .thenReturn(beforeExpiry)
                 .thenReturn(atExpiry)
                 .thenReturn(atExpiry);
         ExecutorFixture fixture = fixture(clock);
         WebhookDeliveryClaim claim = claimWithGeneration(1);
-        when(fixture.endpointSecretService().loadForDelivery(
-                claim.merchantId(), claim.endpointId(),
-                claim.signingSecretGeneration(), beforeExpiry))
-                .thenReturn("whsec_previous");
         when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
                 URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
         when(fixture.claimService().prepareForDispatch(eq(claim), eq(beforeExpiry))).thenReturn(true);
-        when(fixture.endpointSecretService().authorizeGenerationForUse(
+        doThrow(new WebhookStaleSecretGenerationException(
+                "generation expired",
+                WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE))
+                .when(fixture.endpointSecretService()).signForDelivery(
                 claim.merchantId(), claim.endpointId(),
-                claim.signingSecretGeneration()))
-                .thenReturn(WebhookSecretUseWindow.bounded(atExpiry));
-        when(fixture.finalizationService().failTerminally(
-                eq(claim), eq(atExpiry),
+                claim.signingSecretGeneration(), claim.payload(), beforeExpiry,
+                fixture.signer());
+        when(fixture.finalizationService().failRetryably(
+                eq(claim), eq(atExpiry), eq(false), eq(null),
                 eq(WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE)))
                 .thenReturn(new WebhookDeliveryFinalizationResult(
-                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        true, WebhookDeliveryStatus.RETRY_SCHEDULED,
                         WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE,
-                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookAttemptOutcome.RETRYABLE_FAILURE,
                         WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE));
 
         fixture.executor().processClaim(claim);
 
-        verify(fixture.endpointSecretService()).authorizeGenerationForUse(
-                claim.merchantId(), claim.endpointId(),
-                claim.signingSecretGeneration());
         verifyNoInteractions(fixture.signer(), fixture.transport());
-        verify(fixture.finalizationService()).failTerminally(
-                claim, atExpiry, WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
+        verify(fixture.finalizationService()).failRetryably(
+                claim, atExpiry, false, null,
+                WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
+    }
+
+    @Test
+    void finalAttemptStaleGenerationRebindsCurrentSecretBeforeHttp() throws Exception {
+        ExecutorFixture fixture = fixture();
+        WebhookDeliveryClaim claim = claimWithGeneration(WebhookRetryPolicy.MAX_ATTEMPTS);
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(
+                new ValidatedWebhookTarget(
+                        URI.create("http://127.0.0.1/webhook"),
+                        InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(
+                eq(claim), eq(claim.claimedAt()))).thenReturn(true);
+        doThrow(new WebhookStaleSecretGenerationException(
+                "generation expired",
+                WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE))
+                .when(fixture.endpointSecretService()).signForDelivery(
+                claim.merchantId(), claim.endpointId(),
+                claim.signingSecretGeneration(), claim.payload(), claim.claimedAt(),
+                fixture.signer());
+        WebhookSignature reboundSignature = new WebhookSignature(
+                claim.claimedAt().getEpochSecond(), "a".repeat(64),
+                "t=" + claim.claimedAt().getEpochSecond() + ",v1=" + "a".repeat(64));
+        when(fixture.endpointSecretService().signForDelivery(
+                claim.merchantId(), claim.endpointId(), null, claim.payload(),
+                claim.claimedAt(), fixture.signer())).thenReturn(reboundSignature);
+        when(fixture.transport().send(any(WebhookHttpRequest.class)))
+                .thenReturn(new WebhookHttpResponse(204));
+        when(fixture.finalizationService().succeed(
+                eq(claim), eq(claim.claimedAt()), eq(204)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.SUCCEEDED, null,
+                        WebhookAttemptOutcome.SUCCEEDED, null));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.endpointSecretService()).signForDelivery(
+                claim.merchantId(), claim.endpointId(), null, claim.payload(),
+                claim.claimedAt(), fixture.signer());
+        verify(fixture.transport()).send(any(WebhookHttpRequest.class));
+        verify(fixture.finalizationService(), never()).failRetryably(
+                eq(claim), any(Instant.class), eq(false), eq(null),
+                eq(WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE));
     }
 
     @Test
@@ -494,10 +542,21 @@ class WebhookDeliveryExecutorUnitTests {
         WebhookDeliveryFinalizationService finalizationService = mock(WebhookDeliveryFinalizationService.class);
         WebhookDeliveryRepository deliveryRepository = mock(WebhookDeliveryRepository.class);
         WebhookEndpointSecretService endpointSecretService = mock(WebhookEndpointSecretService.class);
-        when(endpointSecretService.authorizeGenerationForUse(
-                any(UUID.class), any(UUID.class), any()))
-                .thenReturn(WebhookSecretUseWindow.unbounded());
         WebhookSigner signer = mock(WebhookSigner.class);
+        when(endpointSecretService.signForDelivery(
+                any(UUID.class), any(UUID.class), any(), any(String.class),
+                any(Instant.class), any(WebhookSigner.class)))
+                .thenAnswer(call -> {
+                    WebhookSigner selectedSigner = call.getArgument(5);
+                    String payload = call.getArgument(3);
+                    Instant signatureTime = call.getArgument(4);
+                    try {
+                        return selectedSigner.sign("whsec_test", payload, signatureTime);
+                    } catch (RuntimeException exception) {
+                        throw new WebhookSigningException(
+                                "Webhook payload could not be signed", exception);
+                    }
+                });
         WebhookTargetPolicy targetPolicy = mock(WebhookTargetPolicy.class);
         WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
         WebhookMetrics metrics = mock(WebhookMetrics.class);

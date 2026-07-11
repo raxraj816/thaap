@@ -3,10 +3,10 @@
 - Parent chapter: 21
 - Review provenance: RETROACTIVE_RECOVERY
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX_BEFORE_ER-0042_FIX
-- Product implementation checkpoint: PENDING_COMMIT
-- Independent implementation review: PENDING
+- Product implementation checkpoint: 1a7c3cd
+- Independent implementation review: PASS
 - Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: REOPENED
+- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
 - Escaped findings: ER-0038, ER-0042
 
 ## Frozen promise
@@ -23,7 +23,7 @@ because a claim-bound secret snapshot became stale before any HTTP request.
 | Prepared claim, generation remains valid | Transport returns 2xx | bounded request timeout | Attempt and delivery succeed | Executor/finalization contract |
 | Prepared claim, generation becomes stale | Rotation/grace expiry occurs before signing | any | No signer/HTTP; recover against current durable generation without losing delivery | `expiredClaimGenerationRetriesAndNextClaimBindsCurrentSecret` |
 | Prepared claim on attempt 1–4, generation stale | Endpoint remains active | before HTTP | Known-no-send evidence and a due recovery path | H2 delivery state/attempt postconditions |
-| Prepared claim on final allowed attempt, generation stale | Endpoint remains active | before HTTP | Delivery must still get one current-generation send opportunity; stale internal snapshot cannot exhaust it | **Missing before ER-0042 fix:** final-attempt stale-generation contract |
+| Prepared claim on final allowed attempt, generation stale | Endpoint remains active | before HTTP | Delivery gets a current-generation signature and its first real HTTP opportunity in the same claim; stale internal snapshot cannot exhaust it | `finalAttemptStaleGenerationUsesCurrentSecretBeforeFirstHttpSend` |
 | Prepared claim, local signer throws | No HTTP request exists | 0 | `SIGNING_FAILED`, known-no-send retry subject to bounded operational retry policy | Executor unit classification test |
 | Prepared claim, database/runtime fails before signer returns | Send cannot be authoritatively finalized | lease duration | Leave claim for lease recovery; do not manufacture terminal truth | Executor unexpected-runtime test plus lease recovery contract |
 | Target DNS resolution fails safely | No socket opened | resolver deadline | Retryable known-no-send | Target resolution contract |
@@ -53,7 +53,14 @@ claim. A stale token cannot finalize a later claim.
 ## Primary deterministic proof
 
 - `expiredClaimGenerationRetriesAndNextClaimBindsCurrentSecret`
-- Required new proof: stale generation on the retry ceiling still receives one
-  current-generation send opportunity.
+- `finalAttemptStaleGenerationUsesCurrentSecretBeforeFirstHttpSend`
 
 Aggregate suite totals are regression context only.
+
+## Independent review result
+
+The review crossed permanent, retryable-known-no-send, ambiguous, disabled,
+stale-token, and retry-ceiling partitions. Attempts below the ceiling retain
+no-send retry evidence; the final stale attempt atomically rebinds current
+secret state before transport so an internal snapshot cannot consume the last
+merchant-visible send opportunity. No blocking classification gap remains.

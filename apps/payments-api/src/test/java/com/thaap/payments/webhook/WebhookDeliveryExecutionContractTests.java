@@ -33,12 +33,14 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -61,6 +63,15 @@ class WebhookDeliveryExecutionContractTests {
 
     @Autowired
     private WebhookEndpointService endpointService;
+
+    @Autowired
+    private WebhookEndpointSecretService endpointSecretService;
+
+    @Autowired
+    private WebhookSecretCipher secretCipher;
+
+    @Autowired
+    private WebhookEndpointRepository endpointRepository;
 
     @Autowired
     private WebhookDeliveryService deliveryService;
@@ -100,6 +111,9 @@ class WebhookDeliveryExecutionContractTests {
 
     @Autowired
     private MeterRegistry meterRegistry;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private HttpServer callbackServer;
 
@@ -397,6 +411,113 @@ class WebhookDeliveryExecutionContractTests {
     }
 
     @Test
+    void expiredClaimGenerationRetriesAndNextClaimBindsCurrentSecret() {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("stale-generation", "thaap_test_stale_generation"));
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), "stale-generation", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult created = endpointService.create(
+                merchantContext, "http://127.0.0.1:9191/thaap",
+                Set.of("refund.created"), "stale-generation-create");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        WebhookDeliveryClaim staleClaim = claimService.claimDue(claimedAt, 1).getFirst();
+        assertThat(staleClaim.signingSecretGeneration())
+                .isEqualTo(created.endpoint().getSigningSecretGeneration());
+
+        WebhookEndpointService.EndpointSecretResult rotated = endpointService.rotateSecret(
+                merchantContext, created.endpoint().getId(), "stale-generation-rotate");
+        WebhookEndpoint stored = endpointRepository.findById(created.endpoint().getId()).orElseThrow();
+        Instant expiresAt = stored.getPreviousSigningSecretExpiresAt();
+        WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
+        WebhookEndpointSecretService clockedSecretService = endpointSecretService(
+                java.time.Clock.fixed(expiresAt, java.time.ZoneOffset.UTC));
+        WebhookDeliveryExecutor staleExecutor = new WebhookDeliveryExecutor(
+                claimService, finalizationService, deliveryRepository, clockedSecretService,
+                signer, targetPolicy, transport, webhookMetrics,
+                java.time.Clock.fixed(expiresAt, java.time.ZoneOffset.UTC));
+
+        staleExecutor.processClaim(staleClaim);
+
+        WebhookDelivery retry = deliveryRepository.findAll().getFirst();
+        WebhookDeliveryAttempt staleAttempt = attemptRepository
+                .findByWebhookDeliveryIdAndAttemptNumber(retry.getId(), 1)
+                .orElseThrow();
+        assertThat(retry.getStatus()).isEqualTo(WebhookDeliveryStatus.RETRY_SCHEDULED);
+        assertThat(retry.getLastErrorCode())
+                .isEqualTo(WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
+        assertThat(retry.getNextAttemptAt()).isEqualTo(expiresAt.plusSeconds(60));
+        assertThat(staleAttempt.getOutcome()).isEqualTo(WebhookAttemptOutcome.RETRYABLE_FAILURE);
+        assertThat(staleAttempt.getHttpRequestSent()).isFalse();
+        verify(transport, never()).send(org.mockito.ArgumentMatchers.any(WebhookHttpRequest.class));
+
+        WebhookDeliveryClaim rebound = claimService.claimDue(expiresAt.plusSeconds(60), 1).getFirst();
+        assertThat(rebound.signingSecretGeneration())
+                .isEqualTo(rotated.endpoint().getSigningSecretGeneration());
+    }
+
+    @Test
+    void finalAttemptStaleGenerationUsesCurrentSecretBeforeFirstHttpSend() {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("stale-final-generation", "thaap_test_stale_final_generation"));
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), "stale-final-generation", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult created = endpointService.create(
+                merchantContext, "http://127.0.0.1:9191/thaap",
+                Set.of("refund.created"), "stale-final-generation-create");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
+        WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
+        jdbcTemplate.update(
+                "UPDATE webhook_deliveries SET attempt_count = 4 WHERE id = ?",
+                delivery.getId());
+        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        WebhookDeliveryClaim staleFinalClaim = claimService.claimDue(claimedAt, 1).getFirst();
+        assertThat(staleFinalClaim.attemptNumber()).isEqualTo(WebhookRetryPolicy.MAX_ATTEMPTS);
+        assertThat(staleFinalClaim.signingSecretGeneration())
+                .isEqualTo(created.endpoint().getSigningSecretGeneration());
+
+        WebhookEndpointService.EndpointSecretResult rotated = endpointService.rotateSecret(
+                merchantContext, created.endpoint().getId(), "stale-final-generation-rotate");
+        Instant expiresAt = endpointRepository.findById(created.endpoint().getId())
+                .orElseThrow().getPreviousSigningSecretExpiresAt();
+        WebhookEndpointSecretService clockedSecretService = endpointSecretService(
+                java.time.Clock.fixed(expiresAt, java.time.ZoneOffset.UTC));
+        AtomicReference<WebhookHttpRequest> sentRequest = new AtomicReference<>();
+        WebhookHttpTransport transport = mock(WebhookHttpTransport.class);
+        when(transport.send(org.mockito.ArgumentMatchers.any(WebhookHttpRequest.class)))
+                .thenAnswer(invocation -> {
+                    sentRequest.set(invocation.getArgument(0));
+                    return new WebhookHttpResponse(204);
+                });
+        WebhookDeliveryExecutor staleFinalExecutor = new WebhookDeliveryExecutor(
+                claimService, finalizationService, deliveryRepository, clockedSecretService,
+                signer, targetPolicy, transport, webhookMetrics,
+                java.time.Clock.fixed(expiresAt, java.time.ZoneOffset.UTC));
+
+        staleFinalExecutor.processClaim(staleFinalClaim);
+
+        WebhookDelivery stored = deliveryRepository.findById(delivery.getId()).orElseThrow();
+        WebhookDeliveryAttempt attempt = attemptRepository
+                .findByWebhookDeliveryIdAndAttemptNumber(
+                        delivery.getId(), WebhookRetryPolicy.MAX_ATTEMPTS)
+                .orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(WebhookDeliveryStatus.SUCCEEDED);
+        assertThat(attempt.getOutcome()).isEqualTo(WebhookAttemptOutcome.SUCCEEDED);
+        WebhookHttpRequest request = sentRequest.get();
+        assertThat(request).isNotNull();
+        String[] signatureParts = request.signatureHeader().split(",", 2);
+        long timestamp = Long.parseLong(signatureParts[0].substring(2));
+        String signatureValue = signatureParts[1].substring(3);
+        assertThat(signer.verify(
+                rotated.rawSigningSecret(), staleFinalClaim.payload(),
+                timestamp, signatureValue)).isTrue();
+    }
+
+    @Test
     void disablingEndpointDuringInFlightFailurePreventsAnotherRetry() {
         Merchant merchant = merchantRepository.saveAndFlush(new Merchant("disable-race", "thaap_test_disable"));
         MerchantContext merchantContext = new MerchantContext(
@@ -426,6 +547,22 @@ class WebhookDeliveryExecutionContractTests {
         assertThat(attempt.getOutcome()).isEqualTo(WebhookAttemptOutcome.TERMINAL_FAILURE);
         assertThat(attempt.getErrorCode()).isEqualTo(WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
         assertThat(claimService.claimDue(claimedAt.plusSeconds(600), 1)).isEmpty();
+    }
+
+    private WebhookEndpointSecretService endpointSecretService(java.time.Clock serviceClock) {
+        return new WebhookEndpointSecretService(
+                endpointRepository, secretCipher, serviceClock) {
+            @Override
+            public WebhookSignature signForDelivery(
+                    java.util.UUID merchantId, java.util.UUID endpointId,
+                    java.util.UUID secretGeneration, String payload,
+                    Instant notBefore, WebhookSigner selectedSigner) {
+                return new TransactionTemplate(transactionManager).execute(status ->
+                        super.signForDelivery(
+                                merchantId, endpointId, secretGeneration, payload,
+                                notBefore, selectedSigner));
+            }
+        };
     }
 
     @Test
