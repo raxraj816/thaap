@@ -3,15 +3,22 @@ package com.thaap.payments.webhook;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
+import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -20,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,7 +39,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -41,7 +49,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class WebhookDeliveryPostgreSqlConcurrencyTests {
 
     @Container
-    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -54,6 +62,33 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
 
     @Autowired
     private WebhookEndpointRepository endpointRepository;
+
+    @Autowired
+    private WebhookEndpointCreationRecordRepository creationRecordRepository;
+
+    @Autowired
+    private WebhookEndpointCreationIdentityRepository creationIdentityRepository;
+
+    @Autowired
+    private SensitiveValueHasher sensitiveValueHasher;
+
+    @Autowired
+    private WebhookEndpointSubscriptionStore subscriptionStore;
+
+    @Autowired
+    private WebhookSecretCipher secretCipher;
+
+    @Autowired
+    private WebhookEndpointSecretService endpointSecretService;
+
+    @Autowired
+    private WebhookSigner webhookSigner;
+
+    @Autowired
+    private AuditLogService auditLogService;
+
+    @Autowired
+    private WebhookMetrics webhookMetrics;
 
     @Autowired
     private WebhookDeliveryService deliveryService;
@@ -99,6 +134,334 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     }
 
     @Test
+    void expiredCreationReservationReclaimSerializesAndReplaysOneEndpoint() throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("creation-reclaim-race", "thaap_creation_reclaim_race"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "creation-reclaim-race", merchant.getApiKeyPrefix());
+        String idempotencyKey = "creation-reclaim-key";
+        String url = "https://merchant.example/reclaim-race";
+        Instant staleStartedAt = Instant.now().minusSeconds(120);
+        WebhookEndpointCreationRecord staleRecord = new WebhookEndpointCreationRecord(
+                merchant.getId(),
+                sensitiveValueHasher.hmacSha256(
+                        "webhook.endpoint.idempotency", idempotencyKey),
+                sensitiveValueHasher.hmacSha256(
+                        "webhook.endpoint.create", url + "\nrefund.created"),
+                sensitiveValueHasher.currentKeyVersion(),
+                UUID.randomUUID(), staleStartedAt.plusSeconds(30),
+                staleStartedAt, staleStartedAt.plusSeconds(24 * 60 * 60));
+        creationRecordRepository.saveAndFlush(staleRecord);
+        CountDownLatch firstOwnsCompletionLock = new CountDownLatch(1);
+        CountDownLatch releaseFirstCommit = new CountDownLatch(1);
+        AtomicReference<WebhookEndpointService.EndpointSecretResult> firstResult =
+                new AtomicReference<>();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> first = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    firstResult.set(endpointService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "reclaim-first"));
+                    firstOwnsCompletionLock.countDown();
+                    await(releaseFirstCommit);
+                });
+                return null;
+            });
+            firstOwnsCompletionLock.await();
+            awaitCreationRecordLockConflict(staleRecord.getId());
+
+            Future<WebhookEndpointService.EndpointSecretResult> second = executor.submit(() ->
+                    endpointService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "reclaim-second"));
+            awaitCreationRecordLockWait();
+
+            releaseFirstCommit.countDown();
+            first.get();
+            WebhookEndpointService.EndpointSecretResult replayed = second.get();
+
+            assertThat(replayed.endpoint().getId())
+                    .isEqualTo(firstResult.get().endpoint().getId());
+            assertThat(replayed.rawSigningSecret())
+                    .isEqualTo(firstResult.get().rawSigningSecret());
+            assertThat(endpointRepository.count()).isEqualTo(1);
+            WebhookEndpointCreationRecord completed =
+                    creationRecordRepository.findById(staleRecord.getId()).orElseThrow();
+            assertThat(completed.getStatus()).isEqualTo(WebhookEndpointCreationStatus.COMPLETED);
+            assertThat(completed.getLeaseToken()).isNull();
+        } finally {
+            releaseFirstCommit.countDown();
+        }
+    }
+
+    @Test
+    void liveEndpointCreationLockSurvivesLeaseExpiryBeforeFirstMutationCompletes()
+            throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("creation-live-owner", "thaap_creation_live_owner"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "creation-live-owner", merchant.getApiKeyPrefix());
+        String idempotencyKey = "creation-live-owner-key";
+        String url = "https://merchant.example/live-owner";
+        Instant startedAt = Instant.parse("2026-07-11T08:00:00Z");
+        MutableClock mutableClock = new MutableClock(startedAt);
+        WebhookEndpointService fixedClockService = endpointService(
+                sensitiveValueHasher, mutableClock);
+        CountDownLatch blockerInserted = new CountDownLatch(1);
+        CountDownLatch releaseBlocker = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            Future<?> blocker = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    UUID blockerEndpointId = UUID.randomUUID();
+                    String rawSecret = WebhookSigningSecret.generate();
+                    WebhookEncryptedSecret encryptedSecret = secretCipher.encrypt(
+                            rawSecret, merchant.getId(), blockerEndpointId);
+                    endpointRepository.saveAndFlush(new WebhookEndpoint(
+                            blockerEndpointId, merchant.getId(), url, rawSecret,
+                            encryptedSecret, startedAt));
+                    blockerInserted.countDown();
+                    await(releaseBlocker);
+                    status.setRollbackOnly();
+                });
+                return null;
+            });
+            assertThat(blockerInserted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+            Future<WebhookEndpointService.EndpointSecretResult> first = executor.submit(() ->
+                    fixedClockService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "live-owner-first"));
+            UUID recordId = awaitSingleCreationRecordId();
+            awaitCreationRecordLockConflict(recordId);
+            awaitEndpointInsertLockWait();
+
+            mutableClock.set(startedAt.plusSeconds(31));
+            Future<WebhookEndpointService.EndpointSecretResult> second = executor.submit(() ->
+                    fixedClockService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "live-owner-second"));
+            awaitCreationRecordLockWait();
+
+            releaseBlocker.countDown();
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            WebhookEndpointService.EndpointSecretResult created =
+                    first.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            WebhookEndpointService.EndpointSecretResult replayed =
+                    second.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            assertThat(replayed.endpoint().getId()).isEqualTo(created.endpoint().getId());
+            assertThat(replayed.rawSigningSecret()).isEqualTo(created.rawSigningSecret());
+            assertThat(endpointRepository.count()).isEqualTo(1);
+            assertThat(creationRecordRepository.findById(recordId).orElseThrow().getStatus())
+                    .isEqualTo(WebhookEndpointCreationStatus.COMPLETED);
+        } finally {
+            releaseBlocker.countDown();
+        }
+    }
+
+    @Test
+    void rotationWaitsUntilCurrentGenerationSignatureIsCryptographicallyUsed()
+            throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("sign-rotation-order", "thaap_sign_rotation_order"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "sign-rotation-order", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult created = endpointService.create(
+                context, "sign-rotation-create", "https://merchant.example/sign-order",
+                Set.of("refund.created"), "sign-rotation-create");
+        UUID generation = created.endpoint().getSigningSecretGeneration();
+        String payload = "{\"id\":\"" + UUID.randomUUID() + "\"}";
+        Instant signatureTime = Instant.parse("2026-07-11T08:30:00Z");
+        CountDownLatch signerOwnsEndpointLock = new CountDownLatch(1);
+        CountDownLatch releaseSigner = new CountDownLatch(1);
+        CountDownLatch rotationStarted = new CountDownLatch(1);
+        AtomicInteger rotationBackendPid = new AtomicInteger();
+        WebhookSigner blockingSigner = new WebhookSigner() {
+            @Override
+            public WebhookSignature sign(String rawSecret, String signedPayload, Instant attemptTime) {
+                signerOwnsEndpointLock.countDown();
+                await(releaseSigner);
+                return super.sign(rawSecret, signedPayload, attemptTime);
+            }
+        };
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<WebhookSignature> signatureFuture = executor.submit(() ->
+                    endpointSecretService.signForDelivery(
+                            merchant.getId(), created.endpoint().getId(), generation,
+                            payload, signatureTime, blockingSigner));
+            assertThat(signerOwnsEndpointLock.await(
+                    5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            awaitEndpointLockConflict(created.endpoint().getId());
+
+            Future<WebhookEndpointService.EndpointSecretResult> rotation = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).execute(status -> {
+                        rotationBackendPid.set(currentBackendPid());
+                        rotationStarted.countDown();
+                        return endpointService.rotateSecret(
+                                context, created.endpoint().getId(), "sign-rotation-action");
+                    }));
+            assertThat(rotationStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            awaitBackendLockWait(rotationBackendPid.get());
+
+            releaseSigner.countDown();
+            WebhookSignature signature = signatureFuture.get(
+                    5, java.util.concurrent.TimeUnit.SECONDS);
+            rotation.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            assertThat(webhookSigner.verify(
+                    created.rawSigningSecret(), payload,
+                    signature.timestampSeconds(), signature.value())).isTrue();
+            WebhookEndpoint rotated = endpointRepository.findById(
+                    created.endpoint().getId()).orElseThrow();
+            assertThat(rotated.getPreviousSigningSecretGeneration()).isEqualTo(generation);
+        } finally {
+            releaseSigner.countDown();
+        }
+    }
+
+    @Test
+    void previousGenerationWaitingForEndpointLockIsRejectedAtActualUseExpiry()
+            throws Exception {
+        Instant rotationTime = Instant.parse("2026-07-11T09:00:00Z");
+        MutableClock mutableClock = new MutableClock(rotationTime);
+        WebhookEndpointService clockedEndpointService = endpointService(
+                sensitiveValueHasher, mutableClock);
+        WebhookEndpointSecretService clockedSecretService =
+                new WebhookEndpointSecretService(
+                        endpointRepository, secretCipher, mutableClock);
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("sign-wait-expiry", "thaap_sign_wait_expiry"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "sign-wait-expiry", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult created = clockedEndpointService.create(
+                context, "sign-wait-expiry-create",
+                "https://merchant.example/sign-wait-expiry",
+                Set.of("refund.created"), "sign-wait-expiry-create");
+        UUID previousGeneration = created.endpoint().getSigningSecretGeneration();
+        WebhookEndpointService.EndpointSecretResult rotated =
+                new TransactionTemplate(transactionManager).execute(status ->
+                        clockedEndpointService.rotateSecret(
+                                context, created.endpoint().getId(),
+                                "sign-wait-expiry-rotate"));
+        Instant expiry = rotated.endpoint().getPreviousSigningSecretExpiresAt();
+        CountDownLatch blockerOwnsEndpointLock = new CountDownLatch(1);
+        CountDownLatch releaseBlocker = new CountDownLatch(1);
+        AtomicInteger signerCalls = new AtomicInteger();
+        WebhookSigner countingSigner = new WebhookSigner() {
+            @Override
+            public WebhookSignature sign(
+                    String rawSecret, String payload, Instant attemptTime) {
+                signerCalls.incrementAndGet();
+                return super.sign(rawSecret, payload, attemptTime);
+            }
+        };
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> blocker = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    endpointRepository.findByIdAndMerchantIdForUpdate(
+                            created.endpoint().getId(), merchant.getId()).orElseThrow();
+                    blockerOwnsEndpointLock.countDown();
+                    await(releaseBlocker);
+                });
+                return null;
+            });
+            assertThat(blockerOwnsEndpointLock.await(
+                    5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+            Future<WebhookSignature> signature = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).execute(status ->
+                            clockedSecretService.signForDelivery(
+                                    merchant.getId(), created.endpoint().getId(),
+                                    previousGeneration,
+                                    "{\"id\":\"" + UUID.randomUUID() + "\"}",
+                                    rotationTime, countingSigner)));
+            awaitEndpointLockWait();
+
+            mutableClock.set(expiry);
+            releaseBlocker.countDown();
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertThatThrownBy(() -> signature.get(
+                    5, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                    .hasRootCauseInstanceOf(WebhookStaleSecretGenerationException.class);
+            assertThat(signerCalls).hasValue(0);
+        } finally {
+            releaseBlocker.countDown();
+        }
+    }
+
+    @Test
+    void rollingHashPepperVersionsSerializeAndReplayOneWebhookEndpoint()
+            throws Exception {
+        String firstPepper = "rolling-webhook-pepper-v1";
+        String secondPepper = "rolling-webhook-pepper-v2";
+        String firstEncoded = Base64.getEncoder().encodeToString(
+                firstPepper.getBytes(StandardCharsets.UTF_8));
+        String secondEncoded = Base64.getEncoder().encodeToString(
+                secondPepper.getBytes(StandardCharsets.UTF_8));
+        WebhookEndpointService versionTwoService = endpointService(
+                new SensitiveValueHasher(
+                        secondPepper, "rolling-v2", "rolling-v1=" + firstEncoded));
+        WebhookEndpointService versionOneService = endpointService(
+                new SensitiveValueHasher(
+                        firstPepper, "rolling-v1", "rolling-v2=" + secondEncoded));
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("rolling-webhook", "thaap_rolling_webhook"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "rolling-webhook", merchant.getApiKeyPrefix());
+        String idempotencyKey = "rolling-webhook-key";
+        String url = "https://merchant.example/rolling-webhook";
+        CountDownLatch firstOwnsCompletionLock = new CountDownLatch(1);
+        CountDownLatch releaseFirstCommit = new CountDownLatch(1);
+        AtomicReference<WebhookEndpointService.EndpointSecretResult> firstResult =
+                new AtomicReference<>();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> first = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    firstResult.set(versionTwoService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "rolling-v2-create"));
+                    firstOwnsCompletionLock.countDown();
+                    await(releaseFirstCommit);
+                });
+                return null;
+            });
+
+            firstOwnsCompletionLock.await();
+            UUID recordId = jdbcTemplate.queryForObject("""
+                    SELECT id
+                    FROM webhook_endpoint_creation_records
+                    """, UUID.class);
+            awaitCreationRecordLockConflict(recordId);
+
+            Future<WebhookEndpointService.EndpointSecretResult> second =
+                    executor.submit(() -> versionOneService.create(
+                            context, idempotencyKey, url,
+                            Set.of("refund.created"), "rolling-v1-replay"));
+            awaitCreationRecordLockWait();
+
+            releaseFirstCommit.countDown();
+            first.get();
+            WebhookEndpointService.EndpointSecretResult replayed = second.get();
+
+            assertThat(replayed.endpoint().getId())
+                    .isEqualTo(firstResult.get().endpoint().getId());
+            assertThat(replayed.rawSigningSecret())
+                    .isEqualTo(firstResult.get().rawSigningSecret());
+            assertThat(endpointRepository.count()).isEqualTo(1);
+            assertThat(creationRecordRepository.count()).isEqualTo(1);
+            assertThat(creationIdentityRepository.count()).isEqualTo(2);
+        } finally {
+            releaseFirstCommit.countDown();
+        }
+    }
+
+    @Test
     void concurrentWorkersCreateOneClaimAndOneAttemptNumberWinner() throws Exception {
         Merchant merchant = merchantRepository.saveAndFlush(new Merchant("claim-race", "thaap_claim_race"));
         MerchantContext context = new MerchantContext(
@@ -133,6 +496,64 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 .extracting(WebhookDeliveryAttempt::getOutcome)
                 .isEqualTo(WebhookAttemptOutcome.IN_PROGRESS);
         assertThat(attemptRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void durableCursorPreventsNoisyMerchantAndEndpointStarvation() {
+        Merchant noisyMerchant = merchantRepository.saveAndFlush(
+                new Merchant("noisy-merchant", "thaap_noisy_merchant"));
+        Merchant quietMerchant = merchantRepository.saveAndFlush(
+                new Merchant("quiet-merchant", "thaap_quiet_merchant"));
+        MerchantContext noisyContext = new MerchantContext(
+                noisyMerchant.getId(), "noisy-merchant", noisyMerchant.getApiKeyPrefix());
+        MerchantContext quietContext = new MerchantContext(
+                quietMerchant.getId(), "quiet-merchant", quietMerchant.getApiKeyPrefix());
+        endpointService.create(
+                noisyContext, "noisy-first", "https://noisy.example/first",
+                Set.of("refund.created"), "noisy-first");
+        endpointService.create(
+                noisyContext, "noisy-second", "https://noisy.example/second",
+                Set.of("refund.created"), "noisy-second");
+        endpointService.create(
+                quietContext, "quiet-endpoint", "https://quiet.example/webhook",
+                Set.of("refund.created"), "quiet-endpoint");
+
+        for (int index = 0; index < 5; index++) {
+            createDeliveries(noisyMerchant.getId());
+        }
+        createDeliveries(quietMerchant.getId());
+        Instant claimAt = Instant.now().plusSeconds(1);
+
+        List<WebhookDeliveryClaim> merchantRound = claimService.claimDue(claimAt, 2);
+
+        assertThat(merchantRound).hasSize(2);
+        assertThat(merchantRound)
+                .extracting(WebhookDeliveryClaim::merchantId)
+                .containsExactlyInAnyOrder(noisyMerchant.getId(), quietMerchant.getId());
+        assertThat(merchantRound)
+                .extracting(WebhookDeliveryClaim::deliveryId)
+                .doesNotHaveDuplicates();
+
+        databaseCleaner.clean();
+        Merchant endpointMerchant = merchantRepository.saveAndFlush(
+                new Merchant("endpoint-fairness", "thaap_endpoint_fairness"));
+        MerchantContext endpointContext = new MerchantContext(
+                endpointMerchant.getId(), "endpoint-fairness", endpointMerchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult first = endpointService.create(
+                endpointContext, "endpoint-first", "https://endpoint.example/first",
+                Set.of("refund.created"), "endpoint-first");
+        WebhookEndpointService.EndpointSecretResult second = endpointService.create(
+                endpointContext, "endpoint-second", "https://endpoint.example/second",
+                Set.of("refund.created"), "endpoint-second");
+        createDeliveries(endpointMerchant.getId());
+
+        List<WebhookDeliveryClaim> endpointRound = claimService.claimDue(
+                Instant.now().plusSeconds(1), 2);
+
+        assertThat(endpointRound).hasSize(2);
+        assertThat(endpointRound)
+                .extracting(WebhookDeliveryClaim::endpointId)
+                .containsExactlyInAnyOrder(first.endpoint().getId(), second.endpoint().getId());
     }
 
     @Test
@@ -540,6 +961,125 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         throw new AssertionError("Expected endpoint lock was not observed");
     }
 
+    private WebhookEndpointService endpointService(SensitiveValueHasher hasher) {
+        return endpointService(hasher, Clock.systemUTC());
+    }
+
+    private WebhookEndpointService endpointService(
+            SensitiveValueHasher hasher, Clock serviceClock) {
+        return new WebhookEndpointService(
+                endpointRepository,
+                creationRecordRepository,
+                creationIdentityRepository,
+                deliveryRepository,
+                subscriptionStore,
+                secretCipher,
+                auditLogService,
+                webhookMetrics,
+                serviceClock,
+                hasher,
+                transactionManager,
+                Duration.ofMinutes(15));
+    }
+
+    private UUID awaitSingleCreationRecordId() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            List<UUID> ids = jdbcTemplate.query(
+                    "SELECT id FROM webhook_endpoint_creation_records",
+                    (resultSet, rowNumber) -> resultSet.getObject(1, UUID.class));
+            if (ids.size() == 1) {
+                return ids.getFirst();
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Endpoint creation reservation was not persisted");
+    }
+
+    private void awaitEndpointInsertLockWait() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE wait_event_type = 'Lock'
+                          AND query LIKE 'insert into webhook_endpoints%'
+                    )
+                    """, Boolean.class);
+            if (Boolean.TRUE.equals(waiting)) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Endpoint insertion did not wait on the unique URL boundary");
+    }
+
+    private void awaitCreationRecordLockConflict(UUID creationRecordId) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            try (Connection connection = dataSource.getConnection();
+                    PreparedStatement statement = connection.prepareStatement("""
+                            SELECT id
+                            FROM webhook_endpoint_creation_records
+                            WHERE id = ?
+                            FOR UPDATE NOWAIT
+                            """)) {
+                connection.setAutoCommit(false);
+                statement.setObject(1, creationRecordId);
+                statement.executeQuery();
+                connection.rollback();
+            } catch (SQLException exception) {
+                if ("55P03".equals(exception.getSQLState())) {
+                    return;
+                }
+                throw exception;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Expected endpoint creation record lock was not observed");
+    }
+
+    private void awaitCreationRecordLockWait() throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE wait_event_type = 'Lock'
+                          AND query LIKE '%webhook_endpoint_creation_records%'
+                    )
+                    """, Boolean.class);
+            if (Boolean.TRUE.equals(waiting)) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError(
+                "Competing endpoint creation did not wait on the reservation lock");
+    }
+
+    private void awaitEndpointLockWait() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE wait_event_type = 'Lock'
+                          AND query LIKE '%webhook_endpoints%'
+                    )
+                    """, Boolean.class);
+            if (Boolean.TRUE.equals(waiting)) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError(
+                "Previous-generation signer did not wait on the endpoint lock");
+    }
+
     private int currentBackendPid() {
         Integer backendPid = jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class);
         if (backendPid == null) {
@@ -581,5 +1121,39 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         ready.countDown();
         start.await();
         return claimService.claimDue(now, 1);
+    }
+
+    private void createDeliveries(UUID merchantId) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchantId, "refund.created", UUID.randomUUID()));
+    }
+
+    private static final class MutableClock extends Clock {
+
+        private final AtomicReference<Instant> current;
+
+        private MutableClock(Instant initial) {
+            this.current = new AtomicReference<>(initial);
+        }
+
+        private void set(Instant instant) {
+            current.set(instant);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return java.time.ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return current.get();
+        }
     }
 }

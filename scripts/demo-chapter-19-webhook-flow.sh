@@ -71,7 +71,8 @@ api_key="$(json_get "$merchant_response" "apiKey")"
 
 endpoint_response="$(post_json "/webhook_endpoints" \
   "{\"url\":\"http://127.0.0.1:${CALLBACK_PORT}/thaap\",\"enabledEvents\":[\"payment_intent.created\"]}" \
-  -H "X-Api-Key: ${api_key}")"
+  -H "X-Api-Key: ${api_key}" \
+  -H "Idempotency-Key: chapter19-${RUN_ID}-webhook-endpoint")"
 json_get "$endpoint_response" "signingSecret" > "$SECRET_FILE"
 
 customer_response="$(post_json "/customers" "{\"email\":\"chapter19-${RUN_ID}@example.com\"}" \

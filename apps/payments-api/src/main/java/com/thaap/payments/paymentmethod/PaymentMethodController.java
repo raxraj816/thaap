@@ -2,7 +2,7 @@ package com.thaap.payments.paymentmethod;
 
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
-import com.thaap.payments.security.SensitiveValueHasher;
+import com.thaap.payments.security.CorrelationValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -26,14 +26,14 @@ public class PaymentMethodController {
     private final PaymentMethodRepository paymentMethodRepository;
     private final CustomerRepository customerRepository;
     private final IdempotencyService idempotencyService;
-    private final SensitiveValueHasher sensitiveValueHasher;
+    private final CorrelationValueHasher correlationValueHasher;
 
     public PaymentMethodController(PaymentMethodRepository paymentMethodRepository, CustomerRepository customerRepository,
-            IdempotencyService idempotencyService, SensitiveValueHasher sensitiveValueHasher) {
+            IdempotencyService idempotencyService, CorrelationValueHasher correlationValueHasher) {
         this.paymentMethodRepository = paymentMethodRepository;
         this.customerRepository = customerRepository;
         this.idempotencyService = idempotencyService;
-        this.sensitiveValueHasher = sensitiveValueHasher;
+        this.correlationValueHasher = correlationValueHasher;
     }
 
     @PostMapping
@@ -56,7 +56,7 @@ public class PaymentMethodController {
         }
         PaymentMethod paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
                 request.customerId(), "pm_tok_" + UUID.randomUUID().toString().replace("-", ""),
-                sensitiveValueHasher.hmacSha256("payment_method.card_fingerprint", normalizedCard),
+                correlationValueHasher.hmacSha256("payment_method.card_fingerprint", normalizedCard),
                 normalizedCard.substring(0, 6),
                 normalizedCard.substring(normalizedCard.length() - 4), cardFunding(normalizedCard), cardCountry()));
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentMethodResponse.from(paymentMethod));

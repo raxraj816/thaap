@@ -1,53 +1,128 @@
 package com.thaap.payments.webhook;
 
 import com.thaap.payments.audit.AuditLogService;
+import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class WebhookEndpointService {
 
+    private static final Duration CREATION_REPLAY_TTL = Duration.ofHours(24);
+    private static final Duration CREATION_RESERVATION_LEASE = Duration.ofSeconds(30);
+
     private final WebhookEndpointRepository endpointRepository;
+    private final WebhookEndpointCreationRecordRepository creationRecordRepository;
+    private final WebhookEndpointCreationIdentityRepository creationIdentityRepository;
     private final WebhookDeliveryRepository deliveryRepository;
     private final WebhookEndpointSubscriptionStore subscriptionStore;
     private final WebhookSecretCipher secretCipher;
     private final AuditLogService auditLogService;
     private final WebhookMetrics metrics;
     private final Clock clock;
+    private final SensitiveValueHasher sensitiveValueHasher;
+    private final TransactionTemplate creationTransaction;
+    private final TransactionTemplate reservationTransaction;
+    private final Duration secretRotationGrace;
 
     public WebhookEndpointService(WebhookEndpointRepository endpointRepository,
+            WebhookEndpointCreationRecordRepository creationRecordRepository,
+            WebhookEndpointCreationIdentityRepository creationIdentityRepository,
             WebhookDeliveryRepository deliveryRepository,
             WebhookEndpointSubscriptionStore subscriptionStore,
             WebhookSecretCipher secretCipher, AuditLogService auditLogService,
-            WebhookMetrics metrics, Clock clock) {
+            WebhookMetrics metrics, Clock clock, SensitiveValueHasher sensitiveValueHasher,
+            PlatformTransactionManager transactionManager,
+            @Value("${thaap.webhook.secret-rotation-grace:15m}") Duration secretRotationGrace) {
+        if (secretRotationGrace.isZero() || secretRotationGrace.isNegative()) {
+            throw new IllegalArgumentException("Webhook secret rotation grace must be positive");
+        }
         this.endpointRepository = endpointRepository;
+        this.creationRecordRepository = creationRecordRepository;
+        this.creationIdentityRepository = creationIdentityRepository;
         this.deliveryRepository = deliveryRepository;
         this.subscriptionStore = subscriptionStore;
         this.secretCipher = secretCipher;
         this.auditLogService = auditLogService;
         this.metrics = metrics;
         this.clock = clock;
+        this.sensitiveValueHasher = sensitiveValueHasher;
+        this.creationTransaction = new TransactionTemplate(transactionManager);
+        this.reservationTransaction = new TransactionTemplate(transactionManager);
+        this.reservationTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.secretRotationGrace = secretRotationGrace;
     }
 
-    @Transactional
-    public EndpointSecretResult create(MerchantContext merchantContext, String url, Set<String> enabledEvents,
-            String requestId) {
+    public EndpointSecretResult create(MerchantContext merchantContext, String idempotencyKey,
+            String url, Set<String> enabledEvents, String requestId) {
+        requireIdempotencyKey(idempotencyKey);
         Set<WebhookEventType> eventTypes = normalizeEventTypes(enabledEvents);
+        String requestMaterial = creationRequestMaterial(url, eventTypes);
+        List<SensitiveValueHasher.VersionedDigest> keyIdentities =
+                sensitiveValueHasher.hmacSha256Keyring(
+                        "webhook.endpoint.idempotency", idempotencyKey);
+        CreationReservation reservation = reserveCreation(
+                merchantContext.merchantId(), keyIdentities, requestMaterial);
+        if (reservation.replayRecord() != null) {
+            return replayCreation(merchantContext, reservation.replayRecord());
+        }
+        try {
+            EndpointSecretResult result = creationTransaction.execute(status ->
+                    createOnce(merchantContext, url, eventTypes, requestId,
+                            reservation.recordId(), reservation.leaseToken()));
+            if (result == null) {
+                throw new IllegalStateException("Webhook endpoint creation transaction returned no result");
+            }
+            return result;
+        } catch (DataIntegrityViolationException exception) {
+            releaseCreationReservation(reservation.recordId(), reservation.leaseToken());
+            if (isDuplicateEndpointUrl(exception)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "A webhook endpoint already exists for this URL", exception);
+            }
+            throw exception;
+        } catch (RuntimeException | Error exception) {
+            releaseCreationReservation(reservation.recordId(), reservation.leaseToken());
+            throw exception;
+        }
+    }
+
+    EndpointSecretResult create(MerchantContext merchantContext, String url,
+            Set<String> enabledEvents, String requestId) {
+        return create(merchantContext, "service:" + requestId, url, enabledEvents, requestId);
+    }
+
+    private EndpointSecretResult createOnce(MerchantContext merchantContext, String url,
+            Set<WebhookEventType> eventTypes, String requestId, UUID creationRecordId,
+            UUID leaseToken) {
+        WebhookEndpointCreationRecord record = creationRecordRepository.findByIdForUpdate(creationRecordId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Webhook endpoint creation reservation disappeared"));
+        record.requireOwnedInProgress(leaseToken);
         UUID endpointId = UUID.randomUUID();
         String rawSecret = WebhookSigningSecret.generate();
         WebhookEncryptedSecret encryptedSecret = secretCipher.encrypt(
@@ -59,7 +134,227 @@ public class WebhookEndpointService {
         auditLogService.recordMerchantApiAction(merchantContext, requestId, "webhook_endpoint.created",
                 "webhook_endpoint", endpointId, "Webhook endpoint created",
                 null, endpointAuditState(endpoint, wireValues(eventTypes)));
+        record.complete(leaseToken, endpointId, endpoint.getSigningSecretGeneration(),
+                new WebhookEncryptedSecret(
+                        endpoint.getSigningSecretCiphertext(),
+                        endpoint.getSigningSecretNonce(),
+                        endpoint.getSigningSecretKeyVersion()),
+                now, now.plus(CREATION_REPLAY_TTL));
         return new EndpointSecretResult(endpoint, rawSecret, wireValues(eventTypes));
+    }
+
+    private CreationReservation reserveCreation(UUID merchantId,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities,
+            String requestMaterial) {
+        try {
+            return reservationTransaction.execute(status ->
+                    reserveCreationOnce(merchantId, keyIdentities, requestMaterial));
+        } catch (DataIntegrityViolationException exception) {
+            return reservationTransaction.execute(status ->
+                    existingCreation(merchantId, keyIdentities, requestMaterial));
+        }
+    }
+
+    private CreationReservation reserveCreationOnce(UUID merchantId,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities,
+            String requestMaterial) {
+        WebhookEndpointCreationRecord existingRecord =
+                findExistingCreationRecord(merchantId, keyIdentities);
+        if (existingRecord != null) {
+            if (existingRecord.isExpired(clock.instant())) {
+                deleteExpiredCreationRecord(existingRecord);
+            } else {
+                return existingCreation(existingRecord, keyIdentities, requestMaterial);
+            }
+        }
+        Instant now = clock.instant();
+        UUID leaseToken = UUID.randomUUID();
+        SensitiveValueHasher.VersionedDigest currentIdentity = keyIdentities.getFirst();
+        String requestHash = creationRequestHash(
+                requestMaterial, currentIdentity.keyVersion());
+        WebhookEndpointCreationRecord record = new WebhookEndpointCreationRecord(
+                merchantId, currentIdentity.digest(), requestHash,
+                currentIdentity.keyVersion(),
+                leaseToken, now.plus(CREATION_RESERVATION_LEASE),
+                now, now.plus(CREATION_REPLAY_TTL));
+        creationRecordRepository.saveAndFlush(record);
+        creationIdentityRepository.saveAllAndFlush(keyIdentities.stream()
+                .map(identity -> new WebhookEndpointCreationIdentity(
+                        merchantId, identity.digest(), identity.keyVersion(),
+                        record.getId(), now))
+                .toList());
+        return CreationReservation.reserved(record.getId(), leaseToken);
+    }
+
+    private CreationReservation existingCreation(UUID merchantId,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities,
+            String requestMaterial) {
+        WebhookEndpointCreationRecord record =
+                findExistingCreationRecord(merchantId, keyIdentities);
+        if (record == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Webhook endpoint creation reservation could not be completed");
+        }
+        if (record.isExpired(clock.instant())) {
+            deleteExpiredCreationRecord(record);
+            return reserveCreationOnce(merchantId, keyIdentities, requestMaterial);
+        }
+        return existingCreation(record, keyIdentities, requestMaterial);
+    }
+
+    private void deleteExpiredCreationRecord(WebhookEndpointCreationRecord record) {
+        if (!record.isExpired(clock.instant())) {
+            throw new IllegalStateException(
+                    "A live webhook creation record cannot be retired");
+        }
+        creationRecordRepository.delete(record);
+        creationRecordRepository.flush();
+    }
+
+    private CreationReservation existingCreation(WebhookEndpointCreationRecord record,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities,
+            String requestMaterial) {
+        String requestHash = creationRequestHash(
+                requestMaterial, record.getRequestHashKeyVersion());
+        if (!MessageDigest.isEqual(
+                record.getRequestHash().getBytes(StandardCharsets.UTF_8),
+                requestHash.getBytes(StandardCharsets.UTF_8))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Idempotency key was already used with a different webhook endpoint request");
+        }
+        ensureCreationIdentityAliases(record, keyIdentities);
+        if (record.getStatus() != WebhookEndpointCreationStatus.COMPLETED) {
+            Instant now = clock.instant();
+            if (record.hasActiveLease(now)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Webhook endpoint creation is already in progress");
+            }
+            UUID leaseToken = UUID.randomUUID();
+            record.reclaim(leaseToken, now, now.plus(CREATION_RESERVATION_LEASE));
+            return CreationReservation.reserved(record.getId(), leaseToken);
+        }
+        return CreationReservation.replay(record);
+    }
+
+    private WebhookEndpointCreationRecord findExistingCreationRecord(UUID merchantId,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities) {
+        List<String> identityHashes = keyIdentities.stream()
+                .map(SensitiveValueHasher.VersionedDigest::digest)
+                .toList();
+        List<WebhookEndpointCreationIdentity> identities =
+                creationIdentityRepository.findByMerchantIdAndIdentityHashInForUpdate(
+                        merchantId, identityHashes);
+        Set<UUID> recordIds = identities.stream()
+                .map(WebhookEndpointCreationIdentity::getCreationRecordId)
+                .collect(java.util.stream.Collectors.toSet());
+        if (recordIds.size() > 1) {
+            throw new IllegalStateException(
+                    "Webhook idempotency identities resolve to conflicting creation records");
+        }
+        if (recordIds.size() == 1) {
+            return creationRecordRepository.findByIdForUpdate(recordIds.iterator().next())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Webhook creation identity lost its reservation lineage"));
+        }
+        List<WebhookEndpointCreationRecord> legacyRecords =
+                creationRecordRepository.findByMerchantIdAndIdempotencyKeyHashInForUpdate(
+                        merchantId, identityHashes);
+        if (legacyRecords.size() > 1) {
+            throw new IllegalStateException(
+                    "Webhook idempotency hashes resolve to conflicting legacy records");
+        }
+        return legacyRecords.isEmpty() ? null : legacyRecords.getFirst();
+    }
+
+    private void ensureCreationIdentityAliases(
+            WebhookEndpointCreationRecord record,
+            List<SensitiveValueHasher.VersionedDigest> keyIdentities) {
+        List<WebhookEndpointCreationIdentity> existingIdentities =
+                creationIdentityRepository.findByMerchantIdAndIdentityHashInForUpdate(
+                        record.getMerchantId(),
+                        keyIdentities.stream()
+                                .map(SensitiveValueHasher.VersionedDigest::digest)
+                                .toList());
+        Set<String> existingHashes = existingIdentities.stream()
+                .map(WebhookEndpointCreationIdentity::getIdentityHash)
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        for (WebhookEndpointCreationIdentity identity : existingIdentities) {
+            if (!identity.getCreationRecordId().equals(record.getId())) {
+                throw new IllegalStateException(
+                        "Webhook idempotency identity is bound to another creation record");
+            }
+        }
+        Instant now = clock.instant();
+        List<WebhookEndpointCreationIdentity> missingIdentities = keyIdentities.stream()
+                .filter(identity -> !existingHashes.contains(identity.digest()))
+                .map(identity -> new WebhookEndpointCreationIdentity(
+                        record.getMerchantId(), identity.digest(), identity.keyVersion(),
+                        record.getId(), now))
+                .toList();
+        if (!missingIdentities.isEmpty()) {
+            creationIdentityRepository.saveAllAndFlush(missingIdentities);
+        }
+    }
+
+    private EndpointSecretResult replayCreation(MerchantContext merchantContext,
+            WebhookEndpointCreationRecord record) {
+        if (record.getExpiresAt().isBefore(clock.instant())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Webhook endpoint creation replay window has expired");
+        }
+        UUID endpointId = record.getWebhookEndpointId();
+        WebhookEndpoint endpoint = endpointRepository.findByIdAndMerchantId(
+                        endpointId, merchantContext.merchantId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Completed webhook endpoint creation lost endpoint lineage"));
+        if (!endpoint.getSigningSecretGeneration().equals(
+                record.getSigningSecretGeneration())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Webhook endpoint creation response was superseded by secret rotation");
+        }
+        String rawSecret = secretCipher.decrypt(
+                record.encryptedSecret(), merchantContext.merchantId(), endpointId);
+        return new EndpointSecretResult(endpoint, rawSecret,
+                subscriptionStore.findWireValues(merchantContext.merchantId(), endpointId));
+    }
+
+    private void releaseCreationReservation(UUID recordId, UUID leaseToken) {
+        reservationTransaction.executeWithoutResult(status -> creationRecordRepository.findByIdForUpdate(recordId)
+                .filter(record -> record.isOwnedInProgress(leaseToken))
+                .ifPresent(creationRecordRepository::delete));
+    }
+
+    private String creationRequestMaterial(
+            String url, Set<WebhookEventType> eventTypes) {
+        String canonicalEvents = eventTypes.stream()
+                .map(WebhookEventType::wireValue)
+                .sorted()
+                .reduce((left, right) -> left + "," + right)
+                .orElseThrow();
+        return url + "\n" + canonicalEvents;
+    }
+
+    private String creationRequestHash(String requestMaterial, String keyVersion) {
+        return sensitiveValueHasher.hmacSha256(
+                "webhook.endpoint.create", requestMaterial, keyVersion);
+    }
+
+    private void requireIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Missing Idempotency-Key header");
+        }
+        if (idempotencyKey.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Idempotency-Key must contain at most 255 characters");
+        }
+    }
+
+    private boolean isDuplicateEndpointUrl(DataIntegrityViolationException exception) {
+        String message = exception.getMostSpecificCause().getMessage();
+        return message != null
+                && message.toLowerCase(java.util.Locale.ROOT)
+                        .contains("uk_webhook_endpoints_merchant_url");
     }
 
     @Transactional
@@ -70,11 +365,17 @@ public class WebhookEndpointService {
                     "Disabled webhook endpoints cannot rotate secrets");
         }
         WebhookEndpointStatus beforeStatus = endpoint.getOperationalStatus();
+        Instant rotatedAt = clock.instant();
+        if (endpoint.hasActivePreviousSecret(rotatedAt)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Webhook endpoint already has an active previous-secret overlap");
+        }
         String beforePrefix = endpoint.getSigningSecretPrefix();
         String rawSecret = WebhookSigningSecret.generate();
         WebhookEncryptedSecret encryptedSecret = secretCipher.encrypt(
                 rawSecret, merchantContext.merchantId(), endpointId);
-        endpoint.rotateSecret(rawSecret, encryptedSecret);
+        endpoint.rotateSecret(rawSecret, encryptedSecret, rotatedAt,
+                rotatedAt.plus(secretRotationGrace));
         Set<String> enabledEvents = subscriptionStore.findWireValues(merchantContext.merchantId(), endpointId);
 
         Map<String, Object> before = new LinkedHashMap<>();
@@ -191,5 +492,17 @@ public class WebhookEndpointService {
     }
 
     private record DisableMetricObservation(String eventType, long deliveryCount) {
+    }
+
+    private record CreationReservation(UUID recordId, UUID leaseToken,
+            WebhookEndpointCreationRecord replayRecord) {
+
+        private static CreationReservation reserved(UUID recordId, UUID leaseToken) {
+            return new CreationReservation(recordId, leaseToken, null);
+        }
+
+        private static CreationReservation replay(WebhookEndpointCreationRecord record) {
+            return new CreationReservation(record.getId(), null, record);
+        }
     }
 }

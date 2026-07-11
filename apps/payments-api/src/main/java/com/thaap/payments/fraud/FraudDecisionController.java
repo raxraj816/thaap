@@ -46,13 +46,15 @@ public class FraudDecisionController {
             FraudRiskLevel riskLevel, FraudDecisionAction action, String modelVersion, String rulesetVersion,
             long latencyMs, Instant decisionStartedAt, Instant decisionCompletedAt,
             FeatureFreshnessStatus featureFreshnessStatus, long maxFeatureAgeMs,
-            List<FraudDecisionReasonCode> reasonCodes, Instant createdAt) {
+            List<FraudDecisionReasonCode> reasonCodes, com.thaap.payments.tenant.TrafficOrigin trafficOrigin,
+            Instant createdAt) {
         static FraudDecisionResponse from(FraudDecision decision) {
             return new FraudDecisionResponse(decision.getId(), decision.getMerchantId(), decision.getPaymentAttemptId(),
                     decision.getRiskScore(), decision.getRiskLevel(), decision.getAction(), decision.getModelVersion(),
                     decision.getRulesetVersion(), decision.getLatencyMs(), decision.getDecisionStartedAt(),
                     decision.getDecisionCompletedAt(), decision.getFeatureFreshnessStatus(),
-                    decision.getMaxFeatureAgeMs(), decision.getReasonCodes(), decision.getCreatedAt());
+                    decision.getMaxFeatureAgeMs(), decision.getReasonCodes(), decision.getTrafficOrigin(),
+                    decision.getCreatedAt());
         }
     }
 
@@ -65,14 +67,16 @@ public class FraudDecisionController {
     public record FeatureSnapshotResponse(UUID id, UUID merchantId, UUID fraudDecisionId, UUID paymentAttemptId,
             String featureVersion, Map<String, Object> features, Instant computedAt, Instant oldestFeatureTimestamp,
             long maxFeatureAgeMs, FeatureFreshnessStatus freshnessStatus, List<String> staleFeatureNames,
-            List<String> missingFeatureNames, Instant createdAt) {
+            List<String> missingFeatureNames, com.thaap.payments.tenant.TrafficOrigin trafficOrigin,
+            Instant createdAt) {
         static FeatureSnapshotResponse from(FeatureSnapshot featureSnapshot) {
             return new FeatureSnapshotResponse(featureSnapshot.getId(), featureSnapshot.getMerchantId(),
                     featureSnapshot.getFraudDecisionId(), featureSnapshot.getPaymentAttemptId(),
                     featureSnapshot.getFeatureVersion(), featureSnapshot.getFeatures(), featureSnapshot.getComputedAt(),
                     featureSnapshot.getOldestFeatureTimestamp(), featureSnapshot.getMaxFeatureAgeMs(),
                     featureSnapshot.getFreshnessStatus(), featureSnapshot.getStaleFeatureNames(),
-                    featureSnapshot.getMissingFeatureNames(), featureSnapshot.getCreatedAt());
+                    featureSnapshot.getMissingFeatureNames(), featureSnapshot.getTrafficOrigin(),
+                    featureSnapshot.getCreatedAt());
         }
     }
 }

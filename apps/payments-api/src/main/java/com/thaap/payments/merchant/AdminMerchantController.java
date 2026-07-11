@@ -17,12 +17,12 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/admin/merchants")
 public class AdminMerchantController {
 
-    private final MerchantRepository merchantRepository;
+    private final MerchantCreationService merchantCreationService;
     private final String bootstrapToken;
 
-    public AdminMerchantController(MerchantRepository merchantRepository,
+    public AdminMerchantController(MerchantCreationService merchantCreationService,
             @Value("${thaap.admin.bootstrap-token:}") String bootstrapToken) {
-        this.merchantRepository = merchantRepository;
+        this.merchantCreationService = merchantCreationService;
         this.bootstrapToken = bootstrapToken;
     }
 
@@ -30,11 +30,14 @@ public class AdminMerchantController {
     @ResponseStatus(HttpStatus.CREATED)
     public MerchantResponse createMerchant(
             @RequestHeader(name = "X-Admin-Bootstrap-Token", required = false) String providedBootstrapToken,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateMerchantRequest request) {
         requireBootstrapToken(providedBootstrapToken);
-        String apiKey = newApiKey();
-        Merchant merchant = merchantRepository.save(new Merchant(request.name(), apiKey));
-        return MerchantResponse.from(merchant, apiKey);
+        MerchantCreationService.MerchantCreationResult result =
+                idempotencyKey == null
+                        ? merchantCreationService.createUnkeyed(request.name())
+                        : merchantCreationService.create(idempotencyKey, request.name());
+        return MerchantResponse.from(result.merchant(), result.rawApiKey());
     }
 
     private void requireBootstrapToken(String providedBootstrapToken) {
@@ -44,10 +47,6 @@ public class AdminMerchantController {
         if (providedBootstrapToken == null || !providedBootstrapToken.equals(bootstrapToken)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Invalid merchant admin bootstrap token");
         }
-    }
-
-    private String newApiKey() {
-        return "thaap_test_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     public record CreateMerchantRequest(@NotBlank String name) {

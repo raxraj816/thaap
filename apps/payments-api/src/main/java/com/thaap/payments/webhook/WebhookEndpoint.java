@@ -47,6 +47,30 @@ public class WebhookEndpoint {
     @Column(name = "signing_secret_key_version", length = 32)
     private String signingSecretKeyVersion;
 
+    @Column(name = "signing_secret_generation", nullable = false)
+    private UUID signingSecretGeneration;
+
+    @Column(name = "previous_signing_secret_prefix", length = 32)
+    private String previousSigningSecretPrefix;
+
+    @Column(name = "previous_signing_secret_hash", length = 64)
+    private String previousSigningSecretHash;
+
+    @Column(name = "previous_signing_secret_ciphertext", columnDefinition = "TEXT")
+    private String previousSigningSecretCiphertext;
+
+    @Column(name = "previous_signing_secret_nonce", length = 64)
+    private String previousSigningSecretNonce;
+
+    @Column(name = "previous_signing_secret_key_version", length = 32)
+    private String previousSigningSecretKeyVersion;
+
+    @Column(name = "previous_signing_secret_generation")
+    private UUID previousSigningSecretGeneration;
+
+    @Column(name = "previous_signing_secret_expires_at")
+    private Instant previousSigningSecretExpiresAt;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -61,6 +85,7 @@ public class WebhookEndpoint {
         this.operationalStatus = WebhookEndpointStatus.REQUIRES_SECRET_ROTATION;
         this.signingSecretPrefix = SecretHasher.prefix(rawSigningSecret);
         this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
+        this.signingSecretGeneration = UUID.randomUUID();
         this.createdAt = Instant.now();
     }
 
@@ -75,13 +100,31 @@ public class WebhookEndpoint {
         this.signingSecretCiphertext = encryptedSecret.ciphertext();
         this.signingSecretNonce = encryptedSecret.nonce();
         this.signingSecretKeyVersion = encryptedSecret.keyVersion();
+        this.signingSecretGeneration = UUID.randomUUID();
         this.createdAt = createdAt;
     }
 
-    public void rotateSecret(String rawSigningSecret, WebhookEncryptedSecret encryptedSecret) {
+    public void rotateSecret(String rawSigningSecret, WebhookEncryptedSecret encryptedSecret,
+            Instant rotatedAt, Instant previousExpiresAt) {
+        if (hasActivePreviousSecret(rotatedAt)) {
+            throw new IllegalStateException(
+                    "Webhook signing secret cannot rotate while a previous-secret overlap is active");
+        }
+        if (this.signingSecretCiphertext != null) {
+            this.previousSigningSecretPrefix = this.signingSecretPrefix;
+            this.previousSigningSecretHash = this.signingSecretHash;
+            this.previousSigningSecretCiphertext = this.signingSecretCiphertext;
+            this.previousSigningSecretNonce = this.signingSecretNonce;
+            this.previousSigningSecretKeyVersion = this.signingSecretKeyVersion;
+            this.previousSigningSecretGeneration = this.signingSecretGeneration;
+            this.previousSigningSecretExpiresAt = previousExpiresAt;
+        } else {
+            clearPreviousSecret();
+        }
         this.signingSecretPrefix = SecretHasher.prefix(rawSigningSecret);
         this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
         replaceEncryptedSecret(encryptedSecret);
+        this.signingSecretGeneration = UUID.randomUUID();
         this.operationalStatus = WebhookEndpointStatus.ACTIVE;
     }
 
@@ -93,6 +136,16 @@ public class WebhookEndpoint {
         this.signingSecretCiphertext = encryptedSecret.ciphertext();
         this.signingSecretNonce = encryptedSecret.nonce();
         this.signingSecretKeyVersion = encryptedSecret.keyVersion();
+    }
+
+    private void clearPreviousSecret() {
+        this.previousSigningSecretPrefix = null;
+        this.previousSigningSecretHash = null;
+        this.previousSigningSecretCiphertext = null;
+        this.previousSigningSecretNonce = null;
+        this.previousSigningSecretKeyVersion = null;
+        this.previousSigningSecretGeneration = null;
+        this.previousSigningSecretExpiresAt = null;
     }
 
     public void disable() {
@@ -137,6 +190,44 @@ public class WebhookEndpoint {
 
     public String getSigningSecretKeyVersion() {
         return signingSecretKeyVersion;
+    }
+
+    public UUID getSigningSecretGeneration() {
+        return signingSecretGeneration;
+    }
+
+    public String getPreviousSigningSecretPrefix() {
+        return previousSigningSecretPrefix;
+    }
+
+    public String getPreviousSigningSecretHash() {
+        return previousSigningSecretHash;
+    }
+
+    public String getPreviousSigningSecretCiphertext() {
+        return previousSigningSecretCiphertext;
+    }
+
+    public String getPreviousSigningSecretNonce() {
+        return previousSigningSecretNonce;
+    }
+
+    public String getPreviousSigningSecretKeyVersion() {
+        return previousSigningSecretKeyVersion;
+    }
+
+    public UUID getPreviousSigningSecretGeneration() {
+        return previousSigningSecretGeneration;
+    }
+
+    public Instant getPreviousSigningSecretExpiresAt() {
+        return previousSigningSecretExpiresAt;
+    }
+
+    public boolean hasActivePreviousSecret(Instant now) {
+        return previousSigningSecretGeneration != null
+                && previousSigningSecretExpiresAt != null
+                && previousSigningSecretExpiresAt.isAfter(now);
     }
 
     public Instant getCreatedAt() {

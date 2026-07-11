@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import com.thaap.payments.tenant.TrafficOrigin;
 
 @Service
 public class WebhookDeliveryService {
@@ -34,6 +35,13 @@ public class WebhookDeliveryService {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void createDeliveriesInCurrentTransaction(UUID merchantId, String eventType, UUID resourceId) {
+        createDeliveriesInCurrentTransaction(
+                merchantId, eventType, resourceId, TrafficOrigin.MERCHANT_API);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void createDeliveriesInCurrentTransaction(UUID merchantId, String eventType, UUID resourceId,
+            TrafficOrigin trafficOrigin) {
         WebhookEventType canonicalEventType = WebhookEventType.fromWireValue(eventType);
         List<String> endpointIdValues = webhookEndpointRepository.findActiveSubscribedEndpointIds(
                 merchantId, canonicalEventType.wireValue());
@@ -47,7 +55,8 @@ public class WebhookDeliveryService {
             return;
         }
         WebhookEvent event = webhookEventRepository.save(
-                envelopeFactory.create(merchantId, canonicalEventType, resourceId, clock.instant()));
+                envelopeFactory.create(merchantId, canonicalEventType, resourceId, clock.instant(),
+                        trafficOrigin));
         Instant occurredAt = event.getOccurredAt();
         for (WebhookEndpoint endpoint : endpoints) {
             webhookDeliveryRepository.save(new WebhookDelivery(merchantId, endpoint.getId(), event.getId(),

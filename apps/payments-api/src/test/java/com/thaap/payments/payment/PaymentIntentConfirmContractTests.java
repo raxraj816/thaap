@@ -38,7 +38,9 @@ class PaymentIntentConfirmContractTests {
     private static final String API_KEY = "X-Api-Key";
     private static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     private static final String ADMIN_BOOTSTRAP_TOKEN = "X-Admin-Bootstrap-Token";
+    private static final String SCENARIO_RUNNER_TOKEN = "X-Thaap-Scenario-Runner-Token";
     private static final String TEST_ADMIN_BOOTSTRAP_TOKEN = "test-admin-bootstrap-token";
+    private static final String TEST_SCENARIO_RUNNER_TOKEN = "test-scenario-runner-token";
 
     private MockMvc mockMvc;
 
@@ -197,6 +199,74 @@ class PaymentIntentConfirmContractTests {
                 .doesNotContain(merchant.apiKey())
                 .doesNotContain("confirm-attempt-a");
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
+    }
+
+    @Test
+    void trustedSyntheticOriginPropagatesThroughDecisionTimeAndEventLineage()
+            throws Exception {
+        MerchantAccess merchant = createMerchant("synthetic-lineage");
+        UUID customerId = createCustomer(merchant, "synthetic-lineage@example.com");
+        UUID paymentMethodId = createPaymentMethod(
+                merchant, customerId, "synthetic-lineage-pm", "4999990000000001");
+        createWebhookEndpoint(merchant, "https://synthetic-lineage.example/webhooks");
+        String responseBody = mockMvc.perform(post("/payment_intents")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(SCENARIO_RUNNER_TOKEN, TEST_SCENARIO_RUNNER_TOKEN)
+                        .header(IDEMPOTENCY_KEY, "synthetic-lineage-intent")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "%s",
+                                  "amount": 1900,
+                                  "currency": "USD",
+                                  "captureMethod": "MANUAL"
+                                }
+                                """.formatted(customerId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID paymentIntentId = UUID.fromString(
+                objectMapper.readTree(responseBody).get("id").asText());
+
+        JsonNode attempt = confirmPaymentIntent(
+                merchant, paymentIntentId, paymentMethodId,
+                "synthetic-lineage-confirm");
+        UUID paymentAttemptId = UUID.fromString(attempt.get("id").asText());
+        UUID fraudDecisionId = UUID.fromString(
+                attempt.get("fraudDecisionId").asText());
+
+        assertThat(attempt.get("trafficOrigin").asText())
+                .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT traffic_origin
+                FROM payment_intents
+                WHERE id = ?
+                """, String.class, paymentIntentId))
+                .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT traffic_origin
+                FROM payment_attempts
+                WHERE id = ?
+                """, String.class, paymentAttemptId))
+                .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT traffic_origin
+                FROM fraud_decisions
+                WHERE id = ?
+                """, String.class, fraudDecisionId))
+                .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT traffic_origin
+                FROM feature_snapshots
+                WHERE fraud_decision_id = ?
+                """, String.class, fraudDecisionId))
+                .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT traffic_origin
+                FROM webhook_events
+                WHERE resource_id IN (?, ?)
+                ORDER BY event_type
+                """, String.class, paymentIntentId, paymentAttemptId))
+                .containsOnly("SYNTHETIC_SCENARIO");
     }
 
     @Test
@@ -637,6 +707,7 @@ class PaymentIntentConfirmContractTests {
     private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
+                        .header("Idempotency-Key", "webhook-" + merchant.id())
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

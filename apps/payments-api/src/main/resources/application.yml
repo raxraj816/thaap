@@ -65,8 +65,15 @@ info:
 thaap:
   admin:
     bootstrap-token: ${THAAP_ADMIN_BOOTSTRAP_TOKEN:}
+  scenario-runner:
+    token: ${THAAP_SCENARIO_RUNNER_TOKEN:}
   security:
     hash-pepper: ${THAAP_HASH_PEPPER:}
+    hash-pepper-version: ${THAAP_HASH_PEPPER_VERSION:v1}
+    previous-hash-peppers: ${THAAP_PREVIOUS_HASH_PEPPERS:}
+    correlation-pepper: ${THAAP_CORRELATION_PEPPER:}
+  idempotency:
+    reservation-lease: ${THAAP_IDEMPOTENCY_RESERVATION_LEASE:30s}
   fraud:
     feature-snapshot:
       max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}
@@ -75,8 +82,11 @@ thaap:
     secret-encryption-key: ${THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY:}
     secret-key-version: ${THAAP_WEBHOOK_SECRET_KEY_VERSION:v1}
     secret-decryption-keys: ${THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS:}
+    secret-rotation-grace: ${THAAP_WEBHOOK_SECRET_ROTATION_GRACE:15m}
     allowed-hosts: ${THAAP_WEBHOOK_ALLOWED_HOSTS:}
     batch-size: ${THAAP_WEBHOOK_BATCH_SIZE:20}
+    max-claims-per-merchant-per-poll: ${THAAP_WEBHOOK_MAX_CLAIMS_PER_MERCHANT_PER_POLL:5}
+    max-claims-per-endpoint-per-poll: ${THAAP_WEBHOOK_MAX_CLAIMS_PER_ENDPOINT_PER_POLL:2}
     lease-duration: ${THAAP_WEBHOOK_LEASE_DURATION:30s}
     connect-timeout: ${THAAP_WEBHOOK_CONNECT_TIMEOUT:2s}
     request-timeout: ${THAAP_WEBHOOK_REQUEST_TIMEOUT:5s}

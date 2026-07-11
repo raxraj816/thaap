@@ -10,20 +10,494 @@ import ipaddress
 import json
 import os
 import pathlib
+import secrets
+import sqlite3
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 
 GENERATOR_VERSION = "synthetic_scenario_generator_v1"
 DEFAULT_BASE_URL = "http://localhost:8080"
 DEFAULT_OUTPUT_ROOT = pathlib.Path("build/reports/synthetic-scenarios")
+DEFAULT_STATE_PATH = DEFAULT_OUTPUT_ROOT / "generator-runs.sqlite3"
+RUN_LEASE_SECONDS = 90
+RESOURCE_TYPES = frozenset({
+    "MERCHANT",
+    "CUSTOMER",
+    "PAYMENT_METHOD",
+    "PAYMENT_INTENT",
+    "PAYMENT_ATTEMPT",
+})
 ADMIN_TOKEN_ENVIRONMENT_VARIABLE = "THAAP_ADMIN_BOOTSTRAP_TOKEN"
+SCENARIO_RUNNER_TOKEN_ENVIRONMENT_VARIABLE = "THAAP_SCENARIO_RUNNER_TOKEN"
+FAIL_AFTER_STEP_ENVIRONMENT_VARIABLE = "THAAP_GENERATOR_FAIL_AFTER_STEP"
+
+
+class AmbiguousGeneratorStepError(RuntimeError):
+    pass
+
+
+class UnsafeRedirectError(RuntimeError):
+    pass
+
+
+class RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        file_pointer: Any,
+        code: int,
+        message: str,
+        headers: Any,
+        new_url: str,
+    ) -> None:
+        raise UnsafeRedirectError(
+            "Synthetic scenario generator rejects redirects to preserve its "
+            "loopback credential boundary"
+        )
+
+
+class GeneratorRunStore:
+    def __init__(self, path: pathlib.Path, lease_seconds: int = RUN_LEASE_SECONDS,
+                 fail_after_step: str | None = None):
+        if lease_seconds < 1:
+            raise ValueError("Generator run lease must be positive")
+        self.path = path
+        self.lease_seconds = lease_seconds
+        self.owner = secrets.token_hex(16)
+        self.fail_after_step = (
+            fail_after_step
+            if fail_after_step is not None
+            else os.environ.get(FAIL_AFTER_STEP_ENVIRONMENT_VARIABLE)
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+        self.path.chmod(0o600)
+        self.connection.row_factory = sqlite3.Row
+        self._initialize()
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def _initialize(self) -> None:
+        self.connection.executescript("""
+            PRAGMA journal_mode = DELETE;
+            PRAGMA secure_delete = ON;
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE IF NOT EXISTS generator_runs (
+                run_id TEXT PRIMARY KEY,
+                seed TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                plan_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at REAL,
+                cleanup_disposition TEXT,
+                summary_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS generator_steps (
+                run_id TEXT NOT NULL,
+                step_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                retry_safe INTEGER NOT NULL CHECK (retry_safe IN (0, 1)),
+                resource_type TEXT,
+                response_json TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, step_key),
+                FOREIGN KEY (run_id) REFERENCES generator_runs (run_id)
+            );
+            CREATE TABLE IF NOT EXISTS generator_resources (
+                run_id TEXT NOT NULL,
+                step_key TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                merchant_id TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, resource_type, resource_id),
+                FOREIGN KEY (run_id) REFERENCES generator_runs (run_id)
+            );
+        """)
+        self._ensure_step_resource_type_column()
+        self._backfill_step_resource_types()
+        self._backfill_resource_references()
+
+    def _ensure_step_resource_type_column(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute(
+                    "PRAGMA table_info(generator_steps)").fetchall()
+        }
+        if "resource_type" not in columns:
+            self.connection.execute(
+                    "ALTER TABLE generator_steps ADD COLUMN resource_type TEXT")
+
+    def _backfill_step_resource_types(self) -> None:
+        rows = self.connection.execute("""
+                SELECT run_id, step_key
+                FROM generator_steps
+                WHERE resource_type IS NULL
+                """).fetchall()
+        for row in rows:
+            resource_type = self._legacy_resource_type(row["step_key"])
+            if resource_type is not None:
+                self.connection.execute("""
+                        UPDATE generator_steps
+                        SET resource_type = ?
+                        WHERE run_id = ? AND step_key = ?
+                        """, (resource_type, row["run_id"], row["step_key"]))
+
+    def _backfill_resource_references(self) -> None:
+        rows = self.connection.execute("""
+                SELECT run_id, step_key, resource_type, response_json
+                FROM generator_steps
+                WHERE status = 'COMPLETED'
+                  AND response_json IS NOT NULL
+                """).fetchall()
+        for row in rows:
+            try:
+                response = json.loads(row["response_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            resource_type = row["resource_type"] or self._legacy_resource_type(
+                    row["step_key"])
+            if row["resource_type"] is None and resource_type is not None:
+                self.connection.execute("""
+                        UPDATE generator_steps
+                        SET resource_type = ?
+                        WHERE run_id = ? AND step_key = ?
+                        """, (resource_type, row["run_id"], row["step_key"]))
+            reference = self._resource_reference(resource_type, response)
+            if reference is None:
+                continue
+            resource_type, resource_id, merchant_id = reference
+            self.connection.execute("""
+                    INSERT INTO generator_resources (
+                        run_id, step_key, resource_type, resource_id,
+                        merchant_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id, resource_type, resource_id) DO NOTHING
+                    """, (row["run_id"], row["step_key"], resource_type,
+                          resource_id, merchant_id, utc_now()))
+
+    def acquire(self, run_id: str, seed: str, base_url: str,
+                fingerprint: str) -> dict[str, Any] | None:
+        now = time.time()
+        timestamp = utc_now()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                    "SELECT * FROM generator_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if row is None:
+                self.connection.execute("""
+                        INSERT INTO generator_runs (
+                            run_id, seed, base_url, plan_fingerprint, status,
+                            lease_owner, lease_expires_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?)
+                        """, (run_id, seed, base_url, fingerprint, self.owner,
+                              now + self.lease_seconds, timestamp, timestamp))
+                self.connection.commit()
+                return None
+            self._validate_identity(row, seed, base_url, fingerprint)
+            if row["status"] == "COMPLETED":
+                summary_json = row["summary_json"]
+                if summary_json is None:
+                    raise RuntimeError("Completed generator run has no durable summary")
+                self.connection.commit()
+                return json.loads(summary_json)
+            if row["status"] in {"ABANDONED", "NEEDS_CLEANUP"}:
+                raise RuntimeError(
+                        f"Generator run {run_id} cannot resume from status {row['status']}; "
+                        "record an explicit cleanup disposition with --abandon-run")
+            if (row["lease_owner"] and row["lease_owner"] != self.owner
+                    and row["lease_expires_at"] and row["lease_expires_at"] > now):
+                raise RuntimeError(f"Generator run {run_id} is active in another process")
+            self.connection.execute("""
+                    UPDATE generator_runs
+                    SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
+                    WHERE run_id = ?
+                    """, (self.owner, now + self.lease_seconds, timestamp, run_id))
+            self.connection.commit()
+            return None
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def execute_step(self, run_id: str, step_key: str, retry_safe: bool,
+                     operation, resource_type: str | None = None) -> Any:
+        if resource_type is not None and resource_type not in RESOURCE_TYPES:
+            raise ValueError(
+                    f"Generator step {step_key} has unsupported resource type "
+                    f"{resource_type}")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            row = self.connection.execute("""
+                    SELECT status, retry_safe, resource_type, response_json
+                    FROM generator_steps
+                    WHERE run_id = ? AND step_key = ?
+                    """, (run_id, step_key)).fetchone()
+            if row is not None:
+                persisted_retry_safe = row["retry_safe"]
+                if persisted_retry_safe not in (0, 1):
+                    raise RuntimeError(
+                            f"Generator step {step_key} has invalid durable retry classification")
+                if bool(persisted_retry_safe) != retry_safe:
+                    raise RuntimeError(
+                            f"Generator step {step_key} retry classification changed; "
+                            "resume with the generator version that created the run")
+                if row["resource_type"] != resource_type:
+                    raise RuntimeError(
+                            f"Generator step {step_key} resource type changed; "
+                            "resume with the generator version that created the run")
+            if row is not None and row["status"] == "COMPLETED":
+                self._renew_lease(run_id)
+                self.connection.commit()
+                return json.loads(row["response_json"])
+            if row is not None and row["status"] == "STARTED" and not bool(row["retry_safe"]):
+                self.connection.execute("""
+                        UPDATE generator_runs
+                        SET status = 'NEEDS_CLEANUP',
+                            lease_owner = NULL,
+                            lease_expires_at = NULL,
+                            updated_at = ?
+                        WHERE run_id = ?
+                        """, (utc_now(), run_id))
+                self.connection.commit()
+                raise AmbiguousGeneratorStepError(
+                        f"Generator run {run_id} stopped after ambiguous non-idempotent "
+                        f"step {step_key}; abandon it with an explicit cleanup disposition")
+            self.connection.execute("""
+                    INSERT INTO generator_steps (
+                        run_id, step_key, status, retry_safe, resource_type,
+                        response_json, updated_at
+                    ) VALUES (?, ?, 'STARTED', ?, ?, NULL, ?)
+                    ON CONFLICT (run_id, step_key) DO UPDATE SET
+                        status = 'STARTED',
+                        response_json = NULL,
+                        updated_at = excluded.updated_at
+                    """, (run_id, step_key, int(retry_safe),
+                          resource_type, utc_now()))
+            self._renew_lease(run_id)
+            self.connection.commit()
+        except BaseException:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            raise
+
+        response = operation()
+        if self.fail_after_step == step_key:
+            raise RuntimeError(
+                    f"Injected generator crash after remote operation for step {step_key}")
+        self._record_resource_reference(
+                run_id, step_key, response, resource_type)
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            self.connection.execute("""
+                    UPDATE generator_steps
+                    SET status = 'COMPLETED', response_json = ?, updated_at = ?
+                    WHERE run_id = ? AND step_key = ?
+                    """, (json.dumps(response, sort_keys=True), utc_now(), run_id, step_key))
+            self._renew_lease(run_id)
+            self.connection.commit()
+            return response
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def complete(self, run_id: str, summary: dict[str, Any]) -> None:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            self.connection.execute("""
+                    UPDATE generator_runs
+                    SET status = 'COMPLETED',
+                        summary_json = ?,
+                        lease_owner = NULL,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE run_id = ?
+                    """, (json.dumps(summary, sort_keys=True), utc_now(), run_id))
+            self.connection.execute("""
+                    UPDATE generator_steps
+                    SET response_json = NULL, updated_at = ?
+                    WHERE run_id = ?
+                    """, (utc_now(), run_id))
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def release(self, run_id: str) -> None:
+        self.connection.execute("""
+                UPDATE generator_runs
+                SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE run_id = ? AND lease_owner = ? AND status = 'RUNNING'
+                """, (utc_now(), run_id, self.owner))
+
+    def heartbeat(self, run_id: str) -> None:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            self._renew_lease(run_id)
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def abandon(self, run_id: str, cleanup_disposition: str) -> None:
+        if not cleanup_disposition.strip():
+            raise ValueError("Cleanup disposition must not be blank")
+        now = time.time()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                    "SELECT status, lease_owner, lease_expires_at FROM generator_runs "
+                    "WHERE run_id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"Generator run {run_id} does not exist")
+            if row["status"] == "COMPLETED":
+                raise ValueError("A completed generator run cannot be abandoned")
+            if (row["lease_owner"] and row["lease_owner"] != self.owner
+                    and row["lease_expires_at"] and row["lease_expires_at"] > now):
+                raise RuntimeError(f"Generator run {run_id} is active in another process")
+            self.connection.execute("""
+                    UPDATE generator_runs
+                    SET status = 'ABANDONED',
+                        cleanup_disposition = ?,
+                        lease_owner = NULL,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE run_id = ?
+                    """, (cleanup_disposition, utc_now(), run_id))
+            self.connection.execute("""
+                    UPDATE generator_steps
+                    SET response_json = NULL, updated_at = ?
+                    WHERE run_id = ?
+                    """, (utc_now(), run_id))
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def list_resource_references(self, run_id: str) -> list[dict[str, str | None]]:
+        rows = self.connection.execute("""
+                SELECT step_key, resource_type, resource_id, merchant_id
+                FROM generator_resources
+                WHERE run_id = ?
+                ORDER BY step_key, resource_type, resource_id
+                """, (run_id,)).fetchall()
+        return [
+            {
+                "stepKey": row["step_key"],
+                "resourceType": row["resource_type"],
+                "resourceId": row["resource_id"],
+                "merchantId": row["merchant_id"],
+            }
+            for row in rows
+        ]
+
+    def _record_resource_reference(
+            self, run_id: str, step_key: str, response: Any,
+            resource_type: str | None) -> None:
+        reference = self._resource_reference(resource_type, response)
+        if reference is None:
+            return
+        resource_type, resource_id, merchant_id = reference
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._require_lease(run_id)
+            if resource_type != "MERCHANT" and merchant_id is None:
+                raise RuntimeError(
+                        f"Generator resource step {step_key} returned no merchant lineage")
+            self.connection.execute("""
+                    INSERT INTO generator_resources (
+                        run_id, step_key, resource_type, resource_id,
+                        merchant_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id, resource_type, resource_id) DO UPDATE SET
+                        step_key = excluded.step_key,
+                        merchant_id = excluded.merchant_id
+                    """, (run_id, step_key, resource_type, resource_id,
+                          merchant_id, utc_now()))
+            self._renew_lease(run_id)
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def _resource_reference(
+            self, resource_type: str | None, response: Any
+    ) -> tuple[str, str, str | None] | None:
+        if resource_type is None:
+            return None
+        if not isinstance(response, dict) or not response.get("id"):
+            raise RuntimeError(
+                    f"Generator {resource_type} step returned no resource ID")
+        merchant_id = (
+            str(response["id"])
+            if resource_type == "MERCHANT"
+            else str(response["merchantId"])
+            if response.get("merchantId") is not None
+            else None
+        )
+        return resource_type, str(response["id"]), merchant_id
+
+    def _legacy_resource_type(self, step_key: str) -> str | None:
+        if (step_key.endswith(".merchant")
+                or step_key == "merchant"
+                or step_key == "tenant_isolation.verifier_merchant"):
+            return "MERCHANT"
+        elif step_key.endswith(".customer") or step_key == "customer":
+            return "CUSTOMER"
+        elif step_key.endswith(".payment_method") or step_key == "payment-method":
+            return "PAYMENT_METHOD"
+        elif step_key.endswith(".payment_intent") or step_key == "payment-intent":
+            return "PAYMENT_INTENT"
+        elif step_key.endswith(".confirm") or step_key == "confirm":
+            return "PAYMENT_ATTEMPT"
+        return None
+
+    def _validate_identity(self, row: sqlite3.Row, seed: str, base_url: str,
+                           fingerprint: str) -> None:
+        expected = (seed, base_url, fingerprint)
+        actual = (row["seed"], row["base_url"], row["plan_fingerprint"])
+        if actual != expected:
+            raise RuntimeError(
+                    f"Generator run {row['run_id']} identity does not match the requested plan")
+
+    def _require_lease(self, run_id: str) -> None:
+        row = self.connection.execute("""
+                SELECT status, lease_owner, lease_expires_at
+                FROM generator_runs
+                WHERE run_id = ?
+                """, (run_id,)).fetchone()
+        if row is None or row["status"] != "RUNNING":
+            raise RuntimeError(f"Generator run {run_id} is not running")
+        if row["lease_owner"] != self.owner or row["lease_expires_at"] < time.time():
+            raise RuntimeError(f"Generator run {run_id} lease is unavailable")
+
+    def _renew_lease(self, run_id: str) -> None:
+        self.connection.execute("""
+                UPDATE generator_runs
+                SET lease_expires_at = ?, updated_at = ?
+                WHERE run_id = ? AND lease_owner = ? AND status = 'RUNNING'
+                """, (time.time() + self.lease_seconds, utc_now(), run_id, self.owner))
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(
+            timespec="microseconds").replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -50,8 +524,15 @@ class ScenarioPlan:
 
 
 class ApiClient:
-    def __init__(self, base_url: str):
+    REQUEST_TIMEOUT_SECONDS = 30
+
+    def __init__(self, base_url: str, scenario_runner_token: str | None = None,
+                 lease_heartbeat: Callable[[], None] | None = None):
         self.base_url = base_url.rstrip("/")
+        self.scenario_runner_token = scenario_runner_token
+        self.lease_heartbeat = lease_heartbeat
+        self.opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}), RejectRedirectHandler())
 
     def get(self, path: str, headers: dict[str, str] | None = None,
             expected_status: int = 200) -> tuple[int, Any]:
@@ -65,23 +546,34 @@ class ApiClient:
                  headers: dict[str, str], expected_status: int) -> tuple[int, Any]:
         encoded_body = None
         request_headers = dict(headers)
+        if self.scenario_runner_token:
+            request_headers["X-Thaap-Scenario-Runner-Token"] = self.scenario_runner_token
         if body is not None:
             encoded_body = json.dumps(body, sort_keys=True).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
                 f"{self.base_url}{path}", data=encoded_body, headers=request_headers, method=method)
+        self._heartbeat()
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                status = response.status
-                payload = response.read().decode("utf-8")
-        except urllib.error.HTTPError as error:
-            status = error.code
-            payload = error.read().decode("utf-8")
+            try:
+                with self.opener.open(
+                        request, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:
+                    status = response.status
+                    payload = response.read().decode("utf-8")
+            except urllib.error.HTTPError as error:
+                status = error.code
+                payload = error.read().decode("utf-8")
+        finally:
+            self._heartbeat()
         if status != expected_status:
             raise RuntimeError(f"{method} {path} returned {status}, expected {expected_status}: {payload}")
         if not payload:
             return status, None
         return status, json.loads(payload)
+
+    def _heartbeat(self) -> None:
+        if self.lease_heartbeat is not None:
+            self.lease_heartbeat()
 
 
 def build_scenario_plan(seed: str) -> tuple[ScenarioPlan, ...]:
@@ -176,135 +668,234 @@ def card_fixture_label(card_number: str) -> str:
     return f"{card_number[:6]}:{card_number[-4:]}"
 
 
-def run_generator(seed: str, base_url: str, admin_token: str) -> dict[str, Any]:
+def run_generator(seed: str, base_url: str, admin_token: str,
+                  scenario_runner_token: str, run_id: str | None = None,
+                  run_store: GeneratorRunStore | None = None) -> dict[str, Any]:
     validated_base_url = validate_local_base_url(base_url)
-    client = ApiClient(validated_base_url)
-    _, health = client.get("/actuator/health")
-    if health.get("status") != "UP":
-        raise RuntimeError(f"payments-api health is not UP: {health}")
     plan = build_scenario_plan(seed)
+    fingerprint = plan_fingerprint(plan)
     generated_at_instant = dt.datetime.now(dt.timezone.utc)
     generated_at = generated_at_instant.isoformat(timespec="microseconds").replace("+00:00", "Z")
-    run_id = new_run_id(seed, generated_at_instant)
-    forbidden_values: list[str] = [admin_token]
+    effective_run_id = run_id or new_run_id(seed, generated_at_instant)
+    operation_identity = f"{seed}:{effective_run_id}"
+    owns_store = run_store is None
+    store = run_store or GeneratorRunStore(DEFAULT_STATE_PATH)
+    if store.lease_seconds <= ApiClient.REQUEST_TIMEOUT_SECONDS:
+        if owns_store:
+            store.close()
+        raise ValueError(
+                "Generator run lease must exceed the per-request network timeout")
+    completed_summary = store.acquire(
+            effective_run_id, seed, validated_base_url, fingerprint)
+    if completed_summary is not None:
+        if owns_store:
+            store.close()
+        return completed_summary
+    client = ApiClient(
+            validated_base_url,
+            scenario_runner_token,
+            lease_heartbeat=lambda: store.heartbeat(effective_run_id))
+    forbidden_values: list[str] = [admin_token, scenario_runner_token]
     scenario_summaries: list[dict[str, Any]] = []
     first_payment_refs: dict[str, str] | None = None
+    try:
+        _, health = client.get("/actuator/health")
+        if health.get("status") != "UP":
+            raise RuntimeError(f"payments-api health is not UP: {health}")
 
-    for scenario_index, scenario in enumerate(plan):
-        merchant = create_merchant(client, admin_token, f"{scenario.merchant_name} {run_id[-12:]}", seed,
-                scenario_index)
-        forbidden_values.append(merchant["apiKey"])
-        customer = create_customer(client, merchant["apiKey"], scenario.customer_email, scenario.customer_phone,
-                seed, scenario_index)
-        forbidden_values.extend([scenario.customer_email, scenario.customer_phone])
-        payment_summaries = []
-
-        for payment_index, payment in enumerate(scenario.payments):
-            forbidden_values.append(payment.card_number)
+        for scenario_index, scenario in enumerate(plan):
+            merchant = store.execute_step(
+                    effective_run_id, f"scenario.{scenario_index}.merchant", True,
+                    lambda scenario=scenario, scenario_index=scenario_index: create_merchant(
+                        client, admin_token,
+                        f"{scenario.merchant_name} {effective_run_id[-12:]}",
+                        operation_identity, scenario_index),
+                    resource_type="MERCHANT")
+            forbidden_values.append(merchant["apiKey"])
+            customer = store.execute_step(
+                    effective_run_id, f"scenario.{scenario_index}.customer", True,
+                    lambda scenario=scenario, scenario_index=scenario_index, merchant=merchant:
+                        create_customer(
+                            client, merchant["apiKey"], scenario.customer_email,
+                            scenario.customer_phone, operation_identity, scenario_index),
+                    resource_type="CUSTOMER")
+            forbidden_values.extend([scenario.customer_email, scenario.customer_phone])
             forbidden_values.extend([
-                idempotency_key(seed, scenario_index, payment_index, "payment-method"),
-                idempotency_key(seed, scenario_index, payment_index, "payment-intent"),
-                idempotency_key(seed, scenario_index, payment_index, "confirm"),
+                idempotency_key(operation_identity, scenario_index, 0, "merchant"),
+                idempotency_key(operation_identity, scenario_index, 0, "customer"),
             ])
-            payment_method = create_payment_method(client, merchant["apiKey"], customer["id"], payment.card_number,
-                    seed, scenario_index, payment_index)
-            payment_intent = create_payment_intent(client, merchant["apiKey"], customer["id"], payment.amount,
-                    scenario.label, payment.label, run_id, seed, scenario_index, payment_index)
-            attempt = confirm_payment_intent(client, merchant["apiKey"], payment_intent["id"], payment_method["id"],
-                    seed, scenario_index, payment_index)
-            _, fetched_intent = client.get(f"/payment_intents/{payment_intent['id']}",
-                    merchant_headers(merchant["apiKey"]))
-            _, fetched_attempt = client.get(f"/payment_attempts/{attempt['id']}", merchant_headers(merchant["apiKey"]))
-            _, fraud_detail = client.get(f"/fraud/decisions/{attempt['fraudDecisionId']}",
-                    merchant_headers(merchant["apiKey"]))
-            _, authorization = client.get(f"/payment_attempts/{attempt['id']}/authorization",
-                    merchant_headers(merchant["apiKey"]))
+            payment_summaries = []
 
-            assert_equal(fetched_intent["status"], payment.expected_payment_intent_status,
-                    f"{scenario.label}/{payment.label} PaymentIntent status")
-            assert_equal(fetched_intent["metadata"].get("syntheticRunId"), run_id,
-                    f"{scenario.label}/{payment.label} synthetic run linkage")
-            assert_equal(fetched_intent["metadata"].get("generatorVersion"), GENERATOR_VERSION,
-                    f"{scenario.label}/{payment.label} generator version linkage")
-            assert_equal(fetched_intent["metadata"].get("syntheticOrigin"), "THAAP_LOCAL_GENERATOR",
-                    f"{scenario.label}/{payment.label} synthetic origin linkage")
-            assert_equal(fetched_attempt["status"], payment.expected_attempt_status,
-                    f"{scenario.label}/{payment.label} attempt status")
-            assert_equal(authorization["processorResponseCode"], payment.expected_processor_outcome_code,
-                    f"{scenario.label}/{payment.label} processor outcome")
-            assert_equal(authorization["status"], payment.expected_authorization_status,
-                    f"{scenario.label}/{payment.label} authorization status")
-            assert_equal(authorization["networkStatus"], payment.expected_network_status,
-                    f"{scenario.label}/{payment.label} network status")
-            assert_equal(authorization["threeDsResult"], payment.expected_three_ds_result,
-                    f"{scenario.label}/{payment.label} 3DS result")
-            assert_equal(authorization["requestedAmount"], payment.amount,
-                    f"{scenario.label}/{payment.label} requested amount")
-            expected_authorized_amount = payment.amount if payment.expected_authorization_status == "APPROVED" else 0
-            assert_equal(authorization["authorizedAmount"], expected_authorized_amount,
-                    f"{scenario.label}/{payment.label} authorized amount")
-            assert_equal(authorization["currency"], "USD", f"{scenario.label}/{payment.label} currency")
-            assert_fraud_lineage(fraud_detail, attempt["id"], attempt["fraudDecisionId"],
-                    payment.expected_fraud_action, f"{scenario.label}/{payment.label}")
+            for payment_index, payment in enumerate(scenario.payments):
+                forbidden_values.append(payment.card_number)
+                forbidden_values.extend([
+                    idempotency_key(operation_identity, scenario_index, payment_index, "payment-method"),
+                    idempotency_key(operation_identity, scenario_index, payment_index, "payment-intent"),
+                    idempotency_key(operation_identity, scenario_index, payment_index, "confirm"),
+                ])
+                step_prefix = f"scenario.{scenario_index}.payment.{payment_index}"
+                payment_method = store.execute_step(
+                        effective_run_id, f"{step_prefix}.payment_method", True,
+                        lambda payment=payment, scenario_index=scenario_index,
+                               payment_index=payment_index, merchant=merchant, customer=customer:
+                            create_payment_method(
+                                client, merchant["apiKey"], customer["id"],
+                                payment.card_number, operation_identity,
+                                scenario_index, payment_index),
+                        resource_type="PAYMENT_METHOD")
+                payment_intent = store.execute_step(
+                        effective_run_id, f"{step_prefix}.payment_intent", True,
+                        lambda payment=payment, scenario=scenario,
+                               scenario_index=scenario_index, payment_index=payment_index,
+                               merchant=merchant, customer=customer:
+                            create_payment_intent(
+                                client, merchant["apiKey"], customer["id"], payment.amount,
+                                scenario.label, payment.label, effective_run_id,
+                                operation_identity, scenario_index, payment_index),
+                        resource_type="PAYMENT_INTENT")
+                attempt = store.execute_step(
+                        effective_run_id, f"{step_prefix}.confirm", True,
+                        lambda scenario_index=scenario_index, payment_index=payment_index,
+                               merchant=merchant, payment_intent=payment_intent,
+                               payment_method=payment_method:
+                            confirm_payment_intent(
+                                client, merchant["apiKey"], payment_intent["id"],
+                                payment_method["id"], operation_identity,
+                                scenario_index, payment_index),
+                        resource_type="PAYMENT_ATTEMPT")
+                _, fetched_intent = client.get(
+                        f"/payment_intents/{payment_intent['id']}",
+                        merchant_headers(merchant["apiKey"]))
+                _, fetched_attempt = client.get(
+                        f"/payment_attempts/{attempt['id']}",
+                        merchant_headers(merchant["apiKey"]))
+                _, fraud_detail = client.get(
+                        f"/fraud/decisions/{attempt['fraudDecisionId']}",
+                        merchant_headers(merchant["apiKey"]))
+                _, authorization = client.get(
+                        f"/payment_attempts/{attempt['id']}/authorization",
+                        merchant_headers(merchant["apiKey"]))
 
-            payment_summary = {
-                "label": payment.label,
-                "amount": payment.amount,
-                "currency": "USD",
-                "paymentIntentId": payment_intent["id"],
-                "paymentAttemptId": attempt["id"],
-                "fraudDecisionId": attempt["fraudDecisionId"],
-                "finalPaymentIntentStatus": fetched_intent["status"],
-                "finalPaymentAttemptStatus": fetched_attempt["status"],
-                "fraudAction": fraud_detail["decision"]["action"],
-                "processorOutcomeCode": authorization["processorResponseCode"],
-                "authorizationStatus": authorization["status"],
-                "networkStatus": authorization["networkStatus"],
-                "threeDsResult": authorization["threeDsResult"],
-            }
-            payment_summaries.append(payment_summary)
-            if first_payment_refs is None:
-                first_payment_refs = {
+                assert_equal(fetched_intent["status"],
+                        payment.expected_payment_intent_status,
+                        f"{scenario.label}/{payment.label} PaymentIntent status")
+                assert_equal(fetched_intent["metadata"].get("syntheticRunId"),
+                        effective_run_id,
+                        f"{scenario.label}/{payment.label} synthetic run linkage")
+                assert_equal(fetched_intent["metadata"].get("generatorVersion"),
+                        GENERATOR_VERSION,
+                        f"{scenario.label}/{payment.label} generator version linkage")
+                assert_equal(fetched_intent["metadata"].get("syntheticOrigin"),
+                        "THAAP_LOCAL_GENERATOR",
+                        f"{scenario.label}/{payment.label} synthetic origin linkage")
+                assert_equal(fetched_intent["trafficOrigin"], "SYNTHETIC_SCENARIO",
+                        f"{scenario.label}/{payment.label} trusted traffic origin")
+                assert_equal(fetched_attempt["status"], payment.expected_attempt_status,
+                        f"{scenario.label}/{payment.label} attempt status")
+                assert_equal(fetched_attempt["trafficOrigin"], "SYNTHETIC_SCENARIO",
+                        f"{scenario.label}/{payment.label} attempt traffic origin")
+                assert_equal(authorization["processorResponseCode"],
+                        payment.expected_processor_outcome_code,
+                        f"{scenario.label}/{payment.label} processor outcome")
+                assert_equal(authorization["status"],
+                        payment.expected_authorization_status,
+                        f"{scenario.label}/{payment.label} authorization status")
+                assert_equal(authorization["networkStatus"],
+                        payment.expected_network_status,
+                        f"{scenario.label}/{payment.label} network status")
+                assert_equal(authorization["threeDsResult"],
+                        payment.expected_three_ds_result,
+                        f"{scenario.label}/{payment.label} 3DS result")
+                assert_equal(authorization["requestedAmount"], payment.amount,
+                        f"{scenario.label}/{payment.label} requested amount")
+                expected_authorized_amount = (
+                    payment.amount
+                    if payment.expected_authorization_status == "APPROVED"
+                    else 0
+                )
+                assert_equal(authorization["authorizedAmount"],
+                        expected_authorized_amount,
+                        f"{scenario.label}/{payment.label} authorized amount")
+                assert_equal(authorization["currency"], "USD",
+                        f"{scenario.label}/{payment.label} currency")
+                assert_fraud_lineage(
+                        fraud_detail, attempt["id"], attempt["fraudDecisionId"],
+                        payment.expected_fraud_action,
+                        f"{scenario.label}/{payment.label}")
+                assert_equal(fraud_detail["decision"]["trafficOrigin"],
+                        "SYNTHETIC_SCENARIO",
+                        f"{scenario.label}/{payment.label} decision traffic origin")
+                assert_equal(fraud_detail["featureSnapshot"]["trafficOrigin"],
+                        "SYNTHETIC_SCENARIO",
+                        f"{scenario.label}/{payment.label} snapshot traffic origin")
+
+                payment_summary = {
+                    "label": payment.label,
+                    "amount": payment.amount,
+                    "currency": "USD",
                     "paymentIntentId": payment_intent["id"],
                     "paymentAttemptId": attempt["id"],
                     "fraudDecisionId": attempt["fraudDecisionId"],
+                    "finalPaymentIntentStatus": fetched_intent["status"],
+                    "finalPaymentAttemptStatus": fetched_attempt["status"],
+                    "fraudAction": fraud_detail["decision"]["action"],
+                    "processorOutcomeCode": authorization["processorResponseCode"],
+                    "authorizationStatus": authorization["status"],
+                    "networkStatus": authorization["networkStatus"],
+                    "threeDsResult": authorization["threeDsResult"],
                 }
+                payment_summaries.append(payment_summary)
+                if first_payment_refs is None:
+                    first_payment_refs = {
+                        "paymentIntentId": payment_intent["id"],
+                        "paymentAttemptId": attempt["id"],
+                        "fraudDecisionId": attempt["fraudDecisionId"],
+                    }
 
-        _, ledger_entries = client.get("/ledger/entries?limit=10", merchant_headers(merchant["apiKey"]))
-        assert_no_ledger_truth(ledger_entries, scenario.label)
-        scenario_summaries.append({
-            "label": scenario.label,
-            "merchantId": merchant["id"],
-            "customerId": customer["id"],
-            "payments": payment_summaries,
-            "ledgerEntryCount": len(ledger_entries),
-            "createsCaptureOrLedgerTruth": len(ledger_entries) > 0,
-        })
+            _, ledger_entries = client.get(
+                    "/ledger/entries?limit=10",
+                    merchant_headers(merchant["apiKey"]))
+            assert_no_ledger_truth(ledger_entries, scenario.label)
+            scenario_summaries.append({
+                "label": scenario.label,
+                "merchantId": merchant["id"],
+                "customerId": customer["id"],
+                "payments": payment_summaries,
+                "ledgerEntryCount": len(ledger_entries),
+                "createsCaptureOrLedgerTruth": len(ledger_entries) > 0,
+            })
 
-    tenant_isolation_checks = run_tenant_isolation_checks(client, admin_token, seed, run_id, first_payment_refs,
-            forbidden_values)
-    summary = {
-        "generatorVersion": GENERATOR_VERSION,
-        "seed": seed,
-        "runId": run_id,
-        "generatedAt": generated_at,
-        "baseUrl": validated_base_url,
-        "scenarioPlanFingerprint": plan_fingerprint(plan),
-        "scenarioPlan": plan_to_public_dict(plan),
-        "scenarios": scenario_summaries,
-        "tenantIsolationChecks": tenant_isolation_checks,
-    }
-    summary["sensitiveDataScan"] = sensitive_data_scan(summary, forbidden_values)
-    if summary["sensitiveDataScan"]["status"] != "PASS":
-        raise RuntimeError(f"summary sensitive-data scan failed: {summary['sensitiveDataScan']}")
-    if any(check["status"] != "PASS" for check in tenant_isolation_checks):
-        raise RuntimeError(f"tenant isolation checks failed: {tenant_isolation_checks}")
-    return summary
+        tenant_isolation_checks = run_tenant_isolation_checks(
+                client, admin_token, operation_identity, effective_run_id,
+                first_payment_refs, forbidden_values, store)
+        summary = {
+            "generatorVersion": GENERATOR_VERSION,
+            "seed": seed,
+            "runId": effective_run_id,
+            "generatedAt": generated_at,
+            "baseUrl": validated_base_url,
+            "scenarioPlanFingerprint": fingerprint,
+            "scenarioPlan": plan_to_public_dict(plan),
+            "scenarios": scenario_summaries,
+            "tenantIsolationChecks": tenant_isolation_checks,
+        }
+        summary["sensitiveDataScan"] = sensitive_data_scan(summary, forbidden_values)
+        if summary["sensitiveDataScan"]["status"] != "PASS":
+            raise RuntimeError(f"summary sensitive-data scan failed: {summary['sensitiveDataScan']}")
+        if any(check["status"] != "PASS" for check in tenant_isolation_checks):
+            raise RuntimeError(f"tenant isolation checks failed: {tenant_isolation_checks}")
+        store.complete(effective_run_id, summary)
+        return summary
+    finally:
+        store.release(effective_run_id)
+        if owns_store:
+            store.close()
 
 
 def create_merchant(client: ApiClient, admin_token: str, name: str, seed: str, scenario_index: int) -> dict[str, Any]:
     _, response = client.post("/admin/merchants", {"name": name}, {
         "X-Admin-Bootstrap-Token": admin_token,
+        "Idempotency-Key": idempotency_key(seed, scenario_index, 0, "merchant"),
         "X-Request-Id": request_id(seed, scenario_index, "merchant"),
     }, expected_status=201)
     return response
@@ -314,6 +905,7 @@ def create_customer(client: ApiClient, api_key: str, email: str, phone: str, see
                     scenario_index: int) -> dict[str, Any]:
     _, response = client.post("/customers", {"email": email, "phone": phone}, {
         **merchant_headers(api_key),
+        "Idempotency-Key": idempotency_key(seed, scenario_index, 0, "customer"),
         "X-Request-Id": request_id(seed, scenario_index, "customer"),
     }, expected_status=201)
     return response
@@ -364,13 +956,23 @@ def confirm_payment_intent(client: ApiClient, api_key: str, payment_intent_id: s
     return response
 
 
-def run_tenant_isolation_checks(client: ApiClient, admin_token: str, seed: str, run_id: str,
-                                refs: dict[str, str] | None, forbidden_values: list[str]) -> list[dict[str, Any]]:
+def run_tenant_isolation_checks(client: ApiClient, admin_token: str,
+                                operation_identity: str, run_id: str,
+                                refs: dict[str, str] | None,
+                                forbidden_values: list[str],
+                                run_store: GeneratorRunStore) -> list[dict[str, Any]]:
     if refs is None:
         return [{"name": "tenant_isolation_reference_exists", "status": "FAIL", "httpStatus": None}]
-    verifier = create_merchant(client, admin_token,
-            f"Synthetic Isolation Verifier {safe_slug(seed)} {run_id[-12:]}", seed, 90)
+    verifier = run_store.execute_step(
+            run_id, "tenant_isolation.verifier_merchant", True,
+            lambda: create_merchant(
+                client, admin_token,
+                f"Synthetic Isolation Verifier "
+                f"{safe_slug(operation_identity)} {run_id[-12:]}",
+                operation_identity, 90),
+            resource_type="MERCHANT")
     forbidden_values.append(verifier["apiKey"])
+    forbidden_values.append(idempotency_key(operation_identity, 90, 0, "merchant"))
     checks = [
         ("cross_merchant_payment_intent_read", f"/payment_intents/{refs['paymentIntentId']}"),
         ("cross_merchant_payment_attempt_read", f"/payment_attempts/{refs['paymentAttemptId']}"),
@@ -428,6 +1030,13 @@ def admin_token_from_environment(environ: dict[str, str]) -> str:
     if not admin_token.strip():
         raise ValueError(f"{ADMIN_TOKEN_ENVIRONMENT_VARIABLE} must be set")
     return admin_token
+
+
+def scenario_runner_token_from_environment(environ: dict[str, str]) -> str:
+    scenario_runner_token = environ.get(SCENARIO_RUNNER_TOKEN_ENVIRONMENT_VARIABLE, "")
+    if not scenario_runner_token.strip():
+        raise ValueError(f"{SCENARIO_RUNNER_TOKEN_ENVIRONMENT_VARIABLE} must be set")
+    return scenario_runner_token
 
 
 def new_run_id(seed: str, generated_at: dt.datetime | None = None) -> str:
@@ -498,18 +1107,49 @@ def write_summary(summary: dict[str, Any], output: pathlib.Path | None) -> pathl
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate THAAP synthetic payment scenarios through public APIs.")
-    parser.add_argument("--seed", required=True, help="Deterministic seed for scenario planning.")
+    parser.add_argument("--seed", help="Deterministic seed for scenario planning.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"payments-api base URL. Default: {DEFAULT_BASE_URL}")
     parser.add_argument("--output", type=pathlib.Path, help="Summary JSON output path.")
+    parser.add_argument("--run-id",
+            help="Stable run identifier. Reusing it resumes a safely checkpointed run.")
+    parser.add_argument("--state", type=pathlib.Path, default=DEFAULT_STATE_PATH,
+            help=f"Durable SQLite run-state path. Default: {DEFAULT_STATE_PATH}")
+    parser.add_argument("--abandon-run",
+            help="Terminate an interrupted run with an explicit cleanup disposition.")
+    parser.add_argument("--cleanup-disposition",
+            choices=("retain-generated-resources", "manually-cleaned"),
+            help="Disposition for product truth created before an abandoned run stopped.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
+        if args.abandon_run:
+            if not args.cleanup_disposition:
+                raise ValueError("--cleanup-disposition is required with --abandon-run")
+            run_store = GeneratorRunStore(args.state)
+            try:
+                run_store.abandon(args.abandon_run, args.cleanup_disposition)
+            finally:
+                run_store.close()
+            print(f"Abandoned generator run {args.abandon_run}: "
+                    f"{args.cleanup_disposition}")
+            return 0
+        if not args.seed:
+            raise ValueError("--seed is required unless --abandon-run is used")
         admin_token = admin_token_from_environment(os.environ)
-        summary = run_generator(args.seed, args.base_url, admin_token)
-    except ValueError as exception:
+        scenario_runner_token = scenario_runner_token_from_environment(os.environ)
+        effective_run_id = args.run_id or new_run_id(args.seed)
+        print(f"Generator run ID: {effective_run_id}", flush=True)
+        run_store = GeneratorRunStore(args.state)
+        try:
+            summary = run_generator(
+                    args.seed, args.base_url, admin_token, scenario_runner_token,
+                    effective_run_id, run_store)
+        finally:
+            run_store.close()
+    except (ValueError, RuntimeError) as exception:
         print(f"Configuration error: {exception}", file=sys.stderr)
         return 2
     output_path = write_summary(summary, args.output)

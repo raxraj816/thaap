@@ -103,8 +103,9 @@ export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
 scripts/demo-chapter-20-processor-catalog.py
 ```
 
-The runner accepts only a loopback API origin and rejects every HTTP redirect
-before a follow-up request can forward API or bootstrap credentials. It creates
+The runner accepts only a loopback API origin, ignores environment proxy
+configuration, and rejects every HTTP redirect before a follow-up request can
+forward API or bootstrap credentials. It creates
 fresh merchant-owned objects through public APIs for mapped approval, six
 decline/verification outcomes, 3DS-required, and unknown-card default approval.
 It fails closed unless PaymentIntent, PaymentAttempt, Authorization,
@@ -118,6 +119,7 @@ Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+export THAAP_SCENARIO_RUNNER_TOKEN=change-me-local-scenario-runner-token
 scripts/generate-synthetic-scenarios.py --seed chapter-16-demo
 ```
 
@@ -127,13 +129,51 @@ Useful options:
 scripts/generate-synthetic-scenarios.py \
   --seed chapter-16-demo \
   --base-url http://localhost:8080 \
+  --run-id chapter-16-demo-run-1 \
+  --state build/reports/synthetic-scenarios/generator-runs.sqlite3 \
   --output build/reports/synthetic-scenarios/chapter-16-demo-summary.json
 ```
 
 The generator creates approved, retryable-decline, and basic card-testing
 scenario families using merchant-facing APIs only. It reads the bootstrap token
-directly from `THAAP_ADMIN_BOOTSTRAP_TOKEN`, accepts only loopback API targets,
-and refuses to run against a shared or production endpoint. Its JSON summary
+and dedicated scenario-runner credential directly from the environment,
+accepts only loopback API targets, and refuses to run against a shared or
+production endpoint. It explicitly ignores environment proxy configuration
+and rejects every HTTP redirect before a follow-up request can forward API,
+bootstrap, or scenario-runner credentials. The runner
+credential assigns server-authoritative
+`SYNTHETIC_SCENARIO` lineage; synthetic-looking merchant metadata has no trust
+authority.
+
+Each run is journaled in an owner-only SQLite file. Reuse `--run-id` to resume
+after interruption. Completed steps replay from checkpoints, mutation steps use
+stable run-scoped idempotency keys, persisted retry-safety classifications
+cannot be rewritten by a later binary, and two processes cannot own one live
+run. Merchant and customer creation now reconcile through server-side
+idempotency even if the process dies immediately after the API commits and
+before any local resource/checkpoint write. Every HTTP request heartbeats the
+run lease before and after its bounded network wait, and startup rejects a
+lease that does not exceed one request timeout, so slow verification reads
+cannot silently hand ownership to another process. A future or explicitly
+unsafe step with an ambiguous outcome still enters `NEEDS_CLEANUP` rather than
+being repeated. Record the operator disposition explicitly:
+
+```bash
+scripts/generate-synthetic-scenarios.py \
+  --state build/reports/synthetic-scenarios/generator-runs.sqlite3 \
+  --abandon-run chapter-16-demo-run-1 \
+  --cleanup-disposition retain-generated-resources
+```
+
+Abandonment erases secret-bearing checkpoint responses but retains a separate
+sanitized inventory of created merchant/resource IDs so the operator can
+reconcile or clean up durable product state without recovering API keys.
+Every resource-producing step persists an explicit immutable `resource_type`;
+resource lineage no longer depends on step-name suffixes. Older journals are
+additively backfilled, including interrupted steps and the tenant-isolation
+verifier merchant, before resume is allowed.
+
+Its JSON summary
 includes safe IDs, final statuses, fraud decision IDs, actual processor response
 codes, tenant-isolation checks, and a sensitive-data scan. It fails if an
 uncaptured scenario creates ledger truth, if authorization/fraud lineage drifts,
@@ -227,6 +267,8 @@ The non-trivial gate also runs:
 ```bash
 scripts/invariant-proof-check.py docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md
 scripts/escaped-review-check.py
+scripts/slice-review-check.py
+scripts/slice-review-check.py --require-verified
 scripts/chapter-closure-check.py \
   docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md \
   docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md

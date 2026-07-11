@@ -34,12 +34,34 @@ public interface WebhookEndpointRepository extends JpaRepository<WebhookEndpoint
     Optional<WebhookEndpoint> findByIdAndMerchantIdForShare(
             @Param("id") UUID id, @Param("merchantId") UUID merchantId);
 
-    @Query("""
-            SELECT DISTINCT endpoint.signingSecretKeyVersion
-            FROM WebhookEndpoint endpoint
-            WHERE endpoint.operationalStatus = :status
-            """)
-    List<String> findDistinctSecretKeyVersions(@Param("status") WebhookEndpointStatus status);
+    @Query(value = """
+            SELECT DISTINCT required.key_version
+            FROM (
+                SELECT endpoint.signing_secret_key_version AS key_version
+                FROM webhook_endpoints endpoint
+                WHERE endpoint.operational_status = 'ACTIVE'
+
+                UNION
+
+                SELECT endpoint.previous_signing_secret_key_version AS key_version
+                FROM webhook_endpoints endpoint
+                WHERE endpoint.operational_status = 'ACTIVE'
+                  AND endpoint.previous_signing_secret_expires_at > :now
+
+                UNION
+
+                SELECT creation.signing_secret_key_version AS key_version
+                FROM webhook_endpoint_creation_records creation
+                JOIN webhook_endpoints endpoint
+                  ON endpoint.merchant_id = creation.merchant_id
+                 AND endpoint.id = creation.webhook_endpoint_id
+                WHERE creation.status = 'COMPLETED'
+                  AND creation.expires_at >= :now
+                  AND creation.signing_secret_generation = endpoint.signing_secret_generation
+            ) required
+            WHERE required.key_version IS NOT NULL
+            """, nativeQuery = true)
+    List<String> findRequiredSecretKeyVersions(@Param("now") java.time.Instant now);
 
     @Query(value = """
             SELECT CAST(endpoint.id AS VARCHAR)

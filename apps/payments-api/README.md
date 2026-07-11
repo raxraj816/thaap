@@ -32,13 +32,15 @@ Responsibilities:
 ## Merchant Tenant Boundary
 
 `Merchant` is the tenant root. Admin setup creates merchants and reveals an
-API key once. This bootstrap endpoint is disabled unless
+API key in the creation response. An idempotent retry replays that same
+response during its 24-hour window. This bootstrap endpoint is disabled unless
 `THAAP_ADMIN_BOOTSTRAP_TOKEN` is configured, and requests must send the matching
 `X-Admin-Bootstrap-Token` header:
 
 ```bash
 curl -X POST http://localhost:8080/admin/merchants \
   -H 'X-Admin-Bootstrap-Token: change-me-local-admin-bootstrap-token' \
+  -H 'Idempotency-Key: merchant-onboarding-001' \
   -H 'Content-Type: application/json' \
   -d '{"name":"Demo Merchant"}'
 ```
@@ -46,21 +48,58 @@ curl -X POST http://localhost:8080/admin/merchants \
 Merchant-facing APIs derive tenant scope from `X-Api-Key`; only the API key
 prefix and hash are stored. Clients must not be trusted to choose `merchantId`
 in request bodies. Mutating payment APIs require `Idempotency-Key`, and
-idempotency records are unique per `(merchant_id, key)`.
+idempotency records are unique per `(merchant_id, key)`. Merchant and customer
+creation accept the header for safe retry and reconciliation. Legacy callers
+may omit it, but a present blank or oversized header is rejected; the
+synthetic generator always supplies one.
 
 The idempotency service now treats each key as a small state machine:
 
 - reserve a merchant-scoped `IN_PROGRESS` row before running the mutation
 - bind the key to an operation name and keyed request hash
-- reject duplicates while the first mutation is still in progress
+- persist the request-hash key version and verify replay with that original
+  version across routine key rotation
+- lock and validate reservation ownership before invoking mutation or processor
+  work, then reject or serialize duplicates while that work is in progress
+- fence reservations with an expiring owner token so process-death state can
+  be reclaimed without allowing a stale owner to commit
 - mark the row `COMPLETED` only after the mutation response is durable
 - replay completed responses for exact retries
 - release the reservation when the mutation fails so retryable failures are not
   cached as successful work
 
-`THAAP_HASH_PEPPER` must also be configured so customer PII hashes, internal
-card fingerprints, and idempotency request hashes use keyed, domain-separated
-HMACs instead of plain deterministic SHA-256.
+Merchant onboarding uses a global HMACed idempotency identity because no
+merchant tenant exists yet. Exact replay returns the same merchant and raw API
+key for 24 hours. V16 stores only unique versioned HMAC aliases for every
+configured current/previous pepper; all aliases point to one creation record.
+The API key is deterministically derived under that record's original pepper
+version and verified against the merchant's stored hash, so neither the raw
+idempotency key nor raw API key is persisted. Startup fails closed if an
+in-progress or unexpired replay record requires an unavailable version. Customer
+creation reuses the normal merchant-scoped idempotency transaction; its stored
+response contains only safe IDs, never email or phone.
+`THAAP_IDEMPOTENCY_RESERVATION_LEASE` controls the fail-stop reservation lease
+and defaults to 30 seconds.
+
+`THAAP_HASH_PEPPER` is the rotatable replay-identity key. V17 stores the original
+key version for generic request hashes and gives webhook endpoint creation the
+same tenant-scoped current/previous alias model as merchant creation.
+`THAAP_HASH_PEPPER_VERSION` defaults to `v1`;
+`THAAP_PREVIOUS_HASH_PEPPERS` uses comma-separated `version=base64` entries.
+Rotate in four phases: deploy the V17-capable code everywhere with the old
+version current and both keys configured; promote the new current version;
+retain the old version through every live 24-hour replay window; then remove it
+only after startup key-inventory checks no longer require it. Key-version names
+are immutable and must match `[A-Za-z0-9._-]{1,32}`. Different version labels
+must use distinct key material; startup rejects duplicate bytes because they
+would make alias and retention semantics ambiguous.
+
+`THAAP_CORRELATION_PEPPER` separately protects stable customer email/phone
+pseudonyms and internal card fingerprints. Routine replay-key rotation must not
+change this value, because doing so would split fraud velocity, graph, and ML
+lineage. On the V17 upgrade, set it to the pre-rotation `THAAP_HASH_PEPPER`
+value to preserve existing digests. Changing the correlation key is an explicit
+offline data re-key operation, not part of the online replay-key procedure.
 
 Implemented tenant-scoped endpoints:
 
@@ -131,7 +170,9 @@ Endpoint creation accepts optional `enabledEvents`. If omitted, all currently
 supported event types are subscribed. Creation and rotation reveal a
 `whsec_...` signing secret once. THAAP stores only its prefix/hash plus an
 AES-256-GCM ciphertext protected by the separately configured encryption key.
-If a reveal response is lost, rotate again. Rotation is accepted only for
+Creation requires `Idempotency-Key`; a lost reveal response is recovered by
+replaying the identical request with that key during its 24-hour window.
+Rotation is accepted only for
 `ACTIVE` or `REQUIRES_SECRET_ROTATION` endpoints. A `DISABLED` endpoint returns
 `409 Conflict`; Chapter 19 has no implicit re-enable action.
 
@@ -164,10 +205,17 @@ payload hash. The row is the representative merchant business effect: it
 commits before `204`, survives restart, acknowledges an identical duplicate
 without applying the effect again, and rejects reuse of one event ID with
 different payload bytes.
-THAAP mints the attempt timestamp after dispatch preparation has acquired and
-released its database locks, immediately before bounded transport work. A local
-signing failure after preparation is finalized as retryable known-no-send
-evidence rather than left as ambiguous lease recovery.
+After dispatch preparation, THAAP supplies a timestamp lower bound to the
+signing transaction. That transaction acquires the endpoint row lock, captures
+the actual signature time, validates the claim-bound generation, decrypts, and
+signs before releasing the lock. Rotation therefore cannot move a current
+generation to previous between authorization and cryptographic use, and time
+spent waiting for the lock cannot authorize use after expiry. A stale
+generation below the retry ceiling records retryable known-no-send evidence so
+the next claim binds current state. On the final attempt, THAAP rebinds current
+state before the first HTTP opportunity rather than exhausting on an internal
+snapshot. Local signing-engine failure remains known-no-send; unexpected
+database/runtime failure remains eligible for lease recovery.
 
 Attempt 1 is immediate. Failed attempts schedule attempt 2 after 1 minute,
 attempt 3 after 5 minutes, attempt 4 after 30 minutes, and attempt 5 after 2
@@ -213,8 +261,10 @@ export THAAP_WEBHOOK_EXECUTION_ENABLED=true
 
 For key-encryption-key rotation, configure the new key/version for encryption
 and retain prior keys as comma-separated `version=base64` entries in
-`THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS`. Startup fails if an active endpoint uses
-an unavailable version. The first delivery under an old version decrypts it
+`THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS`. Startup fails if any still-decryptable
+current, unexpired previous, or live creation-replay ciphertext uses an
+unavailable version, even when delivery execution is disabled. The first
+delivery under an old version decrypts it
 under a row lock and re-encrypts the same merchant signing secret with the
 current key, so rotation does not strand or exhaust deliveries.
 
@@ -610,6 +660,15 @@ volume that contains an earlier draft V9 may have the same Flyway version but an
 older table shape. Hibernate validation intentionally rejects that false schema.
 Preserve any needed data separately, then reset the local-only volume; do not
 repair it by editing the finalized migration after merge.
+
+V10 adds trusted traffic-origin lineage. V11 adds webhook secret generations,
+endpoint-create replay, and the fair dispatch cursor; V12 enforces exact
+tenant/URL identity. V13 additively repairs the earlier pre-dispatch attempt
+shape. V14 leases endpoint-create reservations, and V15 leases general
+idempotency plus merchant creation. V16 versions merchant creation derivation
+and backfills each V15 key HMAC into `merchant_creation_identities`, preserving
+one database identity across pepper rotation without rewriting the V15
+migration.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally

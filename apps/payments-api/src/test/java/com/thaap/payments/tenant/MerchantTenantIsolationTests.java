@@ -471,6 +471,7 @@ class MerchantTenantIsolationTests {
     private UUID createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         var response = mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
+                        .header("Idempotency-Key", "webhook-" + merchant.id() + "-" + url.hashCode())
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

@@ -180,6 +180,7 @@ class PaymentIntentCancelVoidRollbackTests {
     private void createWebhookEndpoint(MerchantAccess merchant, String url) throws Exception {
         mockMvc.perform(post("/webhook_endpoints")
                         .header(API_KEY, merchant.apiKey())
+                        .header("Idempotency-Key", "webhook-" + merchant.apiKey().hashCode())
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {
