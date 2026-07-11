@@ -121,11 +121,6 @@ public class WebhookDeliveryExecutor {
         metrics.recordQueueAge(claim.eventType(), Duration.between(claim.deliveryCreatedAt(), attemptStartedAt));
         try {
             requirePayloadIntegrity(claim);
-            String rawSecret = claim.signingSecretGeneration() == null
-                    ? endpointSecretService.loadForDelivery(claim.merchantId(), claim.endpointId())
-                    : endpointSecretService.loadForDelivery(
-                            claim.merchantId(), claim.endpointId(),
-                            claim.signingSecretGeneration(), clock.instant());
             ValidatedWebhookTarget target = targetPolicy.validate(claim.endpointUrl());
             Instant preparationStartedAt = laterOf(attemptStartedAt, clock.instant());
             if (!claimService.prepareForDispatch(claim, preparationStartedAt)) {
@@ -133,16 +128,12 @@ public class WebhookDeliveryExecutor {
                         claim.deliveryId(), claim.eventId(), claim.attemptNumber());
                 return;
             }
-            WebhookSecretUseWindow secretUseWindow =
-                    endpointSecretService.authorizeGenerationForUse(
-                            claim.merchantId(), claim.endpointId(),
-                            claim.signingSecretGeneration());
-            Instant signatureTime = laterOf(preparationStartedAt, clock.instant());
-            secretUseWindow.requireUsableAt(signatureTime);
             WebhookSignature signature;
             try {
-                signature = signer.sign(rawSecret, claim.payload(), signatureTime);
-            } catch (RuntimeException exception) {
+                signature = signForDelivery(claim, preparationStartedAt);
+            } catch (WebhookSecretException exception) {
+                throw exception;
+            } catch (WebhookSigningException exception) {
                 LOGGER.error("Webhook signing failed after dispatch preparation; recording known no-send "
                                 + "deliveryId={} eventId={} attempt={}",
                         claim.deliveryId(), claim.eventId(), claim.attemptNumber(), exception);
@@ -167,6 +158,8 @@ public class WebhookDeliveryExecutor {
             retryableNoRequestFailure(claim, attemptStartedAt, exception.getErrorCode());
         } catch (WebhookTargetPolicyException exception) {
             terminalFailure(claim, attemptStartedAt, WebhookDeliveryErrorCode.TARGET_NOT_ALLOWED);
+        } catch (WebhookStaleSecretGenerationException exception) {
+            retryableNoRequestFailure(claim, attemptStartedAt, exception.getErrorCode());
         } catch (WebhookSecretException exception) {
             terminalFailure(claim, attemptStartedAt, exception.getErrorCode());
         } catch (WebhookTransportException exception) {
@@ -183,6 +176,26 @@ public class WebhookDeliveryExecutor {
             LOGGER.error("Webhook delivery execution failed unexpectedly; lease recovery will retry "
                             + "deliveryId={} eventId={} attempt={}",
                     claim.deliveryId(), claim.eventId(), claim.attemptNumber(), exception);
+        }
+    }
+
+    private WebhookSignature signForDelivery(
+            WebhookDeliveryClaim claim, Instant preparationStartedAt) {
+        try {
+            return endpointSecretService.signForDelivery(
+                    claim.merchantId(), claim.endpointId(),
+                    claim.signingSecretGeneration(), claim.payload(),
+                    preparationStartedAt, signer);
+        } catch (WebhookStaleSecretGenerationException exception) {
+            if (claim.attemptNumber() < WebhookRetryPolicy.MAX_ATTEMPTS) {
+                throw exception;
+            }
+            LOGGER.warn("Final webhook attempt is rebinding a stale secret generation before HTTP "
+                            + "deliveryId={} eventId={} attempt={}",
+                    claim.deliveryId(), claim.eventId(), claim.attemptNumber());
+            return endpointSecretService.signForDelivery(
+                    claim.merchantId(), claim.endpointId(), null, claim.payload(),
+                    preparationStartedAt, signer);
         }
     }
 
