@@ -40,6 +40,8 @@ V1 statuses:
 - `REFUNDED`
 - `DISPUTED`
 - `FAILED`
+- `BLOCKED`
+- `REQUIRES_REVIEW`
 
 State diagram:
 
@@ -51,10 +53,14 @@ REQUIRES_CONFIRMATION
   -> REQUIRES_FRAUD_CHECK
 
 REQUIRES_FRAUD_CHECK
-  -> FAILED                 when fraud action is BLOCK
+  -> BLOCKED                when fraud action is BLOCK
   -> REQUIRES_ACTION        when fraud action is REQUEST_3DS
+  -> REQUIRES_REVIEW        when fraud action is REVIEW
   -> PROCESSING             when fraud action is ALLOW
-  -> PROCESSING             when review later approves
+
+REQUIRES_REVIEW
+  -> CANCELED               when the merchant cancels in Phase 3
+  -> PROCESSING             when review later approves in Phase 4
 
 REQUIRES_ACTION
   -> REQUIRES_FRAUD_CHECK   after successful 3DS completion
@@ -62,9 +68,10 @@ REQUIRES_ACTION
   -> CANCELED               if canceled
 
 PROCESSING
-  -> AUTHORIZED             after auth succeeds and manual capture
+  -> REQUIRES_CAPTURE       after auth succeeds and manual capture
   -> CAPTURED               after auth succeeds and automatic capture
-  -> FAILED                 after processor decline
+  -> REQUIRES_PAYMENT_METHOD after processor decline
+  -> REQUIRES_ACTION        after processor 3DS requirement
 
 AUTHORIZED
   -> CAPTURED               after capture
@@ -74,7 +81,7 @@ CAPTURED
   -> REFUNDED               after full refund
   -> DISPUTED               after chargeback
 
-FAILED, CANCELED, REFUNDED, DISPUTED are terminal for V1
+FAILED, BLOCKED, CANCELED, REFUNDED, DISPUTED are terminal for V1
 ```
 
 Partial refunds may keep status as `CAPTURED` with refund records. Full refund moves to `REFUNDED`.
@@ -95,10 +102,11 @@ PaymentAttempt owns:
 Attempt state examples:
 
 - `CREATED`
-- `FRAUD_CHECKED`
+- `READY_FOR_PROCESSOR`
 - `BLOCKED`
-- `REQUIRES_3DS`
+- `REQUIRES_ACTION`
 - `IN_REVIEW`
+- `CANCELED`
 - `AUTHORIZED`
 - `DECLINED`
 - `FAILED`
@@ -202,21 +210,29 @@ Fraud action branches:
 ```text
 BLOCK
   -> mark attempt BLOCKED
-  -> mark intent FAILED
+  -> mark intent BLOCKED
   -> write fraud_decision.created event
   -> return blocked response
 
 REQUEST_3DS
-  -> mark attempt REQUIRES_3DS
+  -> mark attempt REQUIRES_ACTION
   -> mark intent REQUIRES_ACTION
   -> write fraud_decision.created event
-  -> return next_action payload
+  -> return the committed PaymentAttempt response
 
 REVIEW
   -> mark attempt IN_REVIEW
+  -> mark intent REQUIRES_REVIEW
   -> create ManualReviewCase
   -> write fraud_decision.created and review.opened events
-  -> return review response
+  -> return the committed PaymentAttempt response
+
+MERCHANT CANCEL DURING REVIEW
+  -> mark attempt CANCELED
+  -> mark intent CANCELED
+  -> mark ManualReviewCase CANCELED with MERCHANT_CANCELED
+  -> preserve original FraudDecision REVIEW
+  -> write payment_intent.canceled and review.canceled events
 
 ALLOW
   -> call processor simulator

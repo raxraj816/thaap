@@ -30,6 +30,11 @@ resolved, and the technical debt register has zero non-resolved entries. Five
 independent Chapter 21 recovery packets now carry complete transition tables,
 mandatory closure questions, narrow implementation checkpoints, and later
 hostile-proof checkpoints; the Phase 3 entry gate is satisfied.
+The Phase 3 detailed implementation plan now sequences Chapters 22–25.
+Chapter 22's proof matrix and closure dossier were created before
+implementation. Founder/domain review has frozen the matrix; the dossier
+intentionally remains `IN_PROGRESS` with a `DO_NOT_MERGE` recommendation until
+executable proof is complete. Phase 3 fraud behavior is not yet implemented.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation
