@@ -30,6 +30,11 @@ thaap:
     token: test-scenario-runner-token
   security:
     hash-pepper: test-hash-pepper-for-sensitive-value-contracts
+    hash-pepper-version: test-v1
+    previous-hash-peppers:
+    correlation-pepper: test-hash-pepper-for-sensitive-value-contracts
+  idempotency:
+    reservation-lease: 30s
   fraud:
     feature-snapshot:
       max-json-bytes: 16384

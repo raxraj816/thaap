@@ -69,6 +69,11 @@ thaap:
     token: ${THAAP_SCENARIO_RUNNER_TOKEN:}
   security:
     hash-pepper: ${THAAP_HASH_PEPPER:}
+    hash-pepper-version: ${THAAP_HASH_PEPPER_VERSION:v1}
+    previous-hash-peppers: ${THAAP_PREVIOUS_HASH_PEPPERS:}
+    correlation-pepper: ${THAAP_CORRELATION_PEPPER:}
+  idempotency:
+    reservation-lease: ${THAAP_IDEMPOTENCY_RESERVATION_LEASE:30s}
   fraud:
     feature-snapshot:
       max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}
