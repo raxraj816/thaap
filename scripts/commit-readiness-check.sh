@@ -110,6 +110,12 @@ else
   echo "SKIP closure dossier for trivial work; provide both chapter artifacts to validate closure."
 fi
 
+if [[ "$invariant_matrix" == *"CHAPTER_21_INVARIANT_PROOF_MATRIX.md" ]]; then
+  echo
+  echo "Checking five independent Chapter 21 state-machine reviews..."
+  scripts/slice-review-check.py --require-verified
+fi
+
 echo
 if [[ "$deep_dive_required" == true ]]; then
   scripts/learning-day-check.sh "$date_arg" --deep-dive-required
