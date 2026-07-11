@@ -12,6 +12,27 @@
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
 
+The 2026-07-11 hostile review reopened merchant lifecycle epochs, webhook
+cryptographic-use ordering, stale-generation recovery, KEK readiness across
+disabled execution mode, and endpoint-creation fencing under `ER-0036` through
+`ER-0040`. Lifecycle-epoch derivation, atomic endpoint-lock-held signing,
+retryable stale-generation convergence, mode-independent persisted KEK
+inventory, and pre-mutation reservation locking now close those families.
+Closure was reopened again because the five protocols were not independently
+reviewed, their transition tables were absent before the already-present fixes,
+and the claimed hostile pass lacked a separate checkpoint. Five honest
+`RETROACTIVE_RECOVERY` packets now record complete transitions and mandatory
+closure questions. Each names an implementation commit and a later hostile
+proof commit; `scripts/slice-review-check.py --require-verified` validates the
+commit ancestry and packet state.
+
+The recovery transition tables immediately found `ER-0041` and `ER-0042`:
+signature time was captured before an endpoint-lock wait, and stale-generation
+recovery could exhaust at the retry ceiling without any current-generation send
+opportunity. `ER-0041` and `ER-0042` are resolved by post-lock time capture and
+final-attempt current-generation rebinding, with exact deterministic proof in
+Slices B and C.
+
 Scope clarification: before the run-state implementation, the matrix was
 re-frozen around an operator-local durable journal. One generator run creates
 and verifies multiple isolated merchants, so pretending the orchestration row
@@ -25,14 +46,41 @@ secret use, complete KEK inventory, crash-recoverable endpoint reservations,
 and sanitized generator cleanup lineage. The matrix was re-verified only after
 the implementations and hostile tests below closed every partition.
 
+The final pre-merge review subsequently found and resolved `ER-0029` and
+`ER-0030`. Generator resume now treats persisted retry classification as
+immutable protocol state. V15 fenced server reservations, deterministic
+secret-safe merchant API-key replay, tenant-scoped customer idempotency, and
+an earlier failpoint prove convergence across the exact remote
+commit-to-local-checkpoint window.
+
+The post-closure Senior Staff review then reopened transaction ordering,
+secret-derived identity rotation, and workflow lease coverage under `ER-0031`
+through `ER-0033`. The operation transaction now owns the idempotency row before
+the supplier runs; V16 gives merchant creation versioned cross-key identity
+aliases and fail-closed key inventory; every generator HTTP request heartbeats
+run ownership. The matrix returned to `VERIFIED` only after forced expiry,
+pepper rotation, V15-to-V16 upgrade, and cumulative slow-network proof passed.
+
+The next end-to-end review reopened the matrix under `ER-0034` and `ER-0035`.
+`ER-0032` repaired only merchant creation even though the rotatable HMAC service
+also backed generic request replay, webhook endpoint idempotency identity, card
+fingerprints, and customer pseudonyms. V17 now versions generic request hashes,
+adds tenant-scoped webhook identity aliases, and inventories live historical
+versions; a separate stable correlation key preserves card and customer
+lineage. The generator now persists immutable explicit resource types and
+backfills completed/interrupted legacy journals, including the verifier
+merchant. `ER-0034` and `ER-0035` returned the matrix to `VERIFIED` only after
+clean/upgrade migration, rolling PostgreSQL, live/expired key, correlation, and
+complete cleanup-ledger partitions passed.
+
 ## C21-PAY-001
 
 - Lens: PAYMENT_FRAUD
 - Invariant: Debt-retirement operations do not rewrite lifecycle, processor, fraud, refund, void, or ledger truth beyond requested public payment operations.
 - Failure sequence: Resume or webhook administration replays a payment mutation, changes a decision, or couples delivery state to money state.
-- Implementation: Stable public-API idempotency, immutable origin, and separate webhook administration transactions preserve payment boundaries.
-- Proof: Full 240-test backend suite; repository 60-test Python suite; Chapter 21 live crash/resume reconciliation; existing capture, cancel, refund, rollback, and webhook suites.
-- Adversarial evidence: Crash after remote commit resumed to exactly five intended intents, attempts, authorizations, decisions, and zero capture ledger entries.
+- Implementation: Stable public-API idempotency locks and validates ownership before processor/mutation execution; original-version request verification survives replay-key rotation; immutable origin and separate webhook administration transactions preserve payment boundaries.
+- Proof: `expiredMerchantCreationStartsNewCredentialEpochWithoutPepperRotation`, mixed-version PostgreSQL replay, exact-window crash/resume reconciliation, forced in-flight lease expiry, and existing payment rollback/lifecycle contracts. The full suite is regression context only.
+- Adversarial evidence: An expired lease cannot enter a second supplier while the first owns the row lock. A live request replays across rotation, an expired request can restart after old-key retirement, and crash after remote commit resumes to exactly five intended intents, attempts, authorizations, decisions, and zero capture ledger entries.
 - Status: PASS
 
 ## C21-PAY-002
@@ -40,9 +88,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: PAYMENT_FRAUD
 - Invariant: A resumed declared scenario step produces at most one intended payment, attempt, decision, authorization, and event.
 - Failure sequence: The process dies after API commit but before checkpoint and resumes with a different mutation identity.
-- Implementation: Run-scoped stable idempotency keys, durable completed-step responses, and fail-closed ambiguous non-idempotent steps enforce convergence.
-- Proof: `test_crash_after_remote_commit_retries_only_a_retry_safe_step`, checkpoint/abandonment tests, and live `chapter21-live-resume` PostgreSQL evidence.
-- Adversarial evidence: The live failpoint fired after PaymentIntent commit; resume produced five distinct intended PaymentIntents, five attempts, and five decisions—not six.
+- Implementation: Stable domain-separated merchant/customer keys, V15 fenced server reservations, V16/V17 versioned replay identities, record-UUID lifecycle epochs, atomic customer mutation/response completion, immutable typed generator resources, and original-version merchant API-key replay make every generator creation step retry-safe without plaintext credential storage.
+- Proof: Real-SQLite exact-window merchant/customer crash-resume and legacy typed-journal proof, H2 replay/conflict/privacy/lease/pepper-rotation/same-pepper-expiry contracts, deterministic PostgreSQL reservation waits, V15-to-V17 clean and upgrade migration proof, and full suites.
+- Adversarial evidence: Failure is injected after the server response but before every local write; resume restores complete typed resource lineage while the fake remote server contains exactly one merchant/customer. Changed payload, blank key, active lease, expired lease, same-pepper expired reuse, cross-tenant reuse, concurrent replay, pepper rotation, unavailable historical key, resource-type drift, and verifier-merchant cleanup partitions fail or converge as specified.
 - Status: PASS
 
 ## C21-TEN-001
@@ -50,9 +98,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: TENANT_ISOLATION
 - Invariant: Origin and all webhook endpoint, secret, creation, delivery, and event records remain owned by exactly one merchant.
 - Failure sequence: A caller substitutes another merchant's endpoint, key, generation, object ID, or identical external key/URL.
-- Implementation: Merchant authentication, scoped lookups, composite foreign keys, tenant-bound encryption AAD, and merchant-scoped uniqueness enforce ownership.
-- Proof: `MerchantTenantIsolationTests`, endpoint replay cross-tenant proof, secret wrong-tenant proof, generator tenant reads, and full suite.
-- Adversarial evidence: Identical endpoint idempotency keys and URLs succeed independently across tenants; cross-tenant object reads remain 404 and wrong-AAD decrypt fails.
+- Implementation: Merchant authentication, scoped lookups, composite foreign keys, tenant-bound encryption AAD, tenant-scoped versioned webhook identities, explicit generator merchant lineage, and merchant-scoped uniqueness enforce ownership.
+- Proof: `MerchantTenantIsolationTests`, endpoint replay/rotation cross-tenant proof, secret wrong-tenant proof, generator resource-ledger tenant reconciliation, and full suite.
+- Adversarial evidence: Identical endpoint idempotency keys and URLs succeed independently across tenants; current/previous aliases cannot cross merchants; every child generator resource records its merchant; cross-tenant object reads remain 404 and wrong-AAD decrypt fails.
 - Status: PASS
 
 ## C21-SEC-001
@@ -70,9 +118,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: SECURITY_PRIVACY
 - Invariant: Creation replay and rotation never persist plaintext signing secrets; expired/superseded generations are unusable at the exact cryptographic-use instant; startup has every KEK needed by still-decryptable state.
 - Failure sequence: Retry mints a second secret, replay exposes a rotated-away response, ciphertext crosses tenants, or old material works at expiry.
-- Implementation: AES-GCM response/endpoint ciphertext, HMACed idempotency identity, generation binding, `WebhookSecretUseWindow` validation at the exact signature timestamp, complete current/previous/replay KEK inventory, and superseded-response conflict enforce lifecycle.
-- Proof: `endpointCreationReplayIsTenantScopedAndDuplicateUrlsAreExplicitlyRejected`, `claimedSecretGenerationRemainsAvailableOnlyDuringRotationGrace`, `previousGenerationIsRejectedWhenDispatchWaitCrossesItsExpiry`, `requiredKeyInventoryIncludesCurrentPreviousAndReplayCiphertext`, startup key-version proof, and cipher tamper/AAD tests.
-- Adversarial evidence: Exact before/at/after signature use, a dispatch wait crossing expiry, missing current/previous/replay KEKs, second active overlap, rotation-after-create replay, wrong tenant, and ciphertext tampering all fail safely. `ER-0025` and `ER-0026` record the reopened families.
+- Implementation: AES-GCM response/endpoint ciphertext, HMACed idempotency identity, generation binding, post-lock exact-time signing, current-generation fallback at the final stale pre-send attempt, complete current/previous/replay KEK inventory in both execution modes, and superseded-response conflict enforce lifecycle.
+- Proof: `rotationWaitsUntilCurrentGenerationSignatureIsCryptographicallyUsed`, `previousGenerationWaitingForEndpointLockIsRejectedAtActualUseExpiry`, `expiredClaimGenerationRetriesAndNextClaimBindsCurrentSecret`, `finalAttemptStaleGenerationUsesCurrentSecretBeforeFirstHttpSend`, `requiredKeyInventoryIncludesCurrentPreviousAndReplayCiphertext`, `disabledExecutionStillFailsClosedWhenAdministrationNeedsUnavailableKey`, and cipher tamper/AAD tests.
+- Adversarial evidence: Both signer/rotation lock orderings, a lock wait crossing exact expiry, first/intermediate/final stale attempts, missing KEKs with workers enabled or disabled, second active overlap, wrong tenant, and ciphertext tampering fail or converge as specified. `ER-0025`, `ER-0026`, `ER-0037` through `ER-0039`, `ER-0041`, and `ER-0042` preserve the review history.
 - Status: PASS
 
 ## C21-SEC-003
@@ -81,7 +129,7 @@ the implementations and hostile tests below closed every partition.
 - Invariant: Dependency and test runtime configuration preserves DNS, migration, instrumentation, and PostgreSQL proof fidelity.
 - Failure sequence: Native fallback, untested H2, dynamic agent loading, or Testcontainers teardown noise hides a real failure.
 - Implementation: H2 2.3.232, Testcontainers 2.0.5 packages, macOS native DNS runtime, explicit native access, Mockito agent, and a 24-hour test-only scheduler delay remove owned ambiguity.
-- Proof: Fresh 240-test suite has zero failure, error, or skip; all PostgreSQL migration and forced-interleaving tests execute.
+- Proof: PostgreSQL migration and forced-interleaving classes execute without skips; dependency-lifecycle warning scans remain clean. Aggregate totals are supporting regression context only.
 - Adversarial evidence: PostgreSQL 16 migrations and forced interleavings execute rather than skip; ER-0022 proved the live upgrade path independently.
 - Status: PASS
 
@@ -98,11 +146,11 @@ the implementations and hostile tests below closed every partition.
 ## C21-CON-001
 
 - Lens: TRANSACTION_CONCURRENCY
-- Invariant: At most one process advances a generator run; stale recovery cannot repeat a completed non-idempotent step.
-- Failure sequence: Two processes own one run, or an ambiguous merchant/customer create is blindly retried.
-- Implementation: SQLite `BEGIN IMMEDIATE`, expiring exclusive lease ownership, durable STARTED/COMPLETED steps, a separate sanitized resource ledger, and `NEEDS_CLEANUP` guard transitions enforce ownership and cleanup operability.
-- Proof: `test_active_run_lease_blocks_a_concurrent_generator`, completed-step replay, retry-safe restart, ambiguous-step, and abandonment/resource-retention tests use real SQLite files.
-- Adversarial evidence: A second owner is rejected; a crashed non-idempotent STARTED step never invokes its operation again; abandonment erases API keys while retaining safe merchant/resource references. `ER-0028` records the original lineage loss.
+- Invariant: At most one process advances a generator run; persisted retry safety is immutable; in-flight or stale recovery cannot duplicate merchant, customer, payment, processor, or fraud truth.
+- Failure sequence: Two processes own one run across cumulative network waits, a caller reclassifies a durable unsafe step, a mutation lease expires while its supplier is active, pepper rotation changes identity, or the process dies after merchant/customer API commit before local checkpoint.
+- Implementation: SQLite validates immutable retry and resource-type classification and heartbeats ownership around every HTTP request. V15 owner tokens plus a pre-supplier row lock fence general mutations; V16/V17 unique current/previous HMAC aliases and original-version derivation fence merchant and endpoint creation across rotation.
+- Proof: SQLite classification/resource-type drift tests; real delayed-server heartbeat proof; active/stale H2 leases; live/expired pepper-rotation and missing-key contracts; V15-to-V17 upgrades; PostgreSQL NOWAIT/`pg_stat_activity` forced waits for mixed pepper versions and expiry while protected work is blocked.
+- Adversarial evidence: Cumulative network latency exceeds the original lease without ownership loss; classification drift never invokes the operation; an expired mutation lease cannot run a second supplier; pepper rotation replays one merchant/API key and one endpoint; unavailable live versions fail startup while expired versions can retire; stranded ownership remains reclaimable.
 - Status: PASS
 
 ## C21-CON-002
@@ -110,9 +158,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: TRANSACTION_CONCURRENCY
 - Invariant: Endpoint create, rotation, claim, and disable converge to one endpoint/secret/delivery truth.
 - Failure sequence: Concurrent create duplicates an endpoint, rotation removes a claimed key, or disable loses its monotonic state.
-- Implementation: Fenced expiring endpoint-create reservation leases, database URL uniqueness, endpoint lock order, and claim-bound current/previous secret generations enforce convergence.
-- Proof: H2 active/stale reservation tests, V14 historical migration proof, `expiredCreationReservationReclaimSerializesAndReplaysOneEndpoint`, and existing PostgreSQL create/claim, rotation/disable, routing/disable, and lease-recovery interleavings.
-- Adversarial evidence: A process-death reservation is reclaimed without stealing live ownership; two contenders wait on the real PostgreSQL row lock and converge to one endpoint/replayed secret; stale replay after rotation conflicts. `ER-0027` records the omitted fail-stop sequence.
+- Implementation: Fenced expiring endpoint-create reservation leases locked before mutation, tenant-scoped versioned identity aliases, original-version request verification, database URL uniqueness, endpoint-lock-held exact-use signing, and claim-bound current/previous secret generations enforce convergence.
+- Proof: H2 active/stale/rotation/key-retirement reservation tests, V14 and V16-to-V17 historical migration proof, `expiredCreationReservationReclaimSerializesAndReplaysOneEndpoint`, `liveEndpointCreationLockSurvivesLeaseExpiryBeforeFirstMutationCompletes`, `rotationWaitsUntilCurrentGenerationSignatureIsCryptographicallyUsed`, the forced rolling-version endpoint-create test, and existing PostgreSQL claim/disable/routing/lease-recovery interleavings.
+- Adversarial evidence: A process-death reservation is reclaimed without stealing live ownership; a live owner retains fencing after lease expiry while blocked before its first mutation; old/new workers wait on the real PostgreSQL row lock and converge to one endpoint/replayed secret with two aliases; rotation waits for an in-progress signature; changed-request reuse still conflicts and expired state no longer retains a dead key. `ER-0027`, `ER-0034`, `ER-0037`, and `ER-0040` record the escaped sequences.
 - Status: PASS
 
 ## C21-CON-003
@@ -140,9 +188,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: DATA_ML_LINEAGE
 - Invariant: Generator checkpoints and summary publication cannot claim success before all referenced product truth reconciles.
 - Failure sequence: Resume changes plan identity, a partial run publishes success, or checkpoint secrets survive completion.
-- Implementation: Immutable seed/base/plan fingerprint, deterministic plan, atomic report write, completion guard, SQLite rollback journaling with secure deletion, checkpoint payload redaction, and separate safe resource references enforce evidence truth.
-- Proof: Repeated-seed, identity, atomic-output, completion-redaction, safe-reference retention, crash/restart, live reconciliation, and sensitive-data scan tests.
-- Adversarial evidence: Changed identity is rejected, failure leaves no success summary, raw API-key checkpoint data is erased, sanitized cleanup identity survives abandonment, and live output is mode `0600`.
+- Implementation: Immutable seed/base/plan fingerprint, deterministic plan, atomic report write, completion guard, SQLite rollback journaling with secure deletion, checkpoint payload redaction, immutable explicit resource types, and separate safe resource references enforce evidence truth.
+- Proof: Repeated-seed, identity, atomic-output, completion-redaction, typed legacy-journal backfill, resource-type drift, complete verifier-merchant ledger, safe-reference retention, crash/restart, live reconciliation, and sensitive-data scan tests.
+- Adversarial evidence: Changed identity or resource type is rejected before execution, failure leaves no success summary, raw API-key checkpoint data is erased, every committed resource including the verifier merchant remains in sanitized cleanup lineage, and live output is mode `0600`.
 - Status: PASS
 
 ## C21-API-001
@@ -150,9 +198,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: API_PRODUCT
 - Invariant: Endpoint creation has an explicit tenant-scoped retry contract and deterministic exact-URL behavior.
 - Failure sequence: Lost response creates another active endpoint/secret, changed body rebinds a key, or rotation makes replay misleading.
-- Implementation: Required `Idempotency-Key`, HMACed identity, canonical request hash, encrypted 24-hour response replay, V12 URL uniqueness, and generation comparison enforce the contract.
-- Proof: Endpoint replay test covers same request, changed request, different key/same URL, cross-tenant reuse, single audit, and rotation supersession.
-- Adversarial evidence: Duplicate URL insertion reaches the database uniqueness boundary and becomes a 409; plaintext idempotency and secret values are absent from storage/audit.
+- Implementation: Required `Idempotency-Key`, tenant-scoped current/previous HMAC aliases, original-version canonical request hash, encrypted 24-hour response replay, V12 URL uniqueness, and generation comparison enforce the contract.
+- Proof: Endpoint replay tests cover same/changed request, live/expired rotation, same-pepper expired reuse, missing historical key, different key/same URL, cross-tenant reuse, single audit, and rotation supersession; PostgreSQL proves mixed-version serialization.
+- Adversarial evidence: Duplicate URL insertion reaches the database uniqueness boundary and becomes a 409; rotation cannot make a bound key appear new; expired bindings can be reused after old-key retirement; plaintext idempotency and secret values are absent from storage/audit.
 - Status: PASS
 
 ## C21-API-002
@@ -180,9 +228,9 @@ the implementations and hostile tests below closed every partition.
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Crash, restart, dependency timeout, scheduler shutdown, and schema upgrade leave work resumable or explicitly terminal, never falsely successful.
 - Failure sequence: Crash lands between remote commit/checkpoint, scheduler polls a destroyed database, or a shipped schema cannot start current code.
-- Implementation: Generator leases/checkpoints, stable API idempotency, test scheduler lifecycle control, webhook delivery leases, V14 endpoint-reservation leases, and additive V13/V14 repairs enforce recovery.
-- Proof: Live failpoint/resume, Python restart tests, full lifecycle suite, `v13RepairsPreviouslyAppliedWebhookAttemptSchemaWithoutLosingSendTruth`, `v14MakesPreviouslyStrandedEndpointCreationReservationsReclaimable`, and deterministic PostgreSQL reservation reclaim.
-- Adversarial evidence: `ER-0022` reopened migration proof and `ER-0027` reopened fail-stop reservation recovery; shipped attempt and endpoint-create states now upgrade conservatively.
+- Implementation: Existing recovery boundaries remain; V15 fail-stop leases recover stranded reservations, V16/V17 preserve replay identity across pepper rotation, explicit resource types preserve cleanup lineage, and per-request heartbeats keep the generator owner live across bounded network waits.
+- Proof: V15-to-V17 clean and upgrade migrations, forced PostgreSQL in-flight expiry and rolling-version interleavings, H2 active/stale/live/expired rotation contracts, legacy SQLite journal upgrades, delayed real-HTTP heartbeat proof, and exact remote-response-before-local-write crash/replay tests.
+- Adversarial evidence: Historical `IN_PROGRESS` rows become reclaimable; active mutation and generator owners cannot be stolen; missing live historical versions fail startup while expired versions retire; malformed keys fail before mutation; legacy interrupted journals preserve type; client death before local persistence converges rather than duplicating or losing server truth.
 - Status: PASS
 
 ## C21-OPS-002
@@ -190,7 +238,7 @@ the implementations and hostile tests below closed every partition.
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Chapter 21 cannot close with non-resolved debt, skipped proof, unresolved matrix entries, escaped findings, or contradictory source-of-truth status.
 - Failure sequence: Debt is cosmetically hidden, PostgreSQL skips, README claims readiness early, or the live upgrade failure is omitted.
-- Implementation: Immutable debt/escaped registers, matrix/dossier checks, mandatory readiness tests, and source reconciliation enforce the gate.
-- Proof: `technical-debt-check.py` reports five resolved/zero open; invariant and escaped-review checks pass; full backend reports 240/0/0/0; repository Python reports 60/0; README/master plan agree.
-- Adversarial evidence: `ER-0022` through `ER-0028` are recorded and repaired rather than suppressed; every prior-phase debt retains its immutable ID and concrete evidence.
+- Implementation: TD-0001 through TD-0005 and ER-0001 through ER-0042 are resolved; five independently verified slice packets, matrix, dossier, README, master plan, learning trail, and registers carry one completion state.
+- Proof: Slice-review ancestry validation, named deterministic interleavings, plan-to-code-to-proof traceability, complete persisted-HMAC inventory, deterministic keyring-order and duplicate-material rejection, and separate hostile lifecycle-epoch, exact-use, retry-ceiling, mode-readiness, fencing, typed-journal, and cumulative-network-lease reviews. Full suites are regression context only.
+- Adversarial evidence: The recovery review rejected aggregate structural green, wrote complete transition tables, reused expired identity under unchanged key material, forced both endpoint-lock orderings across expiry, crossed stale recovery with the retry ceiling, disabled the worker while retaining admin decrypt paths, expired live ownership during mutation, changed durable resource type, and held network reads beyond the original run lease before re-closing.
 - Status: PASS

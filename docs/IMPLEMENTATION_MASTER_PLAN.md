@@ -1745,7 +1745,8 @@ Phase 1 closure chapter:
 
 1. Chapter 16: Synthetic Scenario Generator V1.
 
-   Status: complete.
+   Status: implementation complete. Chapter 21 closure includes the resolved
+   ER-0034 and ER-0035 boundary-family recovery.
 
    Build:
 
@@ -1830,7 +1831,9 @@ Phase 1 closure chapter:
    - `[TD-0002]` was resolved in Chapter 21C. The loopback runner now owns an
      owner-only SQLite run journal with stable run/step identities, exclusive
      leases, restart-safe completed-step replay, run-scoped API idempotency,
-     and explicit abandonment for ambiguous non-idempotent steps.
+     authoritative immutable retry classification, server-idempotent
+     merchant/customer creation, and explicit abandonment for genuinely
+     ambiguous non-idempotent steps.
 
 ### Phase 2: Processor, Capture, Refund, Ledger, Webhooks
 
@@ -2212,9 +2215,9 @@ Detailed Phase 2 chapter plan:
      fractional-millisecond, configured-maximum, and overflow values before
      Java future/socket APIs can reinterpret a truncated configuration.
    - Attempt signatures are minted after potentially blocking dispatch
-     preparation. A signing failure is classified as retryable known-no-send
-     evidence, and a 301-second preparation delay still produces a fresh
-     merchant-verifiable timestamp.
+     preparation and endpoint-lock acquisition. A signing failure is classified
+     as retryable known-no-send evidence, and elapsed preparation/lock time
+     cannot hide previous-secret expiry or produce a stale timestamp.
    - Bulk endpoint disable executes one bounded update per canonical event type
      and emits terminal metrics from actual affected-row counts. A forced
      PostgreSQL claim/disable interleaving proves predicate re-evaluation cannot
@@ -2504,8 +2507,9 @@ Detailed Phase 2 chapter plan:
    - After secret loading and DNS policy validation, renew the matching claim
      under a delivery row lock immediately before HTTP. A worker whose token
      became stale during preparation must not send. Mint the signature
-     timestamp only after that potentially blocking preparation returns, then
-     sign immediately before transport. If signing fails, finalize the prepared
+     lower bound only after that potentially blocking preparation returns; the
+     signing transaction captures exact time after its endpoint lock, then
+     signs immediately before transport. If signing fails, finalize the prepared
      attempt as retryable known-no-send `SIGNING_FAILED` evidence. Finalization
      also locks the delivery row before checking token/attempt identity, preventing a
      check-then-write race with lease recovery.
@@ -2895,6 +2899,20 @@ IDs remain immutable in the register after resolution.
      environment proxies as well as redirects, and a sanitized resource ledger
      retains actionable cleanup references after secret-bearing checkpoints
      are erased.
+   - `ER-0029` and `ER-0030` are resolved: durable retry classification is
+     authoritative in both drift directions, and V15 leased server
+     reservations plus stable generator keys make merchant/customer creation
+     converge when the client dies after commit but before local persistence.
+   - `ER-0031` through `ER-0033` close the post-closure transaction, key
+     rotation, and ownership gaps: general idempotency owns the row before
+     supplier/processor work; V16 versioned HMAC aliases preserve one merchant
+     and API key across pepper rotation; every bounded HTTP request heartbeats
+     the generator run lease.
+   - `ER-0034` and `ER-0035` close the complete persisted-HMAC and cleanup
+     lineage families. V17 versions general request hashes, adds tenant-scoped
+     webhook creation identity aliases, separates the stable fraud/PII
+     correlation key from rotatable replay keys, and makes resource type
+     immutable durable step metadata with legacy-journal backfill.
 
    Chapter 21D: Webhook endpoint creation idempotency (`TD-0005`).
 
@@ -2908,6 +2926,11 @@ IDs remain immutable in the register after resolution.
    - `ER-0027` added V14 fenced reservation leases: fail-stop `IN_PROGRESS`
      rows become reclaimable, active ownership cannot be stolen, and a
      deterministic PostgreSQL interleaving converges to one endpoint/secret.
+   - `ER-0034` adds V17 versioned endpoint-create aliases and original-version
+     request verification. Rolling current/previous workers serialize on the
+     same PostgreSQL record, changed-request reuse still conflicts, expired
+     windows no longer retain dead key versions, and startup fails closed while
+     a live replay still requires an unavailable version.
 
    Chapter 21E: Webhook signing-secret rotation overlap (`TD-0003`).
 
@@ -2940,11 +2963,20 @@ IDs remain immutable in the register after resolution.
      synthetic resume evidence, webhook operations evidence, and sanitized
      public-API demos pass.
    - The hostile end-to-end re-review records and resolves `ER-0024` through
-     `ER-0028`; full proof passes 240 backend tests and 60 repository Python
-     tests.
-   - The Chapter 21 closure dossier recommends `MERGE`, and README and
-     architecture sources agree. Branch integration into `develop` remains the
-     normal post-review Git action and is not part of implementation truth.
+     `ER-0035`; full proof includes replay-key rotation for every persisted
+     HMAC consumer, stable fraud/PII correlation, typed generator lineage,
+     V16-to-V17 migration, PostgreSQL execution, and zero skips.
+   - `ER-0036` through `ER-0042` are resolved through five independent
+     `RETROACTIVE_RECOVERY` packets, reviewable implementation commits, and
+     later hostile-proof commits validated for ancestry.
+   - Aggregate test totals are regression context, never primary closure proof.
+   - The Chapter 21 closure dossier recommends `MERGE` after that review
+     protocol passes.
+
+   Closure state: complete. Recovery tables found and closed `ER-0041` and
+   `ER-0042`; post-lock signing-time capture and final-attempt current-secret
+   rebinding have deterministic proof. Aggregate suite totals remain regression
+   context, not persuasive closure evidence.
 
 Done when:
 

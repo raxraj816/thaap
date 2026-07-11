@@ -13,17 +13,33 @@ chapter-specific invariant matrix plus closure dossier under `docs/reviews/`.
 ## Current Status
 
 Chapter 20 is complete and the canonical Phase 2 simulator boundary is closed.
-Chapter 21 is complete, and Phase 2.5 is complete. `TD-0001` through `TD-0005` are resolved,
-the technical debt register has zero non-resolved entries, and the Phase 3
-entry gate is open. Trusted synthetic origin, restart-safe generator runs,
+Chapter 21 is complete, and the Phase 2.5 zero-debt entry gate is satisfied.
+`ER-0034` through `ER-0042` close the complete persisted-HMAC rotation,
+generator resource-lineage, merchant lifecycle-epoch, webhook exact-use,
+stale-generation recovery, KEK-readiness, and endpoint-fencing boundary
+families.
+Persisted generator retry classification is authoritative across restart, and
+V15 server-side merchant/customer creation idempotency closes the remote
+commit-to-local-checkpoint gap without storing raw merchant API keys or
+customer PII. V16 preserves merchant replay across HMAC-pepper rotation,
+and V17 extends versioned replay safety to generic idempotency and webhook
+endpoint creation while separating stable fraud/PII correlation keys,
+general idempotency locks ownership before processor/mutation work, and every
+generator request renews live run ownership. `TD-0001` through `TD-0005` are
+resolved, and the technical debt register has zero non-resolved entries. Five
+independent Chapter 21 recovery packets now carry complete transition tables,
+mandatory closure questions, narrow implementation checkpoints, and later
+hostile-proof checkpoints; the Phase 3 entry gate is satisfied.
+Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation
 recovery all have executable evidence. The final hostile re-review also proves
-that credentialed Python clients ignore environment proxies, webhook secret
-expiry is enforced at the exact signature timestamp, startup inventories every
-required current/previous/replay KEK, and generator abandonment retains only
-sanitized cleanup references. Full proof passes 240 backend and 60 repository
-Python tests.
+that credentialed Python clients ignore environment proxies, webhook signing
+and rotation serialize at the endpoint lock, stale generations retry without
+sending, startup inventories every required current/previous/replay KEK in
+both worker modes, and generator abandonment retains only sanitized cleanup
+references. Named deterministic interleavings provide closure evidence; full
+backend and repository Python suites pass as regression context only.
 The deterministic processor catalog, capture, cancel/void, full refund, ledger,
 audit, and signed at-least-once webhook paths now have one integrated
 pre-implementation proof matrix and closure dossier. Chapter 19 remains
@@ -60,8 +76,8 @@ scenarios through public APIs:
 - Merchant API keys and webhook signing secrets are stored as prefixes and
   hashes, not raw secrets.
 - Merchant creation requires an admin bootstrap token and contract tests prove
-  one-time API key reveal, stored prefix/hash behavior, validation errors, and
-  follow-on API-key authentication.
+  creation-time API key reveal, exact keyed replay, stored prefix/hash behavior,
+  validation errors, and follow-on API-key authentication.
 - Customer and payment method contract tests prove raw PII and raw card input
   are not returned or persisted beyond the simulator boundary.
 - Simulated card input is reduced to internal fingerprinting plus public safe
@@ -86,9 +102,15 @@ scenarios through public APIs:
   deeper payment side effects.
 - `IdempotencyService` now reserves an `IN_PROGRESS` row before a mutation,
   binds each key to merchant, operation, and request hash, completes the record
-  only after the mutation response is durable, rejects in-progress duplicates,
-  and releases reservations after failed mutations so retryable failures are
-  not cached.
+  only after the mutation response is durable, locks and validates ownership
+  before supplier or processor work, fences active work with a reclaimable
+  lease, rejects or serializes in-progress duplicates, and releases owned
+  reservations after failed mutations so retryable failures are not cached.
+- Merchant and customer creation support server-side idempotency. Merchant
+  replay returns the same merchant and API key without plaintext key storage,
+  including across versioned hash-pepper rotation; customer replay is
+  tenant-scoped, stores only safe response IDs, and verifies the request using
+  its persisted original hash-key version.
 - Chapter 8 service tests prove completed replay, operation mismatch conflict,
   in-progress duplicate rejection, rollback cleanup after mutation failure,
   merchant-scoped key reuse, and in-progress storage shape.
@@ -197,7 +219,8 @@ scenarios through public APIs:
   disabled legacy endpoints and fails before schema mutation when a V8 row
   claims delivery execution that cannot be reconciled with authoritative
   attempt evidence or contains an unsupported legacy event type.
-- Dispatch signatures are minted only after potentially blocking preparation,
+- Dispatch signatures are minted only after potentially blocking preparation
+  and endpoint-lock acquisition,
   the 64 KiB payload and cumulative 32 KiB response-head limits are enforced
   at their real runtime boundaries, every ASCII response-field character class
   and DNS/socket-duration conversion partition has executable boundary-family
@@ -294,6 +317,8 @@ Local infrastructure and the first runnable service are available:
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
 export THAAP_HASH_PEPPER=change-me-local-sensitive-value-pepper
+export THAAP_HASH_PEPPER_VERSION=v1
+export THAAP_CORRELATION_PEPPER=change-me-local-sensitive-value-pepper
 scripts/local-infra-up.sh
 mvn -f apps/payments-api/pom.xml -Dmaven.repo.local=.m2/repository test
 scripts/payments-api-run.sh

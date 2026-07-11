@@ -5,8 +5,8 @@
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX_BEFORE_ER-0041_FIX
 - Product implementation checkpoint: 54862fb
 - Independent implementation review: PASS
-- Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
+- Hostile review checkpoint: b5e767d
+- Status: VERIFIED
 - Escaped findings: ER-0037, ER-0041
 
 ## Frozen promise

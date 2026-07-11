@@ -428,7 +428,7 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: A previous webhook signing-secret generation is usable only when the exact signature timestamp is strictly before its expiry.
 - Finding: The executor loaded a still-valid previous secret and could wait across its expiry before generating the signature, allowing a delivery to be signed after the advertised verification window had closed.
 - Why prior review missed it: Before/at/after expiry tests exercised secret loading at one instant but did not force the dispatch path to cross expiry between authorization and signature timestamp capture.
-- Resolution evidence: `WebhookEndpointSecretService` now returns a `WebhookSecretUseWindow`; the executor authorizes the generation under the endpoint lock, obtains the exact signature timestamp after dispatch preparation, and validates that timestamp before signing. `previousGenerationIsRejectedWhenDispatchWaitCrossesItsExpiry` fixes the clock at the exact expiry and proves terminal `SIGNING_SECRET_UNAVAILABLE` with no signer or transport call.
+- Resolution evidence: `WebhookEndpointSecretService.signForDelivery` now validates generation state at the exact signature timestamp, decrypts, and signs while holding the endpoint row lock. Exact-expiry proof produces no signer or transport call; `ER-0037` later strengthened the boundary with a forced current-to-previous rotation wait, and `ER-0038` corrected the stale outcome from terminal to retryable no-send convergence.
 - Process correction: Time-bounded credential proof must bind authorization to the exact use instant and include forced clock movement or a boundary timestamp between load and cryptographic use.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-05
@@ -483,3 +483,241 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Recovery journals must classify fields as secret-bearing payload, durable safe reference, or derived summary; erasure tests must prove both confidentiality and retained operability.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-05
+
+## ER-0029
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Final Phase 2.5 pre-merge review
+- Invariant: A durable generator step's retry-safety classification is immutable and authoritative across process and binary restart.
+- Finding: `GeneratorRunStore.execute_step` read the persisted `retry_safe` value but decided from the new caller argument and overwrote the durable value. A previously unsafe `STARTED` merchant/customer step could therefore be reclassified as safe and repeated.
+- Why prior review missed it: Restart tests reused the same caller classification and never crossed durable state with binary/configuration drift or an adversarial reclassification.
+- Resolution evidence: `GeneratorRunStore.execute_step` now validates the stored classification before any state transition or operation, decides unsafe recovery from that durable value, and never overwrites `retry_safe` on conflict. The SQLite schema constrains the field to `0|1`. `test_persisted_retry_classification_cannot_be_rewritten_on_resume` proves both unsafe-to-safe and safe-to-unsafe drift fail closed without invoking the operation or changing the stored value.
+- Process correction: Durable workflow metadata must be treated as protocol state; restart proof must mutate every caller-supplied classification that could contradict the persisted record.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0030
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Final Phase 2.5 pre-merge review
+- Invariant: Merchant and customer creation converge to one server object when the generator dies after the API commits but before the local resource/checkpoint write.
+- Finding: Merchant/customer creation was non-idempotent. The failpoint ran only after `generator_resources` persistence, so a death immediately after the remote commit could lose both the one-time merchant API key and the resource ID; safe resume could only stop ambiguously, not reconcile the committed object.
+- Why prior review missed it: The hostile test injected failure after the client-side resource journal rather than at the earlier distributed commit-to-local-checkpoint boundary.
+- Resolution evidence: V15 adds fenced fail-stop leases to general idempotency records and a secret-safe `merchant_creation_records` state machine. Merchant retries bind an HMACed global key to an HMACed request, return the same merchant and deterministically derived API key without persisting either plaintext, and reject changed requests, live leases, blank keys, and stale ownership. Customer retries use the existing merchant-scoped atomic mutation/response transaction. The generator sends stable domain-separated keys and injects its failpoint immediately after the remote response, before all local persistence. H2 API/lease/privacy contracts, deterministic PostgreSQL row-lock waits for both creation paths, V14-to-V15 historical migration proof, and exact-window Python merchant/customer crash-resume proof converge to one server object and restored local resource lineage.
+- Process correction: Client restart proof for remote mutations must inject failure immediately after the server response/commit and before every client-side persistence action; local journaling cannot certify server convergence by itself.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0031
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Post-closure Senior Staff payment-idempotency review
+- Invariant: An active payment mutation owns and locks its idempotency reservation before any processor, fraud, ledger, webhook, or other mutation work begins, so lease expiry cannot admit a second execution.
+- Finding: `IdempotencyService` invoked the mutation supplier before acquiring the reservation row lock. A duplicate request could reclaim an expired lease and invoke the supplier concurrently; the stale database transaction would roll back at completion, but a future external processor authorization could not be rolled back.
+- Why prior review missed it: The PostgreSQL test wrapped a completed service call in an outer transaction and proved that a duplicate waited on the already-completed record. It never expired the lease while the first supplier was blocked, so it did not prove the dangerous in-flight ordering.
+- Resolution evidence: `IdempotencyService` now locks and validates the reservation owner at the beginning of the operation transaction, before invoking the supplier. `expiredCustomerLeaseCannotBeStolenWhileMutationOwnsTheReservationLock` uses a 100-millisecond lease, blocks the first supplier after the lock is held, proves the lease expires, observes the second caller waiting in PostgreSQL, then proves one supplier execution, one customer, and replay of the first response.
+- Process correction: Fenced-lease proof must expire the lease while the protected side effect is still blocked and verify lock acquisition precedes the first irreversible or externally visible operation; holding a lock after service completion is not evidence for in-flight exclusion.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0032
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Post-closure Senior Staff secret-rotation review
+- Invariant: Rotating the sensitive-value HMAC pepper during the merchant replay window cannot make an existing external idempotency key appear new, mint a second merchant, or change the replayed API key.
+- Finding: Merchant creation derived both its lookup identity and replayed API key only from the currently configured pepper. After rotation, the same external key produced a different database lookup and could create a duplicate merchant with a different API key.
+- Why prior review missed it: Privacy tests proved plaintext absence and deterministic replay under one static secret, but the secret-compromise inventory did not rotate the HMAC root between remote commit and retry or consider mixed-version rolling deployment.
+- Resolution evidence: V16 adds `derivation_key_version` plus `merchant_creation_identities`, whose unique HMAC aliases bind every configured current/previous key version to one creation record. Replay derives the API key with the record's original version and promotes the new alias. Startup fails closed when an unexpired/in-progress record requires an unavailable version. `merchantCreationReplaySurvivesPepperRotationAndPromotesTheNewIdentityAlias` proves one merchant, the identical API key, two aliases, and missing-previous-key rejection; `rollingPepperVersionsShareOneDatabaseIdentityAndReplayOneMerchant` forces mixed-version PostgreSQL lock waiting and replay; `v16BackfillsVersionedMerchantCreationIdentityWithoutLosingReplayLineage` proves upgrade lineage and database uniqueness.
+- Process correction: Deterministic secret-derived identifiers require a rotation grammar covering current, previous, rolling mixed-version writers, database uniqueness, replay derivation, retention, and fail-closed startup—not only same-key cryptographic determinism.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0033
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Post-closure Senior Staff generator-ownership review
+- Invariant: A live generator process retains exclusive ownership across every bounded network wait, including verification reads outside checkpointed mutation steps.
+- Finding: The generator renewed its 90-second lease around checkpointed steps but performed four sequential 30-second-timeout verification reads and a ledger read without renewal. A slow but successful API could let another process acquire the run while the first remained active.
+- Why prior review missed it: Ownership tests covered a stationary active lease and step transitions; they did not accumulate multiple successful network waits outside `execute_step` until the lease boundary was crossed.
+- Resolution evidence: `ApiClient` now invokes an owner heartbeat immediately before and after every request, `run_generator` wires it to `GeneratorRunStore.heartbeat`, and startup rejects a run lease that does not exceed one request timeout. `test_api_client_renews_run_ownership_across_slow_sequential_requests` uses a real delayed HTTP server and a one-second lease, runs three calls for longer than the original lease, and proves a second store still cannot acquire the run.
+- Process correction: Workflow lease inventories must include validation, polling, and read-only network waits—not only mutation steps—and proof must make cumulative successful latency exceed the original lease while testing a real competing owner.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0034
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Post-closure end-to-end HMAC consumer review
+- Invariant: Routine replay-key rotation preserves every live idempotency binding, while long-lived fraud and PII correlation identities do not silently change as a side effect.
+- Finding: ER-0032 repaired merchant creation only. Generic idempotency request hashes still used only the current pepper, so a customer, payment-method, PaymentIntent, or confirm retry after rotation conflicted instead of replaying. Webhook endpoint key and request identities also used only the current pepper, so a reused external key appeared new after rotation and could bind a second URL. Card fingerprints plus customer email/phone pseudonyms shared the rotating replay pepper, splitting fraud and data lineage.
+- Why prior review missed it: The secret-rotation pass started from the observed merchant duplicate rather than inventorying every persisted output of `SensitiveValueHasher`; the merchant-specific proof was then promoted into a system-wide rotation claim.
+- Resolution evidence: V17 stores the original request-HMAC key version on generic and endpoint-creation replay records, backfills historical rows as `v1`, and adds tenant-scoped current/previous webhook identity aliases with composite lineage constraints. Generic, merchant, and webhook startup inventories retain every key required by an unexpired replay window and release expired versions. Rotation contracts prove same-request replay, changed-request conflict, alias promotion, missing-live-key startup failure, expired-key reuse after retirement, deterministic current/previous order, and duplicate pepper material rejection. A forced PostgreSQL rolling-v1/v2 interleaving proves one endpoint/record with two aliases. `CorrelationValueHasher` moves PAN, email, and phone correlation to the separately managed `THAAP_CORRELATION_PEPPER`; the contract test proves those digests remain stable while replay HMACs rotate. Clean and V16-to-V17 migrations, 265 Java tests, and 67 repository Python tests pass with zero skips.
+- Process correction: A cryptographic-key rotation review must inventory every producer, persisted column, lookup path, uniqueness boundary, retention rule, and downstream fraud/ML consumer before any member of the boundary family can return to PASS.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-05
+
+## ER-0035
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-05
+- Escaped gate: Post-closure generator cleanup-lineage review
+- Invariant: Every remotely created generator resource is represented by an explicit durable type and safe identifier so interruption or abandonment has a complete cleanup inventory.
+- Finding: Resource classification inferred type from step-name suffixes. The `tenant_isolation.verifier_merchant` step did not match `.merchant`, so its committed merchant never entered `generator_resources`.
+- Why prior review missed it: Tests enumerated scenario merchant/customer names but did not compare the complete execution plan's creation steps with the durable resource ledger.
+- Resolution evidence: `generator_steps.resource_type` is now explicit immutable protocol state, every production resource-creation call declares its type, and resource recording consumes that metadata instead of step-name suffixes. The additive SQLite upgrade backfills both completed and interrupted legacy rows, explicitly maps `tenant_isolation.verifier_merchant`, and reconstructs safe references from completed responses. Tests reject resource-type drift before operation execution, reconcile child resources to merchant lineage, prove the verifier merchant is present, and scan retained state for secret absence. The complete 67-test repository suite passes.
+- Process correction: Durable lineage must use explicit typed operation metadata, and tests must reconcile every resource-producing plan step against the resulting ledger instead of sampling known naming conventions.
+- Primary DRI: ML/Data Platform
+- Last reviewed: 2026-07-05
+
+## ER-0036
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Post-closure merchant replay lifecycle review
+- Invariant: Reusing an expired merchant-creation idempotency key starts a distinct lifecycle epoch while replay within the live window returns the original merchant and API key.
+- Finding: The API key derivation used only the idempotency-key hash and request hash. With an unchanged pepper, deleting an expired creation record and repeating the same request regenerated the original merchant's API key and collided with the permanent unique merchant API-key hash.
+- Why prior review missed it: Expired-key reuse proof rotated the pepper at the same time, which changed the derived API key and masked the same-pepper partition.
+- Resolution evidence: API-key derivation now includes the immutable creation-record UUID as a lifecycle epoch while retaining the record's original HMAC key version for live replay. Expired-record deletion flushes and clears the persistence context before the alias is recreated, preventing a deleted alias from being updated at commit. `expiredMerchantCreationStartsNewCredentialEpochWithoutPepperRotation` proves that identical external key, request, and pepper create a different merchant and API key only after expiry, while the existing live replay and rotation tests still return the original credential.
+- Process correction: Deterministic replay proof must distinguish replay identity from lifecycle epoch and test same-key/same-request reuse both with and without key rotation.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-11
+
+## ER-0037
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Post-closure cryptographic-use interleaving review
+- Invariant: A webhook signature is produced only while its bound generation is current or strictly inside its previous-generation grace window.
+- Finding: Authorization returned an unbounded use window while a generation was current, then released the endpoint lock before timestamp capture and signing. A concurrent rotation could move that generation to previous and let it expire before the worker signed with it.
+- Why prior review missed it: The expiry test started with an already-previous generation and moved the clock between load and authorization; it never rotated a current generation after authorization but before cryptographic use.
+- Resolution evidence: `WebhookEndpointSecretService.signForDelivery` now owns one transaction that locks the tenant-scoped endpoint row, validates the claim-bound generation at the exact signature timestamp, decrypts only that generation, and invokes the signer before releasing the row lock. `rotationWaitsUntilCurrentGenerationSignatureIsCryptographicallyUsed` blocks inside the real signer, observes PostgreSQL rotation waiting on the endpoint lock, verifies the produced signature with the original secret, and proves rotation completes only afterward; the before/at/after expiry contract rejects the previous generation exactly at expiry.
+- Process correction: Exact-use proof must force every state transition that can occur after authorization and before use, including current-to-previous rotation under the real endpoint lock.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-11
+
+## ER-0038
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Post-closure webhook recovery-semantics review
+- Invariant: Expiry of a claim-bound previous signing generation never discards a delivery that an active endpoint can retry with its current generation.
+- Finding: Every `WebhookSecretException` finalized terminally. A stale previous generation therefore exhausted the delivery instead of scheduling a no-send retry whose next claim could bind the current generation.
+- Why prior review missed it: The exact-expiry test asserted fail-closed cryptographic behavior but did not separately prove the at-least-once delivery recovery outcome.
+- Resolution evidence: Stale or expired claim-bound generations now raise `WebhookStaleSecretGenerationException`, which the executor maps to retryable no-send `SIGNING_SECRET_UNAVAILABLE`; signing-engine failures remain known-no-send failures and unexpected database/runtime failures remain lease-recoverable. `expiredClaimGenerationRetriesAndNextClaimBindsCurrentSecret` rotates after claim, reaches exact expiry, proves zero transport calls and a retry schedule, then proves the next claim binds the current generation. Executor unit tests separately prove stale-generation, signing-failure, and unexpected-runtime partitions.
+- Process correction: Error families must be partitioned by recovery semantics—permanent integrity/configuration failure versus stale snapshot that can converge on current durable state.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-11
+
+## ER-0039
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Post-closure startup-readiness review
+- Invariant: Startup inventories every KEK required by any enabled webhook administration or delivery path, independent of scheduler execution mode.
+- Finding: `WebhookExecutionConfiguration` returned before persisted KEK inventory when delivery execution was disabled, even though endpoint replay and rotation APIs remained available and could request those ciphertexts.
+- Why prior review missed it: Readiness proof exercised only execution-enabled startup and coupled worker configuration with general encrypted-state availability.
+- Resolution evidence: `WebhookExecutionConfiguration.validate` inventories every persisted required webhook KEK before applying the delivery-worker enable flag; only worker-specific URL/timeout/lease checks remain conditional. `disabledExecutionStillFailsClosedWhenAdministrationNeedsUnavailableKey` starts validation with execution disabled and proves an unavailable persisted key version still aborts readiness, while enabled/disabled scheduler behavior remains covered independently.
+- Process correction: Startup dependency inventories must be derived from reachable product capabilities, not from one background worker's enable flag.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-11
+
+## ER-0040
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 21
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Post-closure endpoint-creation fencing review
+- Invariant: A live endpoint-creation owner locks and validates its reservation before endpoint, subscription, or audit mutation, so lease expiry cannot admit a competing worker.
+- Finding: Endpoint creation acquired the reservation lock only after creating endpoint, subscription, and audit state. A healthy operation delayed beyond the lease could be reclaimed and lose ownership during mutation.
+- Why prior review missed it: The PostgreSQL test held an outer transaction after the service had completed; it proved post-completion waiting rather than lease expiry while protected work was still blocked.
+- Resolution evidence: `WebhookEndpointService.createOnce` now locks and validates the reservation owner at operation-transaction entry, before secret generation, endpoint insertion, subscription persistence, or audit. `liveEndpointCreationLockSurvivesLeaseExpiryBeforeFirstMutationCompletes` blocks the first worker on a real PostgreSQL endpoint insert after reservation lock acquisition, advances time beyond the lease, observes the second worker waiting on the reservation row, and proves both callers converge to one endpoint and one replayed secret after the blocker rolls back.
+- Process correction: Fenced-lease tests must expire ownership while the first worker is blocked immediately after acquiring the real reservation lock and before the first protected mutation.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-11
+
+## ER-0041
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Five-slice transition-table recovery review
+- Invariant: A previous webhook signing-secret generation is validated against the actual cryptographic-use instant after every database-lock wait.
+- Finding: The executor captured `signatureTime` before calling `signForDelivery`. The service then waited for the endpoint row lock and validated the generation using that earlier timestamp. If rotation held the lock until after previous-secret expiry, the worker could acquire the lock after expiry and still sign using a timestamp captured before expiry.
+- Why prior review missed it: The forced rotation test blocked rotation behind an active signer, but no test reversed the order by blocking a previous-generation signer behind the endpoint lock while wall time crossed expiry. The review asked whether rotation could occur after authorization, but did not ask what could change while acquiring the authorization lock itself.
+- Resolution evidence: `WebhookEndpointSecretService.signForDelivery` now acquires the tenant-scoped endpoint row lock before capturing `clock.instant()`, treats the executor's preparation time only as a lower bound, then validates, decrypts, and signs before releasing the lock. `previousGenerationWaitingForEndpointLockIsRejectedAtActualUseExpiry` holds the endpoint lock, starts a previous-generation signer, observes its PostgreSQL lock wait, advances the service clock to exact expiry, and proves zero signer calls after acquisition.
+- Process correction: Every time-based protocol transition table must distinguish check time, lock-acquisition time, use time, and persisted timestamp; exact-use proof must force elapsed time across every lock wait in both orderings.
+- Primary DRI: Payments Core
+- Last reviewed: 2026-07-11
+
+## ER-0042
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 21
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-11
+- Escaped gate: Five-slice transition-table recovery review
+- Invariant: An active endpoint never loses its first real current-generation send opportunity solely because an internal claim-bound generation became stale before HTTP.
+- Finding: Stale-generation handling called the generic retry finalizer. On attempt five, the retry policy exhausted the delivery even though the stale snapshot produced no signature and no HTTP request, so the promised next claim could never bind the current generation.
+- Why prior review missed it: The recovery contract exercised stale generation only on attempt one. The error-classification review separated retryable from terminal errors but did not cross each known-no-send class with the exact retry ceiling.
+- Resolution evidence: Attempts below the ceiling retain retryable known-no-send stale-generation evidence. On the final allowed attempt, `WebhookDeliveryExecutor` catches only `WebhookStaleSecretGenerationException` and rebinds current endpoint secret state before transport in the same claim; permanent secret failures retain their prior classification. `finalAttemptStaleGenerationRebindsCurrentSecretBeforeHttp` proves control flow and `finalAttemptStaleGenerationUsesCurrentSecretBeforeFirstHttpSend` verifies the emitted HMAC with the rotated current secret and a successful durable delivery.
+- Process correction: Every retry/error transition table must cross each failure class with first, intermediate, and final retry positions and state whether internal pre-send failures consume the merchant-visible send budget.
+- Primary DRI: Payments Core
+- Last reviewed: 2026-07-11

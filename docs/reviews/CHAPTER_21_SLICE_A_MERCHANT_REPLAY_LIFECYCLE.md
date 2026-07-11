@@ -5,8 +5,8 @@
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX
 - Product implementation checkpoint: 2b4b72b
 - Independent implementation review: PASS
-- Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
+- Hostile review checkpoint: 303e67d
+- Status: VERIFIED
 - Escaped findings: ER-0036
 
 This packet is intentionally honest: the first lifecycle-epoch fix existed
