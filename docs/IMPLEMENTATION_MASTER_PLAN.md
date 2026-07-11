@@ -2996,10 +2996,20 @@ Done when:
 Entry gate: Chapter 21 and Phase 2.5 must be complete with zero non-resolved
 previous-phase debt before Phase 3 implementation begins.
 
+Detailed source of truth:
+[`PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md).
+The detailed plan freezes the founder-confirmed phase promises, V1 feature catalogue, immutable
+`rules_v1` policy, decision precedence, schemas, API behavior, transaction and
+lock ordering, hostile failure inventory, observability, proof strategy, and
+Chapter 22–25 sequence. Founder/domain review confirmed the promises and changed
+`docs/reviews/CHAPTER_22_INVARIANT_PROOF_MATRIX.md` from `DRAFT` to `FROZEN`
+before implementation.
+
 Build:
 
-- FraudDecision table.
-- FeatureSnapshot table.
+- Extend the existing FraudDecision and FeatureSnapshot lineage from the
+  allow-only `rules_stub_v1` boundary into real deterministic decisions without
+  rewriting historical rows.
 - FeatureDefinition and FeatureValue tables for V1 feature store abstraction.
 - RuleExecutionResult table.
 - Decision engine interface.
@@ -3016,9 +3026,61 @@ Done when:
 - FraudDecision records decision latency and feature freshness status.
 - FeatureValue supports point-in-time offline joins.
 - `BLOCK` prevents authorization.
+- `BLOCK` moves the PaymentIntent to explicit terminal `BLOCKED`, never generic
+  technical/processor `FAILED` truth.
 - `REQUEST_3DS` moves intent to `REQUIRES_ACTION`.
-- `REVIEW` creates a ManualReviewCase.
+- `REVIEW` creates a ManualReviewCase; merchant cancellation atomically moves
+  the intent, attempt, and open case to canceled truth without rewriting the
+  original decision.
 - `ALLOW` proceeds to processor authorization.
+
+Chapter sequence:
+
+1. Chapter 22 — Feature Contract And Point-In-Time Lineage.
+2. Chapter 23 — Deterministic Rules, Block, And Fraud Step-Up.
+3. Chapter 24 — Manual Review Intake And Merchant Cancellation.
+4. Chapter 25 — Integrated Fraud Decision MVP Closure.
+
+Current state: detailed plan and Chapter 22 promise freeze are approved;
+Chapter 22 implementation is next.
+No Phase 3 implementation is claimed yet.
+
+1. Chapter 22: Feature Contract And Point-In-Time Lineage.
+
+   Status: ready to implement; pre-implementation matrix is `FROZEN` and closure
+   dossier remains `IN_PROGRESS`/`DO_NOT_MERGE` pending executable proof.
+
+   Replace ad hoc snapshot construction with typed, versioned FeatureDefinition
+   and FeatureValue lineage while preserving the existing allow-only processor
+   behavior. Freeze and prove exact type, time, tenant, traffic-origin,
+   migration, rollback, and concurrency boundaries before closure.
+
+2. Chapter 23: Deterministic Rules, Block, And Fraud Step-Up.
+
+   Status: planned; starts only after Chapter 22 closure.
+
+   Install immutable `rules_v1`, preserve every match and non-match, aggregate
+   deterministically, and make `ALLOW`, `BLOCK`, and fraud-engine
+   `REQUEST_3DS` coherent confirm branches. No computed non-allow action may be
+   deployed without its payment transition and processor-exclusion proof.
+
+3. Chapter 24: Manual Review Intake And Merchant Cancellation.
+
+   Status: planned; starts only after Chapter 23 closure.
+
+   Add the `IN_REVIEW`/`REQUIRES_REVIEW` lifecycle and exactly one tenant-scoped
+   `OPEN` ManualReviewCase. The existing merchant cancel API atomically moves
+   intent, attempt, and case to canceled truth. Phase 4 retains assignment,
+   analyst resolution, notes, and review-triggered payment actions.
+
+4. Chapter 25: Integrated Fraud Decision MVP Closure.
+
+   Status: planned; starts only after Chapter 24 closure.
+
+   Reconcile allow, block, step-up, and review through public APIs, durable
+   feature/rule/decision/payment evidence, migrations, forced PostgreSQL
+   orderings, bounded operational signals, traceability, and a later hostile
+   review. Phase 3 closes only when its dossier recommends `MERGE`.
 
 ### Phase 4: Features, Velocity, Lists, Reviews, Chargebacks
 
@@ -3027,6 +3089,15 @@ Build:
 - Real-time feature extractor.
 - RiskContext capture for device, session, IP, checkout, and bot/friction
   signals.
+- **Payment Authentication Completion** owner slice:
+  - Technical DRI: **Payments Core**.
+  - Start after Phase 3 proves a fraud-engine `REQUEST_3DS` can create truthful
+    required/pending state without processor fiction.
+  - Add the challenge lifecycle, idempotent authenticated completion API,
+    expiry/replay semantics, and explicit fraud-versus-processor result source.
+  - Completion evidence must prove challenge success/failure/expiry, duplicate
+    and concurrent completion, tenant substitution, rollback, audit/webhook
+    truth, and that no funds are authorized before valid completion.
 - Redis velocity counters.
 - Fraud lists for card fingerprint, BIN, country, IP, customer, email, email domain, generic string.
 - MerchantRiskProfile and MerchantRiskPolicy MVP.

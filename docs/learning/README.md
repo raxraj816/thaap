@@ -174,6 +174,7 @@ Current concept notes:
 - [API Credential Lifecycle From First Principles](concepts/API_CREDENTIAL_LIFECYCLE.md)
 - [API Validation From First Principles](concepts/API_VALIDATION.md)
 - [Database Migrations And Flyway](concepts/DATABASE_MIGRATIONS_AND_FLYWAY.md)
+- [Deterministic Rule Decisioning](concepts/DETERMINISTIC_RULE_DECISIONING.md)
 - [Docker Compose Local Infrastructure From First Principles](concepts/DOCKER_COMPOSE_LOCAL_INFRASTRUCTURE.md)
 - [Health Checks And Actuator From First Principles](concepts/HEALTH_CHECKS_AND_ACTUATOR.md)
 - [Idempotency From First Principles](concepts/IDEMPOTENCY.md)

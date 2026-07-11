@@ -5,8 +5,12 @@ This directory is organized to avoid conflicting plans during implementation.
 ## Read First
 
 - [IMPLEMENTATION_MASTER_PLAN.md](./IMPLEMENTATION_MASTER_PLAN.md)
+- [PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md)
 
 This is the authoritative implementation source of truth. If any reference document disagrees with it, follow the master plan.
+The Phase 3 detailed plan is incorporated by reference from the master plan and
+defines its proposed promises, schemas, rules, failure inventory, proof strategy,
+and Chapters 22–25.
 
 ## Companion Docs
 

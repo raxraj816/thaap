@@ -306,6 +306,13 @@ Do not build training rows by reading current customer/payment state.
 
 ### 7.1 Rule DSL
 
+The constrained JSON DSL is a Phase 4 policy-authoring target, not the Phase 3
+execution boundary. Phase 3 first ships only the application-owned
+`LONG_GTE` and `CURRENCY_AMOUNT_GTE` predicate shapes frozen in
+`docs/PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md`. This keeps the first active
+ruleset reviewable and avoids introducing a parser/authoring boundary before
+decision lineage and action semantics are proven.
+
 Use constrained JSON, not arbitrary code.
 
 Example:
@@ -390,7 +397,7 @@ No rule becomes active without validation, simulation, and approval.
 
 ### 7.4 Initial Rules
 
-Seed:
+The broader target catalogue is:
 
 - `ALLOW` low-risk low-amount payment
 - `BLOCK` blocked test card
@@ -401,6 +408,11 @@ Seed:
 - `BLOCK` card-testing pattern with many low-amount attempts
 - `REVIEW` new customer, high amount, mismatched shipping/card geography
 - `REQUEST_3DS` elevated risk above merchant policy threshold
+
+Phase 3 seeds only the three immutable `rules_v1` policies defined in the
+detailed plan: USD extreme amount block, repeated-attempt review, and USD
+elevated-amount step-up. Velocity, geography mismatch, card testing, mutable
+merchant thresholds, and rule approval remain owned by Phase 4.
 
 ## 8. Card-Testing And Enumeration Incidents
 
