@@ -818,6 +818,23 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void disabledExecutionStillFailsClosedWhenAdministrationNeedsUnavailableKey() {
+        WebhookEndpointRepository endpointRepository = mock(WebhookEndpointRepository.class);
+        Instant validationTime = Instant.parse("2026-06-28T10:00:00Z");
+        when(endpointRepository.findRequiredSecretKeyVersions(validationTime))
+                .thenReturn(java.util.List.of("retired-replay-v0"));
+        WebhookExecutionConfiguration configuration = new WebhookExecutionConfiguration(
+                false, new WebhookSecretCipher(ENCODED_KEY, "current-v1", new SecureRandom()),
+                new WebhookTargetPolicy(true, Set.of()), endpointRepository,
+                Clock.fixed(validationTime, ZoneOffset.UTC),
+                Duration.ofSeconds(30), Duration.ofSeconds(2), Duration.ofSeconds(5));
+
+        assertThatThrownBy(configuration::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("retired-replay-v0");
+    }
+
+    @Test
     void versionedKeyringDecryptsAndLazilyReencryptsWithCurrentKey() {
         String nextEncodedKey = Base64.getEncoder().encodeToString(
                 "next-webhook-key-32-bytes-123456".getBytes(java.nio.charset.StandardCharsets.UTF_8));

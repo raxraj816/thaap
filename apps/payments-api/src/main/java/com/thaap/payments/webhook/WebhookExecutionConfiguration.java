@@ -53,6 +53,16 @@ public class WebhookExecutionConfiguration {
 
     @PostConstruct
     void validate() {
+        if (endpointRepository != null) {
+            for (String persistedVersion : endpointRepository.findRequiredSecretKeyVersions(
+                    clock.instant())) {
+                if (!secretCipher.canDecryptKeyVersion(persistedVersion)) {
+                    throw new IllegalStateException(
+                            "Webhook administration or execution cannot decrypt required persisted key version "
+                                    + persistedVersion);
+                }
+            }
+        }
         if (!executionEnabled) {
             return;
         }
@@ -68,16 +78,6 @@ public class WebhookExecutionConfiguration {
         if (leaseDuration.compareTo(maximumAttemptDuration) <= 0) {
             throw new IllegalStateException(
                     "Webhook lease duration must exceed connect timeout plus request timeout");
-        }
-        if (endpointRepository != null) {
-            for (String persistedVersion : endpointRepository.findRequiredSecretKeyVersions(
-                    clock.instant())) {
-                if (!secretCipher.canDecryptKeyVersion(persistedVersion)) {
-                    throw new IllegalStateException(
-                            "Webhook execution cannot decrypt required persisted key version "
-                                    + persistedVersion);
-                }
-            }
         }
     }
 }
