@@ -3,10 +3,10 @@
 - Parent chapter: 21
 - Review provenance: RETROACTIVE_RECOVERY
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX_BEFORE_ER-0041_FIX
-- Product implementation checkpoint: PENDING_COMMIT
-- Independent implementation review: PENDING
+- Product implementation checkpoint: 54862fb
+- Independent implementation review: PASS
 - Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: REOPENED
+- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
 - Escaped findings: ER-0037, ER-0041
 
 ## Frozen promise
@@ -25,7 +25,7 @@ held over network I/O.
 | Claim binds G1; rotation already made G1 previous | Worker signs | `< previous expiry` | Signature uses G1 and verifies | Fixed-clock before-expiry contract |
 | Claim binds previous G1 | Worker reaches generation check | `= previous expiry` | No signer and no transport call; stale-generation recovery path owns disposition | Fixed-clock exact-expiry contract |
 | Claim binds previous G1 | Worker reaches generation check | `> previous expiry` | No signer and no transport call | Fixed-clock after-expiry contract |
-| Claim binds previous G1; worker computes timestamp | Rotation transaction holds endpoint lock until after G1 expiry | timestamp `< expiry`, lock acquisition/use `>= expiry` | Must reject G1 using time captured after lock acquisition immediately before HMAC | **Missing before ER-0041 fix:** forced lock wait crossing expiry |
+| Claim binds previous G1; worker supplies preparation lower bound | Rotation transaction holds endpoint lock until after G1 expiry | lower bound `< expiry`, lock acquisition/use `>= expiry` | Reject G1 using time captured after lock acquisition immediately before HMAC | `previousGenerationWaitingForEndpointLockIsRejectedAtActualUseExpiry` |
 | Claim binds current G1 | Rotation commits G2 before worker obtains endpoint lock | any | G1 is accepted only if still previous and exact use is before expiry; otherwise stale path | PostgreSQL rotation-first partitions with fixed clock |
 | Endpoint uses old KEK for current G1 | First delivery signs | 0 | Same raw G1 signs; ciphertext lazily re-encrypts to current KEK in the locked transaction | Ciphertext-version and signature-equivalence contract |
 | Ciphertext/AAD is invalid | Worker attempts signing | 0 | No HMAC, no HTTP, terminal secret-integrity/configuration evidence | Cipher tamper and wrong-tenant AAD tests |
@@ -50,7 +50,14 @@ creates a different generation.
 ## Primary deterministic proof
 
 - `rotationWaitsUntilCurrentGenerationSignatureIsCryptographicallyUsed`
-- Required new proof: previous-generation worker waits on the endpoint lock
-  across exact expiry and is rejected before signer invocation.
+- `previousGenerationWaitingForEndpointLockIsRejectedAtActualUseExpiry`
 
 Aggregate suite totals are regression context only.
+
+## Independent review result
+
+Both lock orderings were forced in PostgreSQL. Rotation waits behind a signer
+already using current G1; a previous-G1 signer waiting behind the endpoint lock
+captures time only after acquisition and is rejected at exact expiry without
+invoking HMAC. The lock ends before transport. No blocking authorization/use
+partition remains.

@@ -3,10 +3,10 @@
 - Parent chapter: 21
 - Review provenance: RETROACTIVE_RECOVERY
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX
-- Product implementation checkpoint: PENDING_COMMIT
-- Independent implementation review: PENDING
+- Product implementation checkpoint: 2af39af
+- Independent implementation review: PASS
 - Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: NOT_READY
+- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
 - Escaped findings: ER-0040
 
 ## Frozen promise
@@ -56,3 +56,11 @@ epoch.
 - `expiredWebhookCreationKeyStartsNewEpochWithoutPepperRotation`
 
 Aggregate suite totals are regression context only.
+
+## Independent review result
+
+The PostgreSQL proof blocks the first owner before its endpoint insert, advances
+past lease expiry, and observes the contender waiting on the reservation row.
+The owner completes one endpoint graph and the contender replays it. Separate
+reclaim, stale-token, rollback, URL-uniqueness, tenant, and expired-epoch
+partitions match the table. No blocking fencing issue remains.
