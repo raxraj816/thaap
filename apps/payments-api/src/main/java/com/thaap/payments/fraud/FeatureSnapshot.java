@@ -10,8 +10,11 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import com.thaap.payments.tenant.TrafficOrigin;
 
@@ -102,7 +105,7 @@ public class FeatureSnapshot {
         this.fraudDecisionId = fraudDecisionId;
         this.paymentAttemptId = paymentAttemptId;
         this.featureVersion = FEATURES_V1;
-        this.features = Map.copyOf(features);
+        this.features = immutableLexicalMap(features);
         this.computedAt = computedAt;
         this.oldestFeatureTimestamp = oldestFeatureTimestamp;
         this.maxFeatureAgeMs = maxFeatureAgeMs;
@@ -134,7 +137,7 @@ public class FeatureSnapshot {
     }
 
     public Map<String, Object> getFeatures() {
-        return Map.copyOf(features);
+        return immutableLexicalMap(features);
     }
 
     public Instant getComputedAt() {
@@ -167,5 +170,9 @@ public class FeatureSnapshot {
 
     public TrafficOrigin getTrafficOrigin() {
         return trafficOrigin;
+    }
+
+    private static Map<String, Object> immutableLexicalMap(Map<String, Object> source) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(new TreeMap<>(source)));
     }
 }

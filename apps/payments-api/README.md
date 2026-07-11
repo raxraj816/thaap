@@ -122,6 +122,7 @@ Implemented tenant-scoped endpoints:
 - `GET /webhook_deliveries/{id}`
 - `GET /webhook_deliveries/{id}/attempts`
 - `GET /fraud/decisions`
+- `GET /fraud/decisions/{id}`
 - `GET /rules`
 - `GET /reviews`
 
@@ -409,9 +410,17 @@ The Chapter 13 confirm path:
 - persists a durable `FraudDecision` with action, risk score, risk level,
   latency, ruleset version, reason codes, feature freshness status, and
   decision timestamps
-- persists an immutable `FeatureSnapshot` with `features_v1`, safe
-  decision-time features, computed time, oldest feature timestamp, max feature
-  age, freshness status, and stale/missing feature names
+- materializes the exact seven Chapter 22 V1 features through immutable
+  `FeatureDefinition` rows and typed, point-in-time `FeatureValue` rows
+- constructs one exact, immutable `DecisionFeatureContext` from those values;
+  this safe context is the fraud engine's only input and is also the source of
+  the persisted snapshot, so BIN, last4, IDs, metadata, and other unrecorded
+  facts cannot influence a decision
+- persists an immutable lexical `FeatureSnapshot` with `features_v1`, computed
+  time, oldest feature timestamp, max feature age, freshness status, and
+  stale/missing feature names
+- explicitly flushes the complete decision/snapshot/value lineage before any
+  processor call while retaining rollback in the confirm transaction
 - attaches the `fraudDecisionId` to the PaymentAttempt
 - moves the PaymentAttempt from `CREATED` to `READY_FOR_PROCESSOR`
 - moves the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`
@@ -441,7 +450,7 @@ sequences. Audit actor identity stores `actor_type=MERCHANT_API_KEY` and
 `actor_id` as the API-key prefix, while `merchant_id` remains the tenant
 boundary.
 
-The feature snapshot storage guard defaults to `16384` serialized JSON bytes
+The feature snapshot storage guard defaults to `16384` serialized UTF-8 bytes
 and can be configured with:
 
 ```yaml
@@ -455,8 +464,23 @@ Actuator metrics include:
 
 - `thaap.audit.logs.created`
 - `thaap.audit.logs.failed`
-- `thaap.feature.snapshot.too_large`
-- `thaap.feature.snapshot.serialization_errors`
+- `fraud_feature_freshness_total{status,traffic_origin}`
+- `fraud_feature_materialization_seconds{outcome,traffic_origin}`
+- `fraud_decision_failures_total{stage,cause,feature_code}`
+
+Metric dimensions are bounded catalogue/stage enums. They never include a
+merchant/resource identifier, feature value, card field, PII, credential, or
+idempotency material. V18 adds the typed schema and seven definitions. V19
+rejects definition insertion/mutation/deletion and historical decision,
+snapshot, or value updates on both H2 and PostgreSQL.
+
+The V18 definition/value foreign key binds definition ID, code, version, and
+declared value type. PostgreSQL therefore rejects every value whose declared
+type disagrees with its immutable definition even when its populated typed
+column is otherwise structurally valid. A real confirm-path PostgreSQL test
+also forces a lineage constraint failure at the explicit flush and proves zero
+processor calls, total rollback, reservation release, and one successful
+same-key retry.
 
 Audit created/failed counters are transaction-completion counters: an audit row
 counts as created only after commit, and counts as failed if it was registered
@@ -682,8 +706,9 @@ operational rollout:
 - add heavyweight foreign keys with `NOT VALID`, then validate them in a
   follow-up migration
 - watch Flyway logs plus `thaap.audit.logs.failed`,
-  `thaap.audit.logs.created`, `thaap.feature.snapshot.too_large`, and
-  `thaap.feature.snapshot.serialization_errors`
+  `thaap.audit.logs.created`, `fraud_feature_freshness_total`,
+  `fraud_feature_materialization_seconds`, and
+  `fraud_decision_failures_total`
 
 V6 and V7 update legacy `payment_intents` rows, while V6 also adds supporting
 unique constraints to `payment_attempts` and `authorizations`. In a real

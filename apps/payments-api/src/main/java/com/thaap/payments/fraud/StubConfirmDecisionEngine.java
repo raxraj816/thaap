@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 public class StubConfirmDecisionEngine implements ConfirmDecisionEngine {
 
     @Override
-    public ConfirmDecision decide(ConfirmDecisionRequest request) {
+    public ConfirmDecision decide(DecisionFeatureContext featureContext) {
         return new ConfirmDecision(FraudDecisionAction.ALLOW, BigDecimal.ZERO, FraudRiskLevel.LOW, "rules_stub_v1",
                 null, List.of(FraudDecisionReasonCode.RULES_NOT_ENABLED));
     }

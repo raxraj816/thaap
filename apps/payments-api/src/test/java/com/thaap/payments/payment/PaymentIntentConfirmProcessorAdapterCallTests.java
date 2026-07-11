@@ -1,5 +1,6 @@
 package com.thaap.payments.payment;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -10,6 +11,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -18,7 +20,10 @@ import com.thaap.payments.authorization.ThreeDsResult;
 import com.thaap.payments.authorization.VerificationResult;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
-import com.thaap.payments.fraud.ConfirmDecisionRequest;
+import com.thaap.payments.fraud.DecisionFeatureContext;
+import com.thaap.payments.fraud.FeatureMapConverter;
+import com.thaap.payments.fraud.FeatureValue;
+import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionReasonCode;
 import com.thaap.payments.fraud.FraudRiskLevel;
@@ -27,6 +32,9 @@ import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.support.DatabaseCleaner;
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -69,6 +78,9 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
     @Autowired
     private DatabaseCleaner databaseCleaner;
 
+    @Autowired
+    private FeatureValueRepository featureValueRepository;
+
     @MockitoBean
     private ProcessorAdapter processorAdapter;
 
@@ -82,7 +94,7 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
                 .build();
         databaseCleaner.clean();
         reset(processorAdapter, confirmDecisionEngine);
-        when(confirmDecisionEngine.decide(any(ConfirmDecisionRequest.class)))
+        when(confirmDecisionEngine.decide(any(DecisionFeatureContext.class)))
                 .thenReturn(new ConfirmDecision(FraudDecisionAction.ALLOW, BigDecimal.ZERO, FraudRiskLevel.LOW,
                         "rules_stub_v1", null,
                         java.util.List.of(FraudDecisionReasonCode.RULES_NOT_ENABLED)));
@@ -100,22 +112,41 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-replay-proof");
         UUID paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-replay-proof", 1200);
 
-        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-replay-proof");
+        JsonNode first = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-replay-proof");
         confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-replay-proof");
 
         verify(processorAdapter, times(1)).authorize(any(ProcessorAuthorizationRequest.class));
-        org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isEqualTo(3);
+        ArgumentCaptor<DecisionFeatureContext> featureContextCaptor =
+                ArgumentCaptor.forClass(DecisionFeatureContext.class);
+        verify(confirmDecisionEngine, times(1)).decide(featureContextCaptor.capture());
+        UUID paymentAttemptId = UUID.fromString(first.get("id").asText());
+        DecisionFeatureContext engineContext = featureContextCaptor.getValue();
+        String featuresJson = jdbcTemplate.queryForObject("""
+                SELECT features_json FROM feature_snapshots WHERE payment_attempt_id = ?
+                """, String.class, paymentAttemptId);
+        Map<String, Object> persistedSnapshot = new FeatureMapConverter().convertToEntityAttribute(featuresJson);
+        List<FeatureValue> persistedValues = featureValueRepository
+                .findByMerchantIdAndPaymentAttemptIdOrderByFeatureCodeAsc(merchant.id(), paymentAttemptId);
+        Map<String, Object> typedValues = new LinkedHashMap<>();
+        for (FeatureValue featureValue : persistedValues) {
+            typedValues.put(featureValue.getFeatureCode(), featureValue.typedValue());
+        }
+        assertThat(engineContext.features()).isEqualTo(persistedSnapshot).isEqualTo(typedValues);
+        assertThat(engineContext.features().toString()).doesNotContain(
+                "424242", "card_bin", "card_last4", "payment_intent_id", "payment_attempt_id",
+                "payment_method_id", "idempotency");
+        assertThat(countRows("payment_attempts")).isEqualTo(1);
+        assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        assertThat(countRows("feature_snapshots")).isEqualTo(1);
+        assertThat(countRows("authorizations")).isEqualTo(1);
+        assertThat(countRows("audit_logs")).isEqualTo(3);
     }
 
     @ParameterizedTest
     @MethodSource("nonAllowActions")
     void nonAllowFraudDecisionDoesNotCallProcessorAdapterOrPersistAuthorization(FraudDecisionAction action)
             throws Exception {
-        when(confirmDecisionEngine.decide(any(ConfirmDecisionRequest.class)))
+        when(confirmDecisionEngine.decide(any(DecisionFeatureContext.class)))
                 .thenReturn(new ConfirmDecision(action, BigDecimal.ZERO, FraudRiskLevel.LOW, "rules_stub_v1", null,
                         java.util.List.of(FraudDecisionReasonCode.RULES_NOT_ENABLED)));
         MerchantAccess merchant = createMerchant("merchant-a");
@@ -232,9 +263,9 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         return UUID.fromString(objectMapper.readTree(response).get("id").asText());
     }
 
-    private void confirmPaymentIntent(MerchantAccess merchant, UUID paymentIntentId, UUID paymentMethodId,
+    private JsonNode confirmPaymentIntent(MerchantAccess merchant, UUID paymentIntentId, UUID paymentMethodId,
             String idempotencyKey) throws Exception {
-        mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
+        String response = mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
                         .header(API_KEY, merchant.apiKey())
                         .header(IDEMPOTENCY_KEY, idempotencyKey)
                         .contentType(APPLICATION_JSON)
@@ -243,7 +274,9 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
                                   "paymentMethodId": "%s"
                                 }
                                 """.formatted(paymentMethodId)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response);
     }
 
     private void confirmPaymentIntentExpectingConflict(MerchantAccess merchant, UUID paymentIntentId,

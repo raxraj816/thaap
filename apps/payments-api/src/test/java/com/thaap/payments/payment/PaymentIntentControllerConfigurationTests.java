@@ -4,19 +4,10 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
-import com.thaap.payments.audit.AuditLogService;
-import com.thaap.payments.authorization.AuthorizationRepository;
-import com.thaap.payments.authorization.AuthorizationVoidRepository;
-import com.thaap.payments.customer.CustomerRepository;
-import com.thaap.payments.fraud.ConfirmDecisionEngine;
-import com.thaap.payments.fraud.FeatureSnapshotRepository;
-import com.thaap.payments.fraud.FraudDecisionRepository;
-import com.thaap.payments.idempotency.IdempotencyService;
-import com.thaap.payments.ledger.LedgerService;
-import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
-import com.thaap.payments.paymentmethod.PaymentMethodRepository;
-import com.thaap.payments.processor.ProcessorAdapter;
-import com.thaap.payments.webhook.WebhookDeliveryService;
+import com.thaap.payments.fraud.FeatureCatalogueValidator;
+import com.thaap.payments.fraud.FeatureDefinitionRepository;
+import com.thaap.payments.fraud.FeatureMaterializationMetrics;
+import com.thaap.payments.fraud.FeatureMaterializer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -37,23 +28,10 @@ class PaymentIntentControllerConfigurationTests {
         assertThatCode(() -> newController(1)).doesNotThrowAnyException();
     }
 
-    private PaymentIntentController newController(int maxFeatureSnapshotJsonBytes) {
-        return new PaymentIntentController(
-                mock(PaymentIntentRepository.class),
-                mock(CustomerRepository.class),
-                mock(PaymentMethodRepository.class),
-                mock(PaymentAttemptRepository.class),
-                mock(IdempotencyService.class),
-                mock(WebhookDeliveryService.class),
-                mock(ConfirmDecisionEngine.class),
-                mock(ProcessorAdapter.class),
-                mock(AuthorizationRepository.class),
-                mock(AuthorizationVoidRepository.class),
-                mock(FraudDecisionRepository.class),
-                mock(FeatureSnapshotRepository.class),
-                mock(AuditLogService.class),
-                mock(LedgerService.class),
-                new SimpleMeterRegistry(),
-                maxFeatureSnapshotJsonBytes);
+    private FeatureMaterializer newController(int maxFeatureSnapshotJsonBytes) {
+        FeatureDefinitionRepository repository = mock(FeatureDefinitionRepository.class);
+        FeatureCatalogueValidator validator = new FeatureCatalogueValidator(repository);
+        return new FeatureMaterializer(repository, validator,
+                new FeatureMaterializationMetrics(new SimpleMeterRegistry()), maxFeatureSnapshotJsonBytes);
     }
 }

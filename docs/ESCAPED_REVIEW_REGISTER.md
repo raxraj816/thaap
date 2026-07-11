@@ -721,3 +721,54 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Every retry/error transition table must cross each failure class with first, intermediate, and final retry positions and state whether internal pre-send failures consume the merchant-visible send budget.
 - Primary DRI: Payments Core
 - Last reviewed: 2026-07-11
+
+## ER-0043
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 22
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-12
+- Escaped gate: Post-closure Senior Staff feature-type lineage review
+- Invariant: Every immutable FeatureValue must declare the same value type as its referenced immutable FeatureDefinition.
+- Finding: The composite definition foreign key bound definition ID, code, and version but omitted `value_type`, so direct PostgreSQL writes could attach a LONG value to a STRING definition and make the corrupt row immutable.
+- Why prior review missed it: Database tests crossed definition ID with feature code and crossed declared type with populated columns, but never crossed a valid definition triple with each incompatible declared value type.
+- Resolution evidence: V18 and the JPA mapping now make `(definition ID, code, version, value type)` one identity. `databaseBindsEveryDeclaredValueTypeToTheReferencedDefinitionType` crosses every seeded definition with LONG, STRING, BOOLEAN, and DECIMAL, accepts only its required type, and rejects all incompatible types on PostgreSQL while the full 301-test backend suite passes without skips.
+- Process correction: Composite lineage reviews must compare every copied semantic discriminator with the referenced source row; typed-column shape alone cannot certify definition/type agreement.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-12
+
+## ER-0044
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 22
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-12
+- Escaped gate: Post-closure Senior Staff decision-input review
+- Invariant: The immutable FeatureSnapshot and typed FeatureValues must be the exact governed values available to the fraud decision engine.
+- Finding: Confirm materialized the governed seven-feature set but passed the engine a separately reconstructed request containing BIN, last4, and resource IDs absent from the snapshot while omitting the governed traffic-origin feature.
+- Why prior review missed it: Tests reconciled materialized rows with the snapshot and separately verified allow-only engine behavior, but never asserted object-level equality between the engine input and persisted decision evidence.
+- Resolution evidence: `DecisionFeatureContext` admits only the exact seven-code typed catalogue and is now the sole `ConfirmDecisionEngine` input. `MaterializedFeatureSet` rejects context/value disagreement. Unit partitions reject missing, extra, wrong-type, and mutation attempts, while `PaymentIntentConfirmProcessorAdapterCallTests` captures the real engine argument and proves exact equality with the persisted snapshot and seven typed rows plus absence of prohibited fields.
+- Process correction: Decision-lineage review must trace one feature object from materialization through evaluation and persistence; equal-looking reconstructions are not acceptable evidence.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-12
+
+## ER-0045
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 22
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-12
+- Escaped gate: Post-closure Senior Staff transaction-boundary review
+- Invariant: A real SQL failure while flushing decision lineage occurs before processor authorization and rolls back attempt, decision, snapshot, values, and idempotency ownership so one coherent retry can succeed.
+- Finding: Rollback tests threw from mocked repository `save` calls, PostgreSQL constraint tests ran outside confirm, and the forced interleaving proved that flush blocks the processor but never proved the failure-and-retry path at PostgreSQL.
+- Why prior review missed it: The review combined mock position coverage, isolated database constraints, and a successful blocked flush into one transaction claim without forcing a constraint failure through the real confirm transaction.
+- Resolution evidence: `realFeatureFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` corrupts one otherwise valid materialized row so PostgreSQL rejects it at the explicit `featureValueRepository.flush()`. It proves zero processor calls; zero attempt, decision, snapshot, value, and authorization rows; deletion of the failed confirm reservation; unchanged intent state; and one successful same-key retry with one complete lineage and completed replay record.
+- Process correction: Transaction proof must inject failure at the actual deferred SQL boundary; a mock before SQL and a successful database wait cannot be composed into failure evidence.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-12

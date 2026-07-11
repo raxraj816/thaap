@@ -1,6 +1,5 @@
 package com.thaap.payments.payment;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
@@ -11,13 +10,16 @@ import com.thaap.payments.authorization.AuthorizationVoidRepository;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
-import com.thaap.payments.fraud.ConfirmDecisionRequest;
-import com.thaap.payments.fraud.FeatureFreshnessStatus;
+import com.thaap.payments.fraud.FeatureMaterializationMetrics;
+import com.thaap.payments.fraud.FeatureMaterializer;
 import com.thaap.payments.fraud.FeatureSnapshot;
 import com.thaap.payments.fraud.FeatureSnapshotRepository;
+import com.thaap.payments.fraud.FeatureValue;
+import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionRepository;
+import com.thaap.payments.fraud.MaterializedFeatureSet;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerService;
@@ -32,8 +34,6 @@ import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -42,7 +42,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -51,7 +50,6 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -71,7 +69,6 @@ public class PaymentIntentController {
 
     public static final long MAX_PAYMENT_INTENT_AMOUNT = 100_000_000L;
     static final int DEFAULT_MAX_FEATURE_SNAPSHOT_JSON_BYTES = 16_384;
-    private static final ObjectMapper FEATURE_SNAPSHOT_OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private final PaymentIntentRepository paymentIntentRepository;
     private final CustomerRepository customerRepository;
@@ -85,11 +82,11 @@ public class PaymentIntentController {
     private final AuthorizationVoidRepository authorizationVoidRepository;
     private final FraudDecisionRepository fraudDecisionRepository;
     private final FeatureSnapshotRepository featureSnapshotRepository;
+    private final FeatureValueRepository featureValueRepository;
+    private final FeatureMaterializer featureMaterializer;
+    private final FeatureMaterializationMetrics featureMaterializationMetrics;
     private final AuditLogService auditLogService;
     private final LedgerService ledgerService;
-    private final int maxFeatureSnapshotJsonBytes;
-    private final Counter featureSnapshotTooLargeCounter;
-    private final Counter featureSnapshotSerializationErrorCounter;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
@@ -97,11 +94,9 @@ public class PaymentIntentController {
             ConfirmDecisionEngine confirmDecisionEngine, ProcessorAdapter processorAdapter,
             AuthorizationRepository authorizationRepository, AuthorizationVoidRepository authorizationVoidRepository,
             FraudDecisionRepository fraudDecisionRepository, FeatureSnapshotRepository featureSnapshotRepository,
-            AuditLogService auditLogService, LedgerService ledgerService, MeterRegistry meterRegistry,
-            @Value("${thaap.fraud.feature-snapshot.max-json-bytes:16384}") int maxFeatureSnapshotJsonBytes) {
-        if (maxFeatureSnapshotJsonBytes <= 0) {
-            throw new IllegalArgumentException("thaap.fraud.feature-snapshot.max-json-bytes must be positive");
-        }
+            FeatureValueRepository featureValueRepository, FeatureMaterializer featureMaterializer,
+            FeatureMaterializationMetrics featureMaterializationMetrics,
+            AuditLogService auditLogService, LedgerService ledgerService) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -114,12 +109,11 @@ public class PaymentIntentController {
         this.authorizationVoidRepository = authorizationVoidRepository;
         this.fraudDecisionRepository = fraudDecisionRepository;
         this.featureSnapshotRepository = featureSnapshotRepository;
+        this.featureValueRepository = featureValueRepository;
+        this.featureMaterializer = featureMaterializer;
+        this.featureMaterializationMetrics = featureMaterializationMetrics;
         this.auditLogService = auditLogService;
         this.ledgerService = ledgerService;
-        this.maxFeatureSnapshotJsonBytes = maxFeatureSnapshotJsonBytes;
-        this.featureSnapshotTooLargeCounter = meterRegistry.counter("thaap.feature.snapshot.too_large");
-        this.featureSnapshotSerializationErrorCounter = meterRegistry.counter(
-                "thaap.feature.snapshot.serialization_errors");
     }
 
     @PostMapping
@@ -179,16 +173,13 @@ public class PaymentIntentController {
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
         PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
                 paymentMethod.getId(), idempotencyKey, attemptNumber, paymentIntent.getTrafficOrigin()));
-        FeatureSnapshotDraft featureSnapshotDraft = buildFeatureSnapshot(paymentIntent, paymentAttempt, paymentMethod);
         Instant decisionStartedAt = Instant.now();
-        ConfirmDecision decision = confirmDecisionEngine.decide(new ConfirmDecisionRequest(merchantContext.merchantId(),
-                paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(), paymentIntent.getAmount(),
-                paymentIntent.getCurrency(), paymentIntent.getCaptureMethod(), paymentAttempt.getAttemptNumber(),
-                paymentMethod.getCardBin(), paymentMethod.getCardLast4(), paymentMethod.getCardCountry(),
-                paymentMethod.getCardFunding().name()));
+        MaterializedFeatureSet materializedFeatures = featureMaterializer.materialize(
+                paymentIntent, paymentAttempt, paymentMethod, decisionStartedAt);
+        ConfirmDecision decision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
         Instant decisionCompletedAt = Instant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
-        FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, featureSnapshotDraft,
+        FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, materializedFeatures,
                 decision, latencyMs, decisionStartedAt, decisionCompletedAt);
         paymentAttempt.attachFraudDecision(fraudDecision.getId());
         applyConfirmDecision(paymentIntent, paymentAttempt, decision);
@@ -211,60 +202,31 @@ public class PaymentIntentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
     }
 
-    private FeatureSnapshotDraft buildFeatureSnapshot(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
-            PaymentMethod paymentMethod) {
-        Instant computedAt = Instant.now();
-        Map<String, Object> features = new LinkedHashMap<>();
-        features.put("payment_amount", paymentIntent.getAmount());
-        features.put("payment_currency", paymentIntent.getCurrency());
-        features.put("capture_method", paymentIntent.getCaptureMethod().name());
-        features.put("attempt_number", paymentAttempt.getAttemptNumber());
-        features.put("card_bin", paymentMethod.getCardBin());
-        features.put("card_last4", paymentMethod.getCardLast4());
-        features.put("card_country", paymentMethod.getCardCountry());
-        features.put("card_funding", paymentMethod.getCardFunding().name());
-        features.put("payment_intent_id", paymentIntent.getId().toString());
-        features.put("payment_attempt_id", paymentAttempt.getId().toString());
-        features.put("payment_method_id", paymentMethod.getId().toString());
-        features.put("traffic_origin", paymentIntent.getTrafficOrigin().name());
-        requireFeatureSnapshotWithinStorageGuard(features);
-        long maxFeatureAgeMs = 0L;
-        return new FeatureSnapshotDraft(features, computedAt, computedAt, maxFeatureAgeMs,
-                FeatureFreshnessStatus.FRESH, List.of(), List.of());
-    }
-
     private FraudDecision persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
-            FeatureSnapshotDraft featureSnapshotDraft, ConfirmDecision decision, long latencyMs,
+            MaterializedFeatureSet materializedFeatures, ConfirmDecision decision, long latencyMs,
             Instant decisionStartedAt, Instant decisionCompletedAt) {
         // IdempotencyService keeps lineage, attempt mutation, authorization, and completion in one transaction.
         // A later failure rolls these writes back together instead of leaving partial confirm evidence.
-        FraudDecision fraudDecision = fraudDecisionRepository.save(new FraudDecision(merchantContext.merchantId(),
-                paymentAttempt.getId(), decision, latencyMs, decisionStartedAt, decisionCompletedAt,
-                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.maxFeatureAgeMs(),
-                paymentAttempt.getTrafficOrigin()));
-        featureSnapshotRepository.save(new FeatureSnapshot(merchantContext.merchantId(), fraudDecision.getId(),
-                paymentAttempt.getId(), featureSnapshotDraft.features(), featureSnapshotDraft.computedAt(),
-                featureSnapshotDraft.oldestFeatureTimestamp(), featureSnapshotDraft.maxFeatureAgeMs(),
-                featureSnapshotDraft.freshnessStatus(), featureSnapshotDraft.staleFeatureNames(),
-                featureSnapshotDraft.missingFeatureNames(), paymentAttempt.getTrafficOrigin()));
-        return fraudDecision;
-    }
-
-    private void requireFeatureSnapshotWithinStorageGuard(Map<String, Object> features) {
         try {
-            byte[] serialized = FEATURE_SNAPSHOT_OBJECT_MAPPER.writeValueAsString(features)
-                    .getBytes(StandardCharsets.UTF_8);
-            if (serialized.length > maxFeatureSnapshotJsonBytes) {
-                featureSnapshotTooLargeCounter.increment();
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "Feature snapshot exceeded safe storage limit");
+            FraudDecision fraudDecision = fraudDecisionRepository.save(new FraudDecision(merchantContext.merchantId(),
+                    paymentAttempt.getId(), decision, latencyMs, decisionStartedAt, decisionCompletedAt,
+                    materializedFeatures.freshnessStatus(), materializedFeatures.maxFeatureAgeMs(),
+                    paymentAttempt.getTrafficOrigin()));
+            featureSnapshotRepository.save(new FeatureSnapshot(merchantContext.merchantId(), fraudDecision.getId(),
+                    paymentAttempt.getId(), materializedFeatures.snapshot(), materializedFeatures.computedAt(),
+                    materializedFeatures.oldestFeatureTimestamp(), materializedFeatures.maxFeatureAgeMs(),
+                    materializedFeatures.freshnessStatus(), materializedFeatures.staleFeatureNames(),
+                    materializedFeatures.missingFeatureNames(), paymentAttempt.getTrafficOrigin()));
+            // Flush the complete local lineage before any processor call. The transaction remains
+            // uncommitted, so a downstream failure still rolls everything back atomically.
+            for (FeatureValue featureValue : materializedFeatures.values()) {
+                featureValueRepository.save(featureValue);
             }
-        } catch (ResponseStatusException exception) {
+            featureValueRepository.flush();
+            return fraudDecision;
+        } catch (RuntimeException exception) {
+            featureMaterializationMetrics.recordFailure("PERSISTENCE", "LINEAGE_WRITE_FAILED");
             throw exception;
-        } catch (Exception exception) {
-            featureSnapshotSerializationErrorCounter.increment();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Feature snapshot could not be serialized", exception);
         }
     }
 
@@ -529,11 +491,6 @@ public class PaymentIntentController {
     }
 
     private record EmptyMutationRequest() {
-    }
-
-    private record FeatureSnapshotDraft(Map<String, Object> features, Instant computedAt,
-            Instant oldestFeatureTimestamp, long maxFeatureAgeMs, FeatureFreshnessStatus freshnessStatus,
-            List<String> staleFeatureNames, List<String> missingFeatureNames) {
     }
 
     private enum CaptureTrigger {

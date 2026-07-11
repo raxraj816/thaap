@@ -263,7 +263,8 @@ When features change:
 
 ### 6.5 V1 Feature Store Abstraction
 
-Do not jump directly to Feast. Add a simple V1 abstraction first.
+Chapter 22 implements the first local feature-store abstraction rather than
+jumping directly to Feast.
 
 Tables:
 
@@ -271,7 +272,8 @@ Tables:
 - `FeatureValue`
 - `FeatureSnapshot`
 
-`FeatureDefinition` fields:
+`FeatureDefinition` is global, application-owned, seeded by migration, and
+database-immutable. Its fields are:
 
 - feature name
 - entity type
@@ -281,23 +283,35 @@ Tables:
 - description
 - created time
 
-`FeatureValue` fields:
+`FeatureValue` is immutable attempt-scoped evidence. Its fields are:
 
-- entity type
-- entity ID
-- feature name
-- value
-- feature timestamp
+- merchant and PaymentAttempt identity
+- definition ID plus copied feature code/version
+- one declared value type and exactly one populated LONG/STRING/BOOLEAN/DECIMAL column
+- observed timestamp
 - computed timestamp
-- feature version
+- trusted traffic origin
 
-`FeatureSnapshot` remains the immutable per-decision record linked to FraudDecision.
+Chapter 22 materializes exactly `payment.amount_minor`, `payment.currency`,
+`payment.capture_method`, `payment.attempt_number`, `card.country`,
+`card.funding`, and `traffic.origin`. It deliberately excludes PAN, CVV,
+fingerprint, BIN, last4, PII, resource IDs, credentials, free-form metadata,
+and descriptions. `FeatureSnapshot` remains the immutable lexical per-decision
+document; typed rows are the normalized offline lineage. Both commit together.
+
+`DecisionFeatureContext` is the single safe online evaluation boundary. It
+contains exactly those seven lexically ordered, type-checked values and no
+merchant, resource, BIN, last4, credential, or processor-only fields.
+`MaterializedFeatureSet` requires the context and typed FeatureValues to agree
+exactly before confirm can call `ConfirmDecisionEngine`; the same context then
+backs the persisted FeatureSnapshot. The engine cannot inspect a fact that is
+absent from the decision evidence.
 
 Point-in-time training rule:
 
 ```text
-For a PaymentAttempt at time T,
-training joins can only use FeatureValue rows where feature_timestamp <= T.
+For a PaymentAttempt decision starting at T,
+training joins can only use FeatureValue rows where observed_at <= T.
 ```
 
 Do not build training rows by reading current customer/payment state.

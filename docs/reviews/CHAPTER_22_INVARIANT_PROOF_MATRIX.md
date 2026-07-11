@@ -3,12 +3,12 @@
 - Chapter: Chapter 22 — Feature Contract And Point-In-Time Lineage
 - Matrix provenance: PRE_IMPLEMENTATION
 - Scope status: FROZEN
-- Review status: IN_PROGRESS
+- Review status: VERIFIED
 - Promise freeze: CONFIRMED
 - Failure inventory: COMPLETE
-- Traceability review: PENDING
-- Fresh hostile review: PENDING
-- Boundary family review: PENDING
+- Traceability review: PASS
+- Fresh hostile review: PASS
+- Boundary family review: PASS
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
 
@@ -17,133 +17,148 @@ failure families in
 `docs/PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md`. Planned test names are proof
 obligations, not claims that the tests already exist. Founder/domain review
 confirmed the freeze before production code or migration changes began.
+Implementation and focused proof were completed first; a later hostile pass
+then reopened deferred SQL flush behavior and immutable-row cleanup as full
+transaction and database-lifecycle families. Explicit pre-processor flush and
+constraint-aware test cleanup close those findings before verification.
+
+A post-closure Senior Staff review on 2026-07-12 reopened the matrix before
+repair implementation. ER-0043 found that the database definition foreign key
+did not bind `value_type`; ER-0044 found that the decision engine received an
+independently reconstructed input instead of the governed materialized feature
+set; and ER-0045 found that rollback proof stopped at mocked repository writes
+instead of a real PostgreSQL flush failure. The repair binds definition type in
+the composite foreign key, makes the exact materialized context the engine's
+only input, and forces a real flush failure through confirm. The complete
+affected type, decision-input, privacy, transaction, and retry families passed
+before this matrix returned to VERIFIED.
 
 ## C22-PAY-001
 
 - Lens: PAYMENT_FRAUD
 - Invariant: Replacing ad hoc snapshot construction with typed feature materialization does not change the allow-only confirm, processor, capture, cancel, refund, ledger, audit, or webhook behavior inherited by Chapter 22.
 - Failure sequence: Feature materialization changes a value or throws after a payment transition, causing a previously valid allow to block, duplicate authorization, omit automatic capture, or commit partial payment truth.
-- Implementation: Planned `FeatureMaterializer` runs inside the existing idempotent confirm transaction before the unchanged allow-only processor branch; existing payment lifecycle services remain the enforcement boundary.
-- Proof: Planned `Chapter22FeatureLineageContractTests.typedMaterializationPreservesEveryProcessorOutcomeAndCaptureMode`, existing Chapter 20 processor catalogue contracts, money lifecycle suites, and an allow-only public demo.
-- Adversarial evidence: Exercise all nine processor outcomes, automatic/manual capture, replay, retryable decline, and injected feature persistence failure; reconcile unchanged processor and money postconditions.
-- Status: PENDING
+- Implementation: `FeatureMaterializer` runs inside the existing idempotent confirm transaction before the unchanged allow-only `StubConfirmDecisionEngine` and processor branch; capture, cancel, refund, ledger, audit, and webhook services remain the enforcement boundaries.
+- Proof: `PaymentIntentConfirmContractTests`, `PaymentIntentConfirmProcessorAdapterCallTests`, the processor catalogue and money lifecycle suites, plus `scripts/demo-chapter-22-feature-lineage.py` prove unchanged outcomes and an allow-only public flow.
+- Adversarial evidence: The 298-test backend suite covers the processor catalogue, automatic/manual capture, replay, retryable declines, rollback, and downstream money behavior; the live demo reconciled `rules_stub_v1`, authorization, seven typed values, and exact replay.
+- Status: PASS
 
 ## C22-PAY-002
 
 - Lens: PAYMENT_FRAUD
 - Invariant: Every committed new PaymentAttempt owns exactly one FraudDecision, one FeatureSnapshot, and the complete V1 FeatureValue set before processor truth is created.
 - Failure sequence: A processor decline or exception commits without feature lineage, a retry duplicates lineage, or an allow reaches the processor before the complete feature set is durable in the transaction.
-- Implementation: Existing unique decision/snapshot constraints plus planned unique FeatureValue identity and ordered confirm orchestration enforce completeness.
-- Proof: Planned `everyCommittedAttemptHasOneCompleteFeatureLineageBeforeAuthorization` and rollback/replay contract tests.
-- Adversarial evidence: Fail each feature write position and the processor call boundary; assert zero partial rows on rollback and exact cardinality on retry.
-- Status: PENDING
+- Implementation: Existing unique decision/snapshot constraints, exact context/value reconciliation, V18 FeatureValue uniqueness, and `featureValueRepository.flush()` inside confirm force the complete seven-value lineage through SQL before processor authorization.
+- Proof: `PaymentIntentConfirmContractTests` asserts one decision, one snapshot, and seven exact values for committed outcomes and replay; `PaymentIntentConfirmFraudLineageRollbackTests` covers feature positions zero through six; the PostgreSQL concurrency suite forces both a blocked successful flush and a failing flush.
+- Adversarial evidence: Each injected feature-write failure rolls back attempt, decision, snapshot, values, and processor work; `realFeatureFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` proves a real constraint failure makes zero processor calls, removes all partial lineage and the failed reservation, and permits one same-key retry.
+- Status: PASS
 
 ## C22-TEN-001
 
 - Lens: TENANT_ISOLATION
 - Invariant: FeatureValue, FeatureSnapshot, FraudDecision, PaymentAttempt, and PaymentIntent lineage cannot cross merchant boundaries through API substitution, repository misuse, or direct database writes.
 - Failure sequence: Merchant A confirms with Merchant B's PaymentMethod or reads a decision ID, while a weakened lookup or non-composite foreign key attaches B's feature values to A's attempt.
-- Implementation: API-key-derived MerchantContext, owned resource lookups, merchant-scoped repositories, and same-tenant composite foreign keys enforce identity.
-- Proof: Planned `crossMerchantSubstitutionCreatesNoFeatureLineage`, tenant read contracts, and database constraint tests for every mismatched lineage pair.
-- Adversarial evidence: Substitute intent, method, attempt, decision, snapshot, and feature-value identifiers in both application and direct-SQL partitions; return not-found without side effects or existence leaks.
-- Status: PENDING
+- Implementation: API-key-derived `MerchantContext`, owned intent/method lookups, merchant-scoped decision reads, and V18 composite merchant/origin foreign keys enforce identity across the full lineage.
+- Proof: `MerchantTenantIsolationTests`, confirm substitution contracts, and `Chapter22FeatureLineageDatabaseContractTests` cover API and direct-SQL boundaries.
+- Adversarial evidence: Cross-merchant intent, method, attempt, decision, snapshot, FeatureValue, and traffic-origin substitutions either return not-found with no rows or fail a PostgreSQL constraint.
+- Status: PASS
 
 ## C22-SEC-001
 
 - Lens: SECURITY_PRIVACY
 - Invariant: The V1 feature surfaces never persist, log, audit, webhook, or return raw PAN, CVV, card fingerprint, BIN, last4, PII, credentials, idempotency material, free-form metadata, or descriptions.
 - Failure sequence: The materializer copies the current broad snapshot map or logs a failed serialized feature value, exposing prohibited card or merchant-controlled data.
-- Implementation: An allowlisted typed feature catalogue, safe API projection, audit/webhook allowlists, and log/metric restrictions enforce minimization.
-- Proof: Planned `featureCatalogueRejectsEveryProhibitedSource`, persistence/API/audit/webhook sensitive-data scans, and `AuditSanitizerTests` regression.
-- Adversarial evidence: Seed each prohibited exact value across input fields, force serialization and persistence failures, then scan database rows, responses, events, audit payloads, logs, and metrics.
-- Status: PENDING
+- Implementation: `FeatureCatalogue` fixes exactly seven safe codes; `DecisionFeatureContext` accepts only that exact typed catalogue; the decision engine interface receives no entity, BIN, last4, resource, credential, or metadata fields; responses expose only the lexical safe snapshot; metrics use bounded operational labels.
+- Proof: `DecisionFeatureContextTests`, `FeatureMaterializerTests`, `PaymentIntentConfirmProcessorAdapterCallTests`, tenant/API assertions, audit/webhook regressions, and source scans prove the allowlist and prohibited-surface absence.
+- Adversarial evidence: Missing, extra, wrong-type, and mutation attempts fail at context construction; engine input, snapshot, and typed rows reconcile exactly; seeded card and merchant-controlled material is absent from engine input, persistence, API, audit, webhook, and metric dimensions.
+- Status: PASS
 
 ## C22-SEC-002
 
 - Lens: SECURITY_PRIVACY
 - Invariant: Feature type and size validation fails before durable mutation and cannot be bypassed through malformed strings, Unicode, numeric overflow, or serializer representation differences.
 - Failure sequence: A value passes the Java type check but changes type/precision in stored JSON or exceeds the bounded snapshot only after partial feature rows are written.
-- Implementation: Definition-driven typed values, exact numeric range checks, lexical feature keys, bounded UTF-8 serialization, database typed-value constraints, and one transaction enforce representation safety.
-- Proof: Planned table-driven `rejectsEveryFeatureTypeAndSizeBoundaryPartition`, converter round-trip property tests, and real database boundary tests.
-- Adversarial evidence: Cover empty/max/over-max strings, Unicode byte expansion, long minima/maxima/overflow input representations, nulls, duplicate keys, unknown keys, and mismatched typed columns.
-- Status: PENDING
+- Implementation: `FeatureValue` validates exact Java types, nonempty 256-byte UTF-8 strings, LONG bounds, exact `NUMERIC(19,6)`, time order, and a single typed column; `FeatureMapConverter` preserves integral and decimal representation; V18 repeats storage constraints.
+- Proof: `FeatureValueBoundaryTests`, `FraudJsonConverterTests`, `FeatureCatalogueValidatorTests`, and PostgreSQL contract cases cover application, serialization, and storage boundaries.
+- Adversarial evidence: Empty, maximum, oversized, and multi-byte strings; long minima/maxima/wrong representations; decimal precision/scale; null/type mismatch; duplicate/unknown definitions; and zero/multiple typed columns are proven at their real boundary.
+- Status: PASS
 
 ## C22-CON-001
 
 - Lens: TRANSACTION_CONCURRENCY
 - Invariant: Decision, FeatureSnapshot, all FeatureValues, attempt mutation, processor/money truth, audit, webhook, and idempotency completion commit atomically or roll back together.
 - Failure sequence: FeatureValue N commits while N+1 fails, or authorization/capture commits while snapshot completion or idempotency response fails.
-- Implementation: The existing idempotency mutation transaction surrounds all planned lineage writes and downstream side effects; unique and foreign-key constraints provide defense in depth.
-- Proof: Planned `Chapter22FeatureLineageRollbackTests` injecting failure before, during, and after every new persistence boundary.
-- Adversarial evidence: Assert absence of every partial artifact, reclaim/retry of the original idempotency reservation, and one coherent result after retry.
-- Status: PENDING
+- Implementation: `IdempotencyService.execute` surrounds attempt, decision, snapshot, seven values, authorization, money, audit, webhook, and replay completion in one transaction; V18 constraints provide defense in depth.
+- Proof: `PaymentIntentConfirmFraudLineageRollbackTests` injects snapshot and every FeatureValue write-position failure; `Chapter22FeatureLineagePostgreSqlConcurrencyTests` forces a real constraint failure at `flush()`; existing processor, audit, capture, and webhook rollback suites cover later boundaries.
+- Adversarial evidence: The real PostgreSQL failure leaves zero attempt, decision, snapshot, value, authorization, or confirm reservation rows and zero processor calls; the identical key then succeeds once with one coherent lineage and completed replay record.
+- Status: PASS
 
 ## C22-CON-002
 
 - Lens: TRANSACTION_CONCURRENCY
 - Invariant: Concurrent confirms cannot create multiple attempts or divergent feature snapshots from one eligible PaymentIntent.
 - Failure sequence: Two distinct idempotency keys both pass eligibility, materialize at different times, and commit two attempts; or a same-key retry evaluates while the first owner is blocked in feature persistence.
-- Implementation: PaymentIntent `FOR UPDATE`, fenced idempotency ownership, attempt numbering, and unique lineage constraints serialize the conflict.
-- Proof: Planned `Chapter22FeatureLineagePostgreSqlConcurrencyTests` with forced distinct-key and same-key orderings plus PostgreSQL lock probes.
-- Adversarial evidence: Block after PaymentIntent lock and after the first FeatureValue write, prove the competing backend waits on the intended row, then assert one attempt and one internally consistent feature set.
-- Status: PENDING
+- Implementation: PaymentIntent `FOR UPDATE`, fenced idempotency ownership, attempt numbering, unique lineage constraints, and pre-processor lineage flush serialize competing confirms.
+- Proof: `Chapter22FeatureLineagePostgreSqlConcurrencyTests` uses database locks and PostgreSQL activity probes for same-key and distinct-key forced orderings.
+- Adversarial evidence: A first owner blocked at FeatureValue SQL has no authorization; a distinct key waits on the PaymentIntent and returns 409, while a same key waits on its idempotency row and replays the exact 201 response. Postconditions are one attempt, decision, snapshot, seven values, and authorization.
+- Status: PASS
 
 ## C22-DATA-001
 
 - Lens: DATA_ML_LINEAGE
 - Invariant: Every Phase 3 V1 feature has one immutable definition and one typed value whose definition, type, version, observed time, computed time, attempt, merchant, and traffic origin agree with its snapshot and decision.
 - Failure sequence: A renamed definition silently changes an old feature, a typed column disagrees with JSON, or origin/version is copied from a different resource.
-- Implementation: Immutable seeded definitions, typed-value database constraint, composite definition identity, unique per-attempt value identity, and materializer reconciliation enforce lineage.
-- Proof: Planned `definitionValueSnapshotAgreementIsExact`, migration seed tests, and direct database constraint tests.
-- Adversarial evidence: Attempt definition mutation, duplicate code/version, wrong type, multiple/nonexistent typed columns, mismatched origin, and snapshot/value disagreement.
-- Status: PENDING
+- Implementation: V18 makes `(definition ID, code, version, value type)` one foreign-key identity, retains typed-column and tenant/origin constraints, and permits one value per attempt/code/version; `MaterializedFeatureSet` rejects any engine-context/value disagreement; V19 rejects reference or lineage mutation.
+- Proof: `DecisionFeatureContextTests`, `FeatureMaterializerTests`, `PaymentIntentConfirmProcessorAdapterCallTests`, migration tests, and `Chapter22FeatureLineageDatabaseContractTests` reconcile definition, declared type, typed column, engine context, snapshot, and values.
+- Adversarial evidence: Every seeded definition accepts its required declared type and rejects each incompatible LONG/STRING/BOOLEAN/DECIMAL declaration at PostgreSQL; missing/extra/wrong-type engine contexts, context/value divergence, definition mutation, origin, tenant, typed-column ambiguity, and time inversion all fail.
+- Status: PASS
 
 ## C22-DATA-002
 
 - Lens: DATA_ML_LINEAGE
 - Invariant: A historical training join can use only FeatureValues observed at or before the decision start, and later payment or reference-data changes cannot rewrite the historical row.
 - Failure sequence: A value observed after decision time is inserted, or an offline query selects the latest current value and leaks future information into training.
-- Implementation: Immutable per-attempt FeatureValues, observed/computed timestamp checks, application comparison to decision start, and a canonical point-in-time repository query enforce temporal lineage.
-- Proof: Planned `pointInTimeJoinExcludesBeforeAtAfterDecisionPartitions` against PostgreSQL and immutability tests.
-- Adversarial evidence: Insert values one database precision tick before, exactly at, and one tick after decision start; include later entity mutation and verify the earlier row/query result is unchanged.
-- Status: PENDING
+- Implementation: Immutable per-attempt values, `observed_at <= computed_at`, application comparison to decision start, and `FeatureValueRepository.findPointInTimeForDecision` enforce temporal lineage.
+- Proof: `Chapter22FeatureLineageDatabaseContractTests` executes the canonical join against PostgreSQL with microsecond-precision before/at/after partitions and mutation rejection.
+- Adversarial evidence: Values one database precision tick before and exactly at decision start are included; the after partition is excluded, time inversion is rejected, and V19 prevents later update/delete rewriting history.
+- Status: PASS
 
 ## C22-API-001
 
 - Lens: API_PRODUCT
 - Invariant: Existing confirm and decision APIs remain backward compatible while decision detail exposes the exact V1 snapshot without internal definition IDs or prohibited values.
 - Failure sequence: A new field changes confirm replay bytes/status, old stub decisions fail to deserialize, or the detail endpoint leaks internal/sensitive fields.
-- Implementation: Existing PaymentAttempt response remains unchanged; decision detail retains current fields and snapshot shape; old rows require no backfill rewrite.
-- Proof: Planned API compatibility tests for old/new decisions, exact idempotent response replay, and OpenAPI/example reconciliation if present.
-- Adversarial evidence: Read legacy `rules_stub_v1` rows, new V1 rows, missing lineage, and cross-tenant IDs; compare response fields and sensitive-data absence.
-- Status: PENDING
+- Implementation: The PaymentAttempt response is unchanged; decision detail keeps its contract while the safe snapshot contains exact V1 lexical keys; V18 performs no fabricated value backfill for historical decisions.
+- Proof: `PaymentIntentConfirmContractTests` reads new typed and directly inserted historical `rules_stub_v1` decisions, verifies exact replay bytes/status, and checks absent typed backfill.
+- Adversarial evidence: New, historical, missing, cross-tenant, and replay partitions preserve status and shape, disclose no definition IDs, and expose none of the prohibited values.
+- Status: PASS
 
 ## C22-OBS-001
 
 - Lens: OBSERVABILITY
 - Invariant: Operators can distinguish materialization, validation, persistence, and freshness failures using bounded dimensions without feature values or merchant/resource identifiers in metrics.
 - Failure sequence: All failures collapse into a generic confirm error, or a metric/log label includes merchant ID, feature value, card data, or free-form exception text.
-- Implementation: Planned bounded counters/timers by stage, cause, feature code, freshness status, and traffic origin plus safe structured logs enforce diagnosability.
-- Proof: Planned `FeatureMaterializationMetricsTests` and log/metric sensitive-dimension scans.
-- Adversarial evidence: Force every failure stage and compare exact bounded signals while seeded secret/PII/card values remain absent.
-- Status: PENDING
+- Implementation: `FeatureMaterializationMetrics` emits freshness counters, latency timers, and failure counters using bounded status, origin, stage, cause, and catalogue-code labels; exception messages omit values.
+- Proof: `FeatureMaterializationMetricsTests` asserts exact names/tags and rejects merchant/resource/value/card/PII/idempotency dimensions; materializer tests cover success, stale, future, validation, and persistence stages.
+- Adversarial evidence: Forced failures remain distinguishable while secret, PII, card, merchant, and resource values are absent from metric identities and exception messages.
+- Status: PASS
 
 ## C22-OPS-001
 
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Fresh and supported Chapter 21 databases migrate to the Phase 3 feature schema without rewriting historical decisions, and application readiness rejects missing, duplicate, or incompatible V1 definitions before serving confirms.
 - Failure sequence: Seed migration partially applies, legacy rows fail Hibernate validation, or a deployment starts with a missing/wrong-type definition and creates incomplete lineage.
-- Implementation: Forward-only Flyway migration, idempotent immutable reference seeds, Hibernate validation, and startup catalogue validation enforce readiness.
-- Proof: Planned fresh-schema and V1-to-current PostgreSQL migration tests plus startup validation partition tests.
-- Adversarial evidence: Remove, duplicate, rename, and type-change each required definition; prove startup fails before traffic and prior schema/data remains intact.
-- Status: PENDING
+- Implementation: Forward-only V18/V19 migrations add definitions, values, constraints, indexes, and immutable triggers; Hibernate validates mappings; `FeatureCatalogueValidator` is an `ApplicationRunner` readiness gate.
+- Proof: `PostgreSqlMigrationTests` covers fresh V19 and realistic V17-to-V19 upgrade; `FeatureCatalogueValidatorTests` covers exact, missing, duplicate, malformed, invalid-age, and incompatible-type catalogues.
+- Adversarial evidence: Upgrade preserves historical decision and snapshot bytes and creates zero fake values; every invalid required catalogue state fails validation before confirm traffic.
+- Status: PASS
 
 ## C22-OPS-002
 
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Chapter 22 cannot close from schema presence or aggregate green tests; every planned promise must trace to production enforcement and exact proof, with no false claim that deterministic fraud actions are active.
 - Failure sequence: README calls Phase 3 operational after feature tables land, or the chapter dossier recommends merge while matrix entries, migrations, hostile review, or accepted debt remain incomplete.
-- Implementation: Source-of-truth reconciliation, debt/escaped-review gates, matrix checker, closure checker, and commit readiness enforce honest status.
-- Proof: Planned source-status search and final readiness invocation naming the Chapter 22 matrix and dossier.
-- Adversarial evidence: Search for contradictory Phase 3/rules status, skipped proof, non-resolved debt, and premature `READY_TO_MERGE`/`MERGE` claims.
-- Status: PENDING
+- Implementation: Root and service status, master plan, learning trail, matrix, dossier, debt register, escaped-review register, and executable readiness gates are reconciled without claiming Chapter 23 deterministic actions.
+- Proof: Matrix, closure, debt, escaped-review, learning, backend, Python, and named Chapter 22 commit-readiness checks provide the final gate.
+- Adversarial evidence: Final source scans find no claim that Phase 3 or `rules_v1` behavior is complete, no skipped test, no non-resolved debt, and no Chapter 22 pending/merge contradiction.
+- Status: PASS
