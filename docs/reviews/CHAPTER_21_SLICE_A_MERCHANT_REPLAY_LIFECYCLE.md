@@ -3,10 +3,10 @@
 - Parent chapter: 21
 - Review provenance: RETROACTIVE_RECOVERY
 - Transition table timing: WRITTEN_AFTER_EXISTING_FIX
-- Product implementation checkpoint: PENDING_COMMIT
-- Independent implementation review: PENDING
+- Product implementation checkpoint: 2b4b72b
+- Independent implementation review: PASS
 - Hostile review checkpoint: PENDING_LATER_COMMIT
-- Status: NOT_READY
+- Status: HOSTILE_REVIEW_COMPLETE_AWAITING_CHECKPOINT
 - Escaped findings: ER-0036
 
 This packet is intentionally honest: the first lifecycle-epoch fix existed
@@ -62,3 +62,11 @@ recreate the old merchant credential.
 
 Aggregate suite totals are regression context only; they do not close this
 packet.
+
+## Independent review result
+
+The review traced every derivation input and record/alias transition from
+`2b4b72b`. The decisive hostile partitions are same-pepper expired reuse and
+lease expiry while protected work owns the PostgreSQL row lock. Both converge
+to the table's durable postconditions; no P0/P1 or frozen-promise P2 issue
+remains in this slice.
