@@ -153,6 +153,24 @@ public class PaymentIntent {
         this.updatedAt = Instant.now();
     }
 
+    public void markBlockedAfterFraudDecision() {
+        requireConfirmable("blocked by fraud");
+        this.status = PaymentIntentStatus.BLOCKED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresActionAfterFraudDecision() {
+        requireConfirmable("require fraud step-up");
+        this.status = PaymentIntentStatus.REQUIRES_ACTION;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresReviewAfterFraudDecision() {
+        requireConfirmable("require review");
+        this.status = PaymentIntentStatus.REQUIRES_REVIEW;
+        this.updatedAt = Instant.now();
+    }
+
     public void markRequiresCaptureAfterAuthorization() {
         if (status != PaymentIntentStatus.PROCESSING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -194,6 +212,7 @@ public class PaymentIntent {
                 && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
                 && status != PaymentIntentStatus.REQUIRES_ACTION
                 && status != PaymentIntentStatus.REQUIRES_FRAUD_CHECK
+                && status != PaymentIntentStatus.REQUIRES_REVIEW
                 && status != PaymentIntentStatus.AUTHORIZED
                 && status != PaymentIntentStatus.REQUIRES_CAPTURE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -218,5 +237,13 @@ public class PaymentIntent {
         }
         this.status = PaymentIntentStatus.REFUNDED;
         this.updatedAt = Instant.now();
+    }
+
+    private void requireConfirmable(String transition) {
+        if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION
+                && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot " + transition + " from status " + status);
+        }
     }
 }

@@ -3037,17 +3037,18 @@ Done when:
 Chapter sequence:
 
 1. Chapter 22 — Feature Contract And Point-In-Time Lineage.
-2. Chapter 23 — Deterministic Rules, Block, And Fraud Step-Up.
+2. Chapter 23 — Deterministic Rules And Coherent Fraud Actions.
 3. Chapter 24 — Manual Review Intake And Merchant Cancellation.
 4. Chapter 25 — Integrated Fraud Decision MVP Closure.
 
-Current state: Chapter 22 is complete. Typed, immutable V1 feature lineage and
-point-in-time offline joins now exist without changing the inherited allow-only
-confirm behavior. The post-closure ER-0043/ER-0044/ER-0045 repair binds
-definition type at PostgreSQL, gives the engine only the exact governed
-`DecisionFeatureContext`, and proves real flush-failure rollback/retry before
-processor work. Chapter 23 deterministic rules and coherent `BLOCK` and fraud
-`REQUEST_3DS` transitions are next. Phase 3 is not complete.
+Current state: Phase 3 is complete. Chapters 23–24 install
+immutable `rules_v1`, complete ordered results, coherent ALLOW/BLOCK/step-up/
+review transitions, bounded review reads, and atomic merchant cancellation.
+Chapter 25 reconciles fresh and supported upgrades through V25, forced
+PostgreSQL orderings and real rule-result flush failure, transaction-outcome
+signals, complete cursor partitions, full suites, and a public all-action demo.
+ER-0047–ER-0050 are resolved, no Phase 3 debt or unresolved escaped finding
+remains, and Phase 4 is next.
 
 1. Chapter 22: Feature Contract And Point-In-Time Lineage.
 
@@ -3061,27 +3062,31 @@ processor work. Chapter 23 deterministic rules and coherent `BLOCK` and fraud
    behavior. Freeze and prove exact type, time, tenant, traffic-origin,
    migration, rollback, and concurrency boundaries before closure.
 
-2. Chapter 23: Deterministic Rules, Block, And Fraud Step-Up.
+2. Chapter 23: Deterministic Rules And Coherent Fraud Actions.
 
-   Status: next; Chapter 22's feature-lineage dependency is closed.
+   Status: complete; matrix `VERIFIED`, every row `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`.
 
    Install immutable `rules_v1`, preserve every match and non-match, aggregate
-   deterministically, and make `ALLOW`, `BLOCK`, and fraud-engine
-   `REQUEST_3DS` coherent confirm branches. No computed non-allow action may be
-   deployed without its payment transition and processor-exclusion proof.
+   deterministically, and make `ALLOW`, `BLOCK`, fraud-engine `REQUEST_3DS`,
+   and minimum `REVIEW` intake coherent confirm branches. Chapter 23 owns the
+   review write path because no computed non-allow action may be deployed
+   without its payment transition and processor-exclusion proof.
 
 3. Chapter 24: Manual Review Intake And Merchant Cancellation.
 
-   Status: planned; starts only after Chapter 23 closure.
+   Status: complete; matrix `VERIFIED`, every row `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`.
 
-   Add the `IN_REVIEW`/`REQUIRES_REVIEW` lifecycle and exactly one tenant-scoped
-   `OPEN` ManualReviewCase. The existing merchant cancel API atomically moves
-   intent, attempt, and case to canceled truth. Phase 4 retains assignment,
-   analyst resolution, notes, and review-triggered payment actions.
+   Expose bounded tenant-scoped list/detail reads for the Chapter 23 `OPEN`
+   ManualReviewCase. The existing merchant cancel API atomically moves intent,
+   attempt, and case to canceled truth. Phase 4 retains assignment, analyst
+   resolution, notes, and review-triggered payment actions.
 
 4. Chapter 25: Integrated Fraud Decision MVP Closure.
 
-   Status: planned; starts only after Chapter 24 closure.
+   Status: complete; integrated matrix `VERIFIED`, every row `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`; Phase 3 closure is proven.
 
    Reconcile allow, block, step-up, and review through public APIs, durable
    feature/rule/decision/payment evidence, migrations, forced PostgreSQL

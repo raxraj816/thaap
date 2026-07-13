@@ -124,7 +124,9 @@ Implemented tenant-scoped endpoints:
 - `GET /fraud/decisions`
 - `GET /fraud/decisions/{id}`
 - `GET /rules`
-- `GET /reviews`
+- `GET /fraud/reviews`
+- `GET /fraud/reviews/{id}`
+- `GET /reviews` (legacy empty review scaffold; Phase 3 work items use `/fraud/reviews`)
 
 Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
@@ -392,7 +394,7 @@ refund objects and reversal accounting.
 `POST /payment_intents/{id}/confirm` creates the first durable scoring/audit
 unit for a payment flow: `PaymentAttempt`.
 
-The Chapter 13 confirm path:
+The Phase 3 confirm path:
 
 - requires `Idempotency-Key`
 - accepts `paymentMethodId`
@@ -404,9 +406,9 @@ The Chapter 13 confirm path:
 - stores `payment_intent_id`, `payment_method_id`, `idempotency_key`, `status`,
   `attempt_number`, nullable fraud/processor/3DS fields, and timestamps
 - serializes attempt numbering with a pessimistic PaymentIntent row lock
-- calls a deterministic in-memory confirm decision engine that returns `ALLOW`,
-  risk score `0.00`, risk level `LOW`, ruleset version `rules_stub_v1`, nullable
-  model version, and reason code `RULES_NOT_ENABLED`
+- evaluates all three immutable `rules_v1` definitions against the exact typed
+  `DecisionFeatureContext`, persists every match and non-match, and aggregates
+  with `BLOCK > REVIEW > REQUEST_3DS > ALLOW`
 - persists a durable `FraudDecision` with action, risk score, risk level,
   latency, ruleset version, reason codes, feature freshness status, and
   decision timestamps
@@ -422,9 +424,11 @@ The Chapter 13 confirm path:
 - explicitly flushes the complete decision/snapshot/value lineage before any
   processor call while retaining rollback in the confirm transaction
 - attaches the `fraudDecisionId` to the PaymentAttempt
-- moves the PaymentAttempt from `CREATED` to `READY_FOR_PROCESSOR`
-- moves the PaymentIntent from `REQUIRES_CONFIRMATION` to `PROCESSING`
-- calls `ProcessorAdapter` only after an `ALLOW` decision
+- applies branch-specific PaymentAttempt and PaymentIntent truth before any
+  external call: processor-ready, blocked, action-required, or in-review
+- creates one tenant-scoped `OPEN` ManualReviewCase atomically for `REVIEW`
+- calls `ProcessorAdapter` only after an `ALLOW` decision; every non-allow
+  branch creates zero Authorization, capture, void, refund, or ledger rows
 - persists a durable `Authorization` row with processor name, processor
   reference, response code, network status, requested amount, authorized
   amount, currency, verification checks, non-null 3DS result, simulator
@@ -467,17 +471,30 @@ Actuator metrics include:
 - `fraud_feature_freshness_total{status,traffic_origin}`
 - `fraud_feature_materialization_seconds{outcome,traffic_origin}`
 - `fraud_decision_failures_total{stage,cause,feature_code}`
+- `fraud_rule_evaluations_total{rule_code,outcome}`
+- `fraud_decisions_total{action,risk_level,traffic_origin}`
+- `fraud_decision_latency_seconds{action}`
+- `fraud_review_cases_opened_total{traffic_origin}`
+- `fraud_review_cases_canceled_total{traffic_origin}`
+- `fraud_review_case_cancellation_failures_total{status,traffic_origin,cause}`
 
-Metric dimensions are bounded catalogue/stage enums. They never include a
+Metric dimensions are bounded catalogue/stage enums and codes. They never include a
 merchant/resource identifier, feature value, card field, PII, credential, or
 idempotency material. V18 adds the typed schema and seven definitions. V19
 rejects definition insertion/mutation/deletion and historical decision,
 snapshot, or value updates on both H2 and PostgreSQL.
 
-The V18 definition/value foreign key binds definition ID, code, version, and
-declared value type. PostgreSQL therefore rejects every value whose declared
-type disagrees with its immutable definition even when its populated typed
-column is otherwise structurally valid. A real confirm-path PostgreSQL test
+V22 forward-repairs the originally shipped V18 three-column feature identity
+into a definition ID/code/version/type foreign key without editing applied
+history. V23 similarly binds copied rule-result meaning and review case
+payment/decision/reason/origin lineage; V24 makes review identity/reasons
+immutable and permits only `OPEN -> CANCELED`. PostgreSQL therefore rejects values or
+fraud evidence whose declared semantics disagree with their immutable source.
+V25 conservatively removes V20-added fraud/review event subscriptions from
+legacy endpoints whose old and new event rows belong to different creation
+cohorts. Exact-five and partial legacy selections therefore remain unchanged,
+while endpoints created after Phase 3 retain their explicit nine-event set.
+A real confirm-path PostgreSQL test
 also forces a lineage constraint failure at the explicit flush and proves zero
 processor calls, total rollback, reservation release, and one successful
 same-key retry.
@@ -500,14 +517,28 @@ simulator outcome field and uses processor-neutral evidence. It does not expose
 raw payment input, PII, API keys, idempotency state, hashes, card fingerprints,
 or webhook secrets.
 
-Chapter 13 deliberately keeps the decision stub honest: it records
-`RULES_NOT_ENABLED` and nullable `modelVersion` rather than pretending real
-rules or model lineage exists.
+Historical Chapter 13 decisions deliberately remain `rules_stub_v1` with
+`RULES_NOT_ENABLED`, nullable `modelVersion`, and no fabricated rule results.
+New decisions use `rules_v1`; their fixed severity score remains a rules score,
+not a model probability.
 Processor simulator outcomes are stored on `Authorization.simulatorOutcomeCode`
 because they are produced after the fraud decision and represent processor
 truth, not fraud-decision reason truth.
 
 `GET /fraud/decisions` returns tenant-scoped decision summaries.
+`GET /fraud/decisions/{id}` returns the exact snapshot and ordered rule results.
+`GET /fraud/reviews` supports status, limit 1–100, and an owned stable cursor;
+`GET /fraud/reviews/{id}` returns one case. The existing idempotent PaymentIntent
+cancel endpoint is the only Phase 3 review mutation and moves `OPEN` to
+`CANCELED` with `MERCHANT_CANCELED`. Assignment, analyst resolution, notes,
+labels, and review-triggered payment actions remain Phase 4 scope.
+
+Run the complete loopback-only Phase 3 proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+scripts/demo-chapter-25-fraud-decision-mvp.py
+```
 `GET /fraud/decisions/{id}` returns a tenant-scoped decision plus its linked
 feature snapshot.
 

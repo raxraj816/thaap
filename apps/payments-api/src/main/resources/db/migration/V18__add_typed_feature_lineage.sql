@@ -10,7 +10,7 @@ CREATE TABLE feature_definitions (
     created_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     CONSTRAINT pk_feature_definitions PRIMARY KEY (id),
     CONSTRAINT uk_feature_definitions_code_version UNIQUE (feature_code, feature_version),
-    CONSTRAINT uk_feature_definitions_lineage UNIQUE (id, feature_code, feature_version, value_type),
+    CONSTRAINT uk_feature_definitions_lineage UNIQUE (id, feature_code, feature_version),
     CONSTRAINT ck_feature_definitions_code CHECK (feature_code ~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'),
     CONSTRAINT ck_feature_definitions_entity CHECK (entity_type IN ('PAYMENT_ATTEMPT')),
     CONSTRAINT ck_feature_definitions_type CHECK (value_type IN ('LONG', 'STRING', 'BOOLEAN', 'DECIMAL')),
@@ -55,8 +55,8 @@ CREATE TABLE feature_values (
     CONSTRAINT fk_feature_values_attempt_origin FOREIGN KEY (merchant_id, payment_attempt_id, traffic_origin)
         REFERENCES payment_attempts (merchant_id, id, traffic_origin),
     CONSTRAINT fk_feature_values_definition FOREIGN KEY
-        (feature_definition_id, feature_code, feature_version, value_type)
-        REFERENCES feature_definitions (id, feature_code, feature_version, value_type),
+        (feature_definition_id, feature_code, feature_version)
+        REFERENCES feature_definitions (id, feature_code, feature_version),
     CONSTRAINT ck_feature_values_type CHECK (value_type IN ('LONG', 'STRING', 'BOOLEAN', 'DECIMAL')),
     CONSTRAINT ck_feature_values_typed_value CHECK (
         (value_type = 'LONG' AND long_value IS NOT NULL AND string_value IS NULL

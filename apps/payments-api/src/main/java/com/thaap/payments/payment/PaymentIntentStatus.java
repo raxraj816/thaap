@@ -10,6 +10,8 @@ public enum PaymentIntentStatus {
     AUTHORIZED,
     REQUIRES_CAPTURE,
     CAPTURED,
+    BLOCKED,
+    REQUIRES_REVIEW,
     CANCELED,
     REFUNDED,
     DISPUTED,

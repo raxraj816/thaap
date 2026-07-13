@@ -1,15 +1,15 @@
 # Phase 3 Detailed Implementation Plan
 
 - Phase: Phase 3 — Fraud Decision MVP
-- Status: APPROVED_READY_FOR_CHAPTER_22_IMPLEMENTATION
+- Status: COMPLETE
 - Entry gate: SATISFIED by Chapter 21 and the Phase 2.5 zero-debt closure
 - Primary deployable: `apps/payments-api`
 - Product DRI: Fraud/Risk Product
 - Technical DRI: Payments Core
 - Data/ML DRI: ML Architecture
-- First implementation chapter: Chapter 22
-- First proof artifact:
-  `docs/reviews/CHAPTER_22_INVARIANT_PROOF_MATRIX.md`
+- Current implementation chapter: Chapter 25 complete; Phase 4 is next
+- Current proof artifact:
+  `docs/reviews/CHAPTER_25_INVARIANT_PROOF_MATRIX.md`
 - Concept foundation:
   `docs/learning/concepts/DETERMINISTIC_RULE_DECISIONING.md`
 
@@ -470,8 +470,10 @@ Bounded metrics:
 - `fraud_rule_evaluations_total{rule_code,outcome}`
 - `fraud_decision_latency_seconds{action}`
 - `fraud_feature_freshness_total{status}`
-- `fraud_decision_failures_total{stage,cause}`
+- `fraud_decision_failures_total{stage,cause,feature_code}`
 - `fraud_review_cases_opened_total{traffic_origin}`
+- `fraud_review_cases_canceled_total{traffic_origin}`
+- `fraud_review_case_cancellation_failures_total{status,traffic_origin,cause}`
 
 `merchant_id`, payment IDs, card metadata, customer identifiers, reason text,
 and idempotency keys are forbidden metric dimensions. Structured logs may carry
@@ -520,10 +522,14 @@ Done when:
 - matrix is verified, dossier recommends merge, and demo reconciles feature
   rows against the decision-time public objects
 
-### Chapter 23 — Deterministic Rules, Block, And Fraud Step-Up
+### Chapter 23 — Deterministic Rules And Coherent Fraud Actions
 
 Goal: evaluate the complete immutable `rules_v1` catalogue, persist one result
-per rule, and make `ALLOW`, `BLOCK`, and `REQUEST_3DS` coherent confirm outcomes.
+per rule, and make every computed `ALLOW`, `BLOCK`, `REQUEST_3DS`, or `REVIEW`
+action a coherent confirm outcome. Chapter 23 owns the minimum review write
+path because deploying the complete ruleset while leaving `REVIEW` unapplied
+would create false payment truth. Chapter 24 retains review reads and the
+merchant cancellation lifecycle.
 
 Deliver:
 
@@ -538,6 +544,8 @@ Deliver:
 - PaymentAttempt and PaymentIntent block transitions to explicit terminal
   `BLOCKED`
 - fraud `REQUEST_3DS` transition to existing action-required statuses
+- minimal `REVIEW` transition to `IN_REVIEW`/`REQUIRES_REVIEW` plus exactly one
+  tenant-scoped `OPEN` ManualReviewCase
 - explicit distinction between fraud step-up and processor 3DS evidence
 - branch-specific audit and webhook truth
 - processor-call and automatic-capture exclusion for non-allow branches
@@ -557,19 +565,19 @@ Proof focus:
 Done when:
 
 - every new decision uses `rules_v1` and has exactly three ordered results
-- allow, block, and step-up are public, idempotent, tenant-safe, and fully
+- allow, block, step-up, and review intake are public, idempotent, tenant-safe, and fully
   reconciled; no computed non-allow action is left unapplied
 
 ### Chapter 24 — Manual Review Intake And Merchant Cancellation
 
-Goal: make `REVIEW` produce a durable analyst work item with a safe merchant
-exit, without prematurely claiming analyst resolution operations.
+Goal: expose the durable analyst work item created by Chapter 23 and give it a
+safe merchant exit, without prematurely claiming analyst resolution operations.
 
 Deliver:
 
 - pre-implementation Chapter 24 matrix
-- PaymentAttempt `IN_REVIEW`; PaymentIntent `REQUIRES_REVIEW`
-- `manual_review_cases` with `OPEN -> CANCELED` merchant lifecycle
+- tenant-scoped `manual_review_cases` reads with bounded pagination
+- `manual_review_cases` `OPEN -> CANCELED` merchant lifecycle
 - bounded tenant-scoped list/detail APIs
 - review-opened audit/webhook truth and metrics
 - atomic integration with the existing idempotent PaymentIntent cancel API
@@ -643,8 +651,9 @@ Phase 3 is complete only when:
 - README, master plan, architecture, learning trail, matrices, and dossiers
   agree that Phase 3 is complete
 
-Until then, README must describe Phase 3 as in progress and must not claim a
-working fraud MVP from schemas or unit tests alone.
+This gate is satisfied by the Chapter 22–25 matrices and dossiers, V18–V25
+migration proof, forced PostgreSQL and rollback proof, 324 backend tests,
+76 repository Python tests, and the loopback public demo.
 
 ## 16. Design-Review Narrative
 
