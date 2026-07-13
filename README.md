@@ -30,20 +30,26 @@ resolved, and the technical debt register has zero non-resolved entries. Five
 independent Chapter 21 recovery packets now carry complete transition tables,
 mandatory closure questions, narrow implementation checkpoints, and later
 hostile-proof checkpoints; the Phase 3 entry gate is satisfied.
-The Phase 3 detailed implementation plan now sequences Chapters 22–25.
-Chapter 22 is complete: V18/V19 add an immutable seven-feature V1 catalogue,
-typed per-attempt FeatureValues, point-in-time query support, composite tenant
-and traffic-origin lineage, startup catalogue validation, and append-only
-decision-time evidence. Confirm materializes and flushes the complete lineage
-before processor authorization while preserving exact idempotent replay and
-the existing allow-only `rules_stub_v1` behavior. A post-closure repair now
-binds definition value type into the PostgreSQL lineage identity, makes the
-exact safe `DecisionFeatureContext` the engine's only input, and proves a real
-flush constraint failure rolls back before processor work and permits one
-coherent retry. The pre-implementation matrix, later hostile passes,
-PostgreSQL migrations/interleavings, live public-API demo, and closure dossier
-all pass. Chapter 23 deterministic fraud behavior is not
-yet implemented; `BLOCK`, fraud `REQUEST_3DS`, and `REVIEW` are not claimed.
+Phase 3 is complete through Chapters 22–25. Chapter 23 is complete, Chapter 24
+is complete, and Chapter 25 is complete. V18–V25 now provide immutable typed
+feature lineage, the exact three-rule `rules_v1` catalogue, three ordered
+match/non-match results per new decision, and database-bound rule, decision,
+payment, review, tenant, and traffic-origin semantics. Confirm applies
+deterministic precedence `BLOCK > REVIEW > REQUEST_3DS > ALLOW` before any
+processor call. `BLOCK` is terminal fraud truth, fraud step-up creates no
+Authorization, and the third attempt can create one open review case; bounded
+tenant-scoped review APIs expose that case and merchant cancellation atomically
+cancels intent, attempt, and case without rewriting the decision or creating
+money truth. Historical `rules_stub_v1` decisions remain readable. The
+pre-implementation matrices, migration and forced PostgreSQL proofs, 324-test
+backend suite, 76-test repository suite, and loopback public demo reconcile all
+four actions with exact replay and durable feature/rule evidence. V25 also
+conservatively preserves legacy webhook subscription consent: an existing
+endpoint receives no new fraud/review event without durable opt-in evidence.
+ER-0047–ER-0050 close the escaped subscription, real SQL-flush, transaction-
+outcome telemetry, and pagination-proof boundaries. Phase 4 owns
+velocity, mutable merchant policies, analyst assignment/resolution, labels,
+and model feedback.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation
@@ -131,16 +137,15 @@ scenarios through public APIs:
 - `POST /payment_intents/{id}/confirm` now creates a tenant-scoped
   `PaymentAttempt` for a valid PaymentIntent and PaymentMethod owned by the
   same merchant/customer.
-- Confirm calls a deterministic in-memory decision-engine interface that returns
-  `ALLOW`, score `0.00`, risk level `LOW`, ruleset version `rules_stub_v1`, and
-  reason code `RULES_NOT_ENABLED`.
-- Confirm persists one tenant-scoped `FraudDecision` and one immutable
-  `FeatureSnapshot` for every successful confirm attempt before processor
-  authorization.
-- Successful confirm moves the `PaymentAttempt` from `CREATED` through
-  `READY_FOR_PROCESSOR`, calls a `ProcessorAdapter` only for `ALLOW`
-  decisions, persists an `Authorization`, and maps the processor result back
-  onto the payment lifecycle.
+- Confirm evaluates all three immutable `rules_v1` policies against the exact
+  seven-feature decision context and persists one tenant-scoped decision,
+  snapshot, seven typed values, and three ordered rule results.
+- Confirm applies ALLOW, BLOCK, fraud REQUEST_3DS, or REVIEW before any
+  processor call. Only ALLOW reaches `ProcessorAdapter`; non-allow actions
+  create no Authorization or money rows.
+- REVIEW creates one open tenant-scoped case. Bounded `/fraud/reviews` reads
+  expose it, and idempotent merchant cancellation closes intent, attempt, and
+  case without rewriting the original decision.
 - The deterministic simulator supports approved, issuer decline, insufficient
   funds, suspected fraud decline, CVC failure, AVS line1 failure, AVS postal
   failure, and 3DS-required outcomes from safe stored card metadata.

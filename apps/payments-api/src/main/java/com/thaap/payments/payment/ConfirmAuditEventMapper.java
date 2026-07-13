@@ -15,8 +15,12 @@ final class ConfirmAuditEventMapper {
 
     static List<ConfirmAuditEvent> eventsForConfirm(PaymentIntentStatus startingStatus, PaymentIntent paymentIntent,
             PaymentAttempt paymentAttempt, FraudDecision fraudDecision, Authorization authorization) {
-        return List.of(
-                paymentIntentConfirmed(startingStatus, paymentIntent, paymentAttempt),
+        if (authorization == null) {
+            return List.of(
+                    paymentIntentConfirmed(startingStatus, paymentIntent, paymentAttempt),
+                    fraudDecisionCompleted(paymentAttempt, fraudDecision));
+        }
+        return List.of(paymentIntentConfirmed(startingStatus, paymentIntent, paymentAttempt),
                 fraudDecisionCompleted(paymentAttempt, fraudDecision),
                 authorizationCompleted(paymentAttempt, authorization));
     }

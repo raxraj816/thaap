@@ -87,3 +87,23 @@ The important production claim is not “the rules are clever.” It is that the
 decision is deterministic, tenant-safe, point-in-time correct, atomic with the
 payment branch, explainable from durable evidence, and incapable of creating
 processor or money truth for a non-allow action.
+
+## THAAP Phase 3 Implementation
+
+- V20 seeds the exact three-definition catalogue, result rows, and review cases.
+- V21 makes rule definitions and execution results append-only.
+- V22 forward-repairs feature type identity while preserving the checksum of
+  the already-shipped V18 migration.
+- V23 binds copied result action/reason/priority to its rule and binds a review
+  case to the exact REVIEW decision, attempt, intent, tenant, reasons, and
+  traffic origin. It also avoids silently subscribing previously selective
+  webhook endpoints to new event types.
+- V24 makes review identity, reasons, and origin immutable, rejects deletion or
+  reopening, and allows only the one Phase 3 lifecycle step `OPEN -> CANCELED`.
+- V25 recognizes that an old exact event set is not durable wildcard consent.
+  It uses subscription creation cohorts to remove newly added events from
+  legacy endpoints while retaining explicit post-Phase-3 nine-event sets.
+- Startup rejects any missing, duplicate, extra, or incompatible rule catalogue
+  before serving confirms.
+- Phase 4 may add velocity and mutable policy authoring only after freezing the
+  configuration, simulation, approval, rollback, and dependency-failure truth.

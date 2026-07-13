@@ -170,6 +170,34 @@ public class PaymentAttempt {
         this.updatedAt = Instant.now();
     }
 
+    public void markBlockedByFraud() {
+        requireCreatedWithFraudDecision("blocked");
+        this.status = PaymentAttemptStatus.BLOCKED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRequiresActionByFraud() {
+        requireCreatedWithFraudDecision("action-required");
+        this.status = PaymentAttemptStatus.REQUIRES_ACTION;
+        this.threeDsStatus = ThreeDsStatus.REQUESTED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markInReview() {
+        requireCreatedWithFraudDecision("in-review");
+        this.status = PaymentAttemptStatus.IN_REVIEW;
+        this.updatedAt = Instant.now();
+    }
+
+    public void cancelFromReview() {
+        if (status != PaymentAttemptStatus.IN_REVIEW) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot be canceled from status " + status);
+        }
+        this.status = PaymentAttemptStatus.CANCELED;
+        this.updatedAt = Instant.now();
+    }
+
     public void markAuthorized(String processorAuthorizationId) {
         requireProcessorReady("authorized");
         this.status = PaymentAttemptStatus.AUTHORIZED;
@@ -196,6 +224,13 @@ public class PaymentAttempt {
         if (status != PaymentAttemptStatus.READY_FOR_PROCESSOR) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "PaymentAttempt cannot be marked " + targetStatus + " from status " + status);
+        }
+    }
+
+    private void requireCreatedWithFraudDecision(String targetStatus) {
+        if (status != PaymentAttemptStatus.CREATED || fraudDecisionId == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot be marked " + targetStatus + " before a fraud decision");
         }
     }
 }

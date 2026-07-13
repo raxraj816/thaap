@@ -19,7 +19,11 @@ import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionRepository;
+import com.thaap.payments.fraud.FraudDecisionMetrics;
 import com.thaap.payments.fraud.MaterializedFeatureSet;
+import com.thaap.payments.fraud.RuleEvaluation;
+import com.thaap.payments.fraud.RuleExecutionResult;
+import com.thaap.payments.fraud.RuleExecutionResultRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerService;
@@ -32,6 +36,9 @@ import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.processor.ProcessorAdapter;
 import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.processor.ProcessorAuthorizationResult;
+import com.thaap.payments.review.ManualReviewCase;
+import com.thaap.payments.review.ManualReviewCaseRepository;
+import com.thaap.payments.review.ManualReviewCaseStatus;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -85,6 +92,9 @@ public class PaymentIntentController {
     private final FeatureValueRepository featureValueRepository;
     private final FeatureMaterializer featureMaterializer;
     private final FeatureMaterializationMetrics featureMaterializationMetrics;
+    private final RuleExecutionResultRepository ruleExecutionResultRepository;
+    private final ManualReviewCaseRepository manualReviewCaseRepository;
+    private final FraudDecisionMetrics fraudDecisionMetrics;
     private final AuditLogService auditLogService;
     private final LedgerService ledgerService;
 
@@ -96,6 +106,9 @@ public class PaymentIntentController {
             FraudDecisionRepository fraudDecisionRepository, FeatureSnapshotRepository featureSnapshotRepository,
             FeatureValueRepository featureValueRepository, FeatureMaterializer featureMaterializer,
             FeatureMaterializationMetrics featureMaterializationMetrics,
+            RuleExecutionResultRepository ruleExecutionResultRepository,
+            ManualReviewCaseRepository manualReviewCaseRepository,
+            FraudDecisionMetrics fraudDecisionMetrics,
             AuditLogService auditLogService, LedgerService ledgerService) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
@@ -112,6 +125,9 @@ public class PaymentIntentController {
         this.featureValueRepository = featureValueRepository;
         this.featureMaterializer = featureMaterializer;
         this.featureMaterializationMetrics = featureMaterializationMetrics;
+        this.ruleExecutionResultRepository = ruleExecutionResultRepository;
+        this.manualReviewCaseRepository = manualReviewCaseRepository;
+        this.fraudDecisionMetrics = fraudDecisionMetrics;
         this.auditLogService = auditLogService;
         this.ledgerService = ledgerService;
     }
@@ -176,25 +192,50 @@ public class PaymentIntentController {
         Instant decisionStartedAt = Instant.now();
         MaterializedFeatureSet materializedFeatures = featureMaterializer.materialize(
                 paymentIntent, paymentAttempt, paymentMethod, decisionStartedAt);
-        ConfirmDecision decision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
+        long engineStartedNanos = System.nanoTime();
+        ConfirmDecision decision;
+        try {
+            decision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
+        } catch (RuntimeException exception) {
+            fraudDecisionMetrics.recordFailure("EVALUATION", "ENGINE_FAILURE");
+            throw exception;
+        }
+        long engineElapsedNanos = Math.max(0L, System.nanoTime() - engineStartedNanos);
+        fraudDecisionMetrics.observeDecisionTransaction(
+                decision, paymentAttempt.getTrafficOrigin(), engineElapsedNanos);
         Instant decisionCompletedAt = Instant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
         FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, materializedFeatures,
                 decision, latencyMs, decisionStartedAt, decisionCompletedAt);
         paymentAttempt.attachFraudDecision(fraudDecision.getId());
         applyConfirmDecision(paymentIntent, paymentAttempt, decision);
-        ProcessorAuthorizationResult processorResult = processorAdapter.authorize(new ProcessorAuthorizationRequest(
-                merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(),
-                paymentIntent.getAmount(), paymentIntent.getCurrency(), paymentMethod.getCardBin(),
-                paymentMethod.getCardLast4()));
-        Authorization authorization = persistAuthorization(merchantContext, paymentAttempt, processorResult);
-        applyProcessorResult(paymentIntent, paymentAttempt, authorization);
+        Authorization authorization = null;
+        ManualReviewCase manualReviewCase = null;
+        if (decision.action() == FraudDecisionAction.ALLOW) {
+            ProcessorAuthorizationResult processorResult = processorAdapter.authorize(new ProcessorAuthorizationRequest(
+                    merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(),
+                    paymentIntent.getAmount(), paymentIntent.getCurrency(), paymentMethod.getCardBin(),
+                    paymentMethod.getCardLast4()));
+            authorization = persistAuthorization(merchantContext, paymentAttempt, processorResult);
+            applyProcessorResult(paymentIntent, paymentAttempt, authorization);
+        } else if (decision.action() == FraudDecisionAction.REVIEW) {
+            manualReviewCase = manualReviewCaseRepository.save(new ManualReviewCase(
+                    merchantContext.merchantId(), paymentIntent.getId(),
+                    paymentAttempt.getId(), fraudDecision.getId(), decision.reasonCodes(),
+                    paymentAttempt.getTrafficOrigin()));
+        }
         recordConfirmAuditLogs(merchantContext, requestId, startingStatus, paymentIntent, paymentAttempt, fraudDecision,
                 authorization);
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_attempt.created",
                 paymentAttempt.getId(), paymentAttempt.getTrafficOrigin());
-        if (authorization.getStatus() == AuthorizationStatus.APPROVED
+        if (decision.action() != FraudDecisionAction.ALLOW) {
+            webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                    merchantContext.merchantId(), eventTypeFor(decision.action()),
+                    manualReviewCase == null ? paymentIntent.getId() : manualReviewCase.getId(),
+                    paymentIntent.getTrafficOrigin());
+        }
+        if (authorization != null && authorization.getStatus() == AuthorizationStatus.APPROVED
                 && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
             captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
                     CaptureTrigger.AUTOMATIC_CONFIRM);
@@ -223,6 +264,11 @@ public class PaymentIntentController {
                 featureValueRepository.save(featureValue);
             }
             featureValueRepository.flush();
+            for (RuleEvaluation evaluation : decision.ruleEvaluations()) {
+                ruleExecutionResultRepository.save(new RuleExecutionResult(merchantContext.merchantId(),
+                        fraudDecision.getId(), evaluation, paymentAttempt.getTrafficOrigin()));
+            }
+            ruleExecutionResultRepository.flush();
             return fraudDecision;
         } catch (RuntimeException exception) {
             featureMaterializationMetrics.recordFailure("PERSISTENCE", "LINEAGE_WRITE_FAILED");
@@ -232,16 +278,37 @@ public class PaymentIntentController {
 
     private void applyConfirmDecision(PaymentIntent paymentIntent, PaymentAttempt paymentAttempt,
             ConfirmDecision decision) {
-        if (decision.action() != FraudDecisionAction.ALLOW) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Fraud decision action is not enabled for confirm orchestration");
+        switch (decision.action()) {
+            case ALLOW -> {
+                paymentAttempt.markReadyForProcessor();
+                paymentIntent.markProcessingAfterConfirm();
+            }
+            case BLOCK -> {
+                paymentAttempt.markBlockedByFraud();
+                paymentIntent.markBlockedAfterFraudDecision();
+            }
+            case REQUEST_3DS -> {
+                paymentAttempt.markRequiresActionByFraud();
+                paymentIntent.markRequiresActionAfterFraudDecision();
+            }
+            case REVIEW -> {
+                paymentAttempt.markInReview();
+                paymentIntent.markRequiresReviewAfterFraudDecision();
+            }
         }
-        paymentAttempt.markReadyForProcessor();
-        paymentIntent.markProcessingAfterConfirm();
         log.info("payment_intents.confirm decision applied merchantId={} paymentIntentId={} paymentAttemptId={} "
                         + "action={} reasonCodes={}",
                 paymentIntent.getMerchantId(), paymentIntent.getId(), paymentAttempt.getId(), decision.action(),
                 decision.reasonCodes());
+    }
+
+    private String eventTypeFor(FraudDecisionAction action) {
+        return switch (action) {
+            case BLOCK -> "payment_intent.blocked";
+            case REQUEST_3DS -> "payment_intent.requires_action";
+            case REVIEW -> "fraud_review.opened";
+            case ALLOW -> throw new IllegalArgumentException("ALLOW has no fraud-only event type");
+        };
     }
 
     private Authorization persistAuthorization(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
@@ -369,19 +436,51 @@ public class PaymentIntentController {
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         Authorization authorization = null;
         AuthorizationVoid authorizationVoid = null;
+        ManualReviewCase reviewCase = null;
         if (startingStatus == PaymentIntentStatus.AUTHORIZED
                 || startingStatus == PaymentIntentStatus.REQUIRES_CAPTURE) {
             authorization = latestApprovedAuthorization(merchantContext, id);
             authorizationVoid = authorizationVoidRepository.save(new AuthorizationVoid(merchantContext.merchantId(),
                     authorization.getId(), authorization.getPaymentAttemptId(), paymentIntent.getId()));
+        } else if (startingStatus == PaymentIntentStatus.REQUIRES_REVIEW) {
+            fraudDecisionMetrics.observeReviewCancellation(paymentIntent.getTrafficOrigin());
+            reviewCase = manualReviewCaseRepository.findForUpdate(paymentIntent.getId(), merchantContext.merchantId(),
+                            ManualReviewCaseStatus.OPEN)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                            "PaymentIntent review case is not open"));
+            PaymentAttempt reviewAttempt = paymentAttemptRepository
+                    .findByIdAndMerchantId(reviewCase.getPaymentAttemptId(), merchantContext.merchantId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                            "PaymentIntent review attempt was not found"));
+            reviewAttempt.cancelFromReview();
+            reviewCase.cancelByMerchant();
         }
         paymentIntent.cancel();
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_intent.canceled",
                 paymentIntent.getId(), paymentIntent.getTrafficOrigin());
+        if (reviewCase != null) {
+            webhookDeliveryService.createDeliveriesInCurrentTransaction(
+                    merchantContext.merchantId(), "fraud_review.canceled",
+                    reviewCase.getId(), reviewCase.getTrafficOrigin());
+            recordReviewCancellationAuditLog(merchantContext, requestId, reviewCase);
+        }
         recordCancelAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization,
                 authorizationVoid);
         return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
+    }
+
+    private void recordReviewCancellationAuditLog(MerchantContext merchantContext, String requestId,
+            ManualReviewCase reviewCase) {
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("manualReviewCaseId", reviewCase.getId().toString());
+        after.put("paymentIntentId", reviewCase.getPaymentIntentId().toString());
+        after.put("paymentAttemptId", reviewCase.getPaymentAttemptId().toString());
+        after.put("fraudDecisionId", reviewCase.getFraudDecisionId().toString());
+        after.put("status", reviewCase.getStatus().name());
+        after.put("cancellationReason", reviewCase.getCancellationReason().name());
+        auditLogService.recordMerchantApiAction(merchantContext, requestId, "fraud_review.canceled",
+                "manual_review_case", reviewCase.getId(), "Merchant canceled review-pending payment", null, after);
     }
 
     private Authorization latestApprovedAuthorization(MerchantContext merchantContext, UUID paymentIntentId) {

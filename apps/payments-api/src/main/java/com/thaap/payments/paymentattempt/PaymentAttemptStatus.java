@@ -5,5 +5,8 @@ public enum PaymentAttemptStatus {
     READY_FOR_PROCESSOR,
     AUTHORIZED,
     DECLINED,
-    REQUIRES_ACTION
+    REQUIRES_ACTION,
+    BLOCKED,
+    IN_REVIEW,
+    CANCELED
 }

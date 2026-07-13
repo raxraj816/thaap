@@ -187,6 +187,13 @@ class DatabaseMigrationTests {
                   AND description = 'complete hmac rotation boundaries'
                   AND success = TRUE
                 """, Integer.class);
+        var webhookSubscriptionConsentRepair = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = '25'
+                  AND description = 'preserve existing webhook subscription consent'
+                  AND success = TRUE
+                """, Integer.class);
 
         assertThat(initialSchema).isEqualTo(1);
         assertThat(authorizationSchema).isEqualTo(1);
@@ -198,6 +205,7 @@ class DatabaseMigrationTests {
         assertThat(refundLedgerSchema).isEqualTo(1);
         assertThat(webhookDeliverySchema).isEqualTo(1);
         assertThat(replayIdentityRotationSchema).isEqualTo(1);
+        assertThat(webhookSubscriptionConsentRepair).isEqualTo(1);
     }
 
     @Test
@@ -272,7 +280,9 @@ class DatabaseMigrationTests {
         assertIndexExists("refunds", "uk_refunds_payment_intent");
         assertIndexExists("refunds", "idx_refunds_merchant_created");
         assertIndexExists("refunds", "idx_refunds_attempt");
-        assertIndexExists("fraud_rules", "idx_fraud_rules_merchant_created");
+        assertIndexExists("fraud_rules", "idx_fraud_rules_ruleset_status");
+        assertIndexExists("rule_execution_results", "idx_rule_results_merchant_decision");
+        assertIndexExists("manual_review_cases", "idx_manual_reviews_merchant_status_created");
         assertIndexExists("review_cases", "idx_review_cases_merchant_created");
 
         assertThat(columnNames("merchants")).contains("api_key_prefix", "api_key_hash").doesNotContain("api_key");
@@ -689,7 +699,7 @@ class DatabaseMigrationTests {
                 SELECT COUNT(*)
                 FROM webhook_endpoint_event_subscriptions
                 WHERE webhook_endpoint_id = ?
-                """, Integer.class, endpointId)).isEqualTo(WebhookEventType.values().length);
+                """, Integer.class, endpointId)).isEqualTo(5);
         Map<String, Object> event = upgrade.jdbcTemplate().queryForMap("""
                 SELECT id, merchant_id, event_type, resource_id, resource_type,
                        api_version, payload, payload_sha256

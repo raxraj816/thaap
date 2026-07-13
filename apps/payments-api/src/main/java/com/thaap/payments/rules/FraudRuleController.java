@@ -1,5 +1,9 @@
 package com.thaap.payments.rules;
 
+import com.thaap.payments.fraud.DeterministicConfirmDecisionEngine;
+import com.thaap.payments.fraud.FraudDecisionAction;
+import com.thaap.payments.fraud.FraudDecisionReasonCode;
+import com.thaap.payments.fraud.RuleConditionType;
 import com.thaap.payments.tenant.MerchantContext;
 import java.util.List;
 import java.util.UUID;
@@ -17,14 +21,20 @@ public class FraudRuleController {
 
     @GetMapping("/rules")
     public List<FraudRuleResponse> listRules(MerchantContext merchantContext) {
-        return fraudRuleRepository.findByMerchantIdOrderByCreatedAtAsc(merchantContext.merchantId()).stream()
+        return fraudRuleRepository.findByRulesetVersionAndStatusOrderByPriorityAscRuleCodeAsc(
+                        DeterministicConfirmDecisionEngine.RULESET_VERSION, "ACTIVE").stream()
                 .map(FraudRuleResponse::from)
                 .toList();
     }
 
-    public record FraudRuleResponse(UUID id, UUID merchantId, String name) {
+    public record FraudRuleResponse(UUID id, String ruleCode, String rulesetVersion, int priority,
+            FraudDecisionAction action, FraudDecisionReasonCode reasonCode, RuleConditionType conditionType,
+            String featureCode, String currencyFeatureCode, String currencyValue, long longThreshold) {
         static FraudRuleResponse from(FraudRule rule) {
-            return new FraudRuleResponse(rule.getId(), rule.getMerchantId(), rule.getName());
+            return new FraudRuleResponse(rule.getId(), rule.getRuleCode(), rule.getRulesetVersion(),
+                    rule.getPriority(), rule.getAction(), rule.getReasonCode(), rule.getConditionType(),
+                    rule.getFeatureCode(), rule.getCurrencyFeatureCode(), rule.getCurrencyValue(),
+                    rule.getLongThreshold());
         }
     }
 }

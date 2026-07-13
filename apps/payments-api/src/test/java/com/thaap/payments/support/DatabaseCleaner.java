@@ -18,6 +18,7 @@ public class DatabaseCleaner {
             "refunds",
             "authorization_voids",
             "authorizations",
+            "manual_review_cases",
             "merchant_creation_identities",
             "merchant_creation_records",
             "idempotency_records",
@@ -25,7 +26,6 @@ public class DatabaseCleaner {
             "payment_methods",
             "payment_intents",
             "customers",
-            "fraud_rules",
             "review_cases",
             "webhook_endpoints",
             "merchants"
@@ -46,14 +46,20 @@ public class DatabaseCleaner {
             try {
                 jdbcTemplate.execute("TRUNCATE TABLE feature_values");
                 jdbcTemplate.execute("TRUNCATE TABLE feature_snapshots");
+                jdbcTemplate.execute("TRUNCATE TABLE rule_execution_results");
+                jdbcTemplate.execute("TRUNCATE TABLE manual_review_cases");
                 jdbcTemplate.execute("TRUNCATE TABLE fraud_decisions");
             } finally {
                 jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE");
             }
         } else {
-            jdbcTemplate.execute("TRUNCATE TABLE feature_values, feature_snapshots, fraud_decisions");
+            jdbcTemplate.execute("TRUNCATE TABLE rule_execution_results, manual_review_cases, "
+                    + "feature_values, feature_snapshots, fraud_decisions");
         }
         for (var table : TABLES) {
+            if ("manual_review_cases".equals(table)) {
+                continue;
+            }
             jdbcTemplate.update("DELETE FROM " + table);
         }
         jdbcTemplate.update("""

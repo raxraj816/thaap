@@ -142,8 +142,10 @@ def run() -> None:
 
     decision = detail["decision"]
     snapshot = detail["featureSnapshot"]
-    if decision["action"] != "ALLOW" or decision["rulesetVersion"] != "rules_stub_v1":
-        raise DemoFailure("Chapter 22 must preserve allow-only rules_stub_v1 behavior")
+    if decision["action"] != "ALLOW" or decision["rulesetVersion"] != "rules_v1":
+        raise DemoFailure("current decision behavior must preserve the Chapter 22 typed lineage boundary")
+    if len(detail["ruleExecutionResults"]) != 3:
+        raise DemoFailure("current rules_v1 decision must preserve three complete rule results")
     if list(snapshot["features"].keys()) != sorted(EXPECTED_FEATURES):
         raise DemoFailure("snapshot does not contain the exact lexical V1 feature catalogue")
     public_text = json.dumps(detail, separators=(",", ":"), sort_keys=True).lower()
@@ -156,7 +158,7 @@ def run() -> None:
     if actual != EXPECTED_FEATURES or any(point_in_time != "true" for *_, point_in_time in rows):
         raise DemoFailure(f"durable typed lineage did not reconcile: {actual}")
     if attempt["status"] != "AUTHORIZED" or not attempt.get("processorAuthorizationId"):
-        raise DemoFailure("allow-only processor behavior changed")
+        raise DemoFailure("ALLOW processor behavior changed")
 
     print("Chapter 22 typed feature-lineage demo passed.")
     print(f"merchant={merchant['id']}")

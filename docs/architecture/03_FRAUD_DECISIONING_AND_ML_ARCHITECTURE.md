@@ -428,6 +428,14 @@ detailed plan: USD extreme amount block, repeated-attempt review, and USD
 elevated-amount step-up. Velocity, geography mismatch, card testing, mutable
 merchant thresholds, and rule approval remain owned by Phase 4.
 
+That Phase 3 boundary is now operational. Every new decision evaluates all
+three rules, retains match and non-match evidence, and applies deterministic
+precedence before processor authorization. V20–V24 make definitions/results
+append-only and bind copied rule and review semantics back to their immutable
+source records. V25 conservatively preserves legacy endpoint subscription
+consent when the fraud/review event vocabulary expands; the application does
+not offer a general expression language.
+
 ## 8. Card-Testing And Enumeration Incidents
 
 Card-testing is a distinct operational threat, not merely a high velocity

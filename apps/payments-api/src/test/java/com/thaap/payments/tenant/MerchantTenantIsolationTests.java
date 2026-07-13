@@ -10,8 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.review.ReviewCase;
 import com.thaap.payments.review.ReviewCaseRepository;
-import com.thaap.payments.rules.FraudRule;
-import com.thaap.payments.rules.FraudRuleRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.webhook.WebhookEventType;
 import java.util.List;
@@ -41,9 +39,6 @@ class MerchantTenantIsolationTests {
 
     @Autowired
     private ObjectMapper objectMapper;
-
-    @Autowired
-    private FraudRuleRepository fraudRuleRepository;
 
     @Autowired
     private ReviewCaseRepository reviewCaseRepository;
@@ -352,8 +347,6 @@ class MerchantTenantIsolationTests {
         var paymentIntentB = createPaymentIntent(merchantB, customerB, "tenant-fraud-pi-b", 2300);
         confirmPaymentIntent(merchantA, paymentIntentA, paymentMethodA, "tenant-fraud-confirm-a");
         confirmPaymentIntent(merchantB, paymentIntentB, paymentMethodB, "tenant-fraud-confirm-b");
-        fraudRuleRepository.save(new FraudRule(merchantA.id(), "a-rule"));
-        fraudRuleRepository.save(new FraudRule(merchantB.id(), "b-rule"));
         reviewCaseRepository.save(new ReviewCase(merchantA.id(), "OPEN"));
         reviewCaseRepository.save(new ReviewCase(merchantB.id(), "CLOSED"));
 
@@ -369,6 +362,9 @@ class MerchantTenantIsolationTests {
         assertThat(fraudDecisionDetail.get("featureSnapshot").get("featureVersion").asText())
                 .isEqualTo("features_v1");
         JsonNode features = fraudDecisionDetail.get("featureSnapshot").get("features");
+        assertThat(fraudDecisionDetail.get("ruleExecutionResults")).hasSize(3);
+        assertThat(fraudDecisionDetail.get("ruleExecutionResults").get(0).get("ruleCode").asText())
+                .isEqualTo("BLOCK_USD_EXTREME_AMOUNT_V1");
         List<String> featureNames = new java.util.ArrayList<>();
         features.fieldNames().forEachRemaining(featureNames::add);
         assertThat(featureNames).containsExactly(
@@ -380,8 +376,8 @@ class MerchantTenantIsolationTests {
         mockMvc.perform(get("/fraud/decisions/{id}", fraudDecisionId)
                         .header(API_KEY, merchantB.apiKey()))
                 .andExpect(status().isNotFound());
-        assertThat(rules).hasSize(1);
-        assertThat(rules.get(0).get("name").asText()).isEqualTo("a-rule");
+        assertThat(rules).hasSize(3);
+        assertThat(rules.get(0).get("ruleCode").asText()).isEqualTo("BLOCK_USD_EXTREME_AMOUNT_V1");
         assertThat(reviews).hasSize(1);
         assertThat(reviews.get(0).get("status").asText()).isEqualTo("OPEN");
     }

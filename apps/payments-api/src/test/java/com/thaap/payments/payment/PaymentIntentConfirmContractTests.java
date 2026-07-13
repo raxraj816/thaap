@@ -1,6 +1,10 @@
 package com.thaap.payments.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,7 +17,11 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.fraud.FeatureValue;
 import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.webhook.WebhookDeliveryService;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -28,6 +36,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -64,12 +74,22 @@ class PaymentIntentConfirmContractTests {
     @Autowired
     private FeatureValueRepository featureValueRepository;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
+    @MockitoSpyBean
+    private WebhookDeliveryService webhookDeliveryService;
+
     @BeforeEach
     void cleanDatabase() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(requestIdFilter)
                 .build();
         databaseCleaner.clean();
+        meterRegistry.clear();
+        WebhookDeliveryService webhookDeliveryServiceTarget =
+                AopTestUtils.getUltimateTargetObject(webhookDeliveryService);
+        reset(webhookDeliveryServiceTarget);
     }
 
     @Test
@@ -115,17 +135,17 @@ class PaymentIntentConfirmContractTests {
         var fraudDecision = fraudDecisionById(fraudDecisionId);
         assertThat(fraudDecision.get("MERCHANT_ID")).isEqualTo(merchant.id());
         assertThat(fraudDecision.get("PAYMENT_ATTEMPT_ID")).isEqualTo(paymentAttemptId);
-        assertThat(fraudDecision.get("RISK_SCORE").toString()).isEqualTo("0.0000");
+        assertThat(fraudDecision.get("RISK_SCORE").toString()).isEqualTo("0.0500");
         assertThat(fraudDecision.get("RISK_LEVEL")).isEqualTo("LOW");
         assertThat(fraudDecision.get("ACTION")).isEqualTo("ALLOW");
         assertThat(fraudDecision.get("MODEL_VERSION")).isNull();
-        assertThat(fraudDecision.get("RULESET_VERSION")).isEqualTo("rules_stub_v1");
+        assertThat(fraudDecision.get("RULESET_VERSION")).isEqualTo("rules_v1");
         assertThat((Long) fraudDecision.get("LATENCY_MS")).isGreaterThanOrEqualTo(0L);
         assertThat(fraudDecision.get("DECISION_STARTED_AT")).isNotNull();
         assertThat(fraudDecision.get("DECISION_COMPLETED_AT")).isNotNull();
         assertThat(fraudDecision.get("FEATURE_FRESHNESS_STATUS")).isEqualTo("FRESH");
         assertThat((Long) fraudDecision.get("MAX_FEATURE_AGE_MS")).isGreaterThanOrEqualTo(0L);
-        assertThat(fraudDecision.get("REASON_CODES")).isEqualTo("[\"RULES_NOT_ENABLED\"]");
+        assertThat(fraudDecision.get("REASON_CODES")).isEqualTo("[\"NO_RULE_MATCH\"]");
         assertThat(fraudDecision.get("CREATED_AT")).isNotNull();
 
         var featureSnapshot = featureSnapshotForDecision(fraudDecisionId);
@@ -215,7 +235,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(fraudDecisionAudit.beforeJson()).isNull();
         assertThat(fraudDecisionAudit.afterJson().get("fraudDecisionId").asText()).isEqualTo(fraudDecisionId.toString());
         assertThat(fraudDecisionAudit.afterJson().get("action").asText()).isEqualTo("ALLOW");
-        assertThat(fraudDecisionAudit.afterJson().get("reasonCodes").get(0).asText()).isEqualTo("RULES_NOT_ENABLED");
+        assertThat(fraudDecisionAudit.afterJson().get("reasonCodes").get(0).asText()).isEqualTo("NO_RULE_MATCH");
 
         AuditLogRow authorizationAudit = auditRow(auditRows, "authorization.approved");
         assertThat(authorizationAudit.aggregateType()).isEqualTo("authorization");
@@ -316,6 +336,219 @@ class PaymentIntentConfirmContractTests {
         assertThat(authorization.get("REQUESTED_AMOUNT")).isEqualTo(4200L);
         assertThat(authorization.get("AUTHORIZED_AMOUNT")).isEqualTo(4200L);
         assertThat(authorization.get("THREE_DS_RESULT")).isEqualTo("NOT_REQUIRED");
+    }
+
+    @Test
+    void fraudBlockIsTerminalAndCreatesCompleteRuleEvidenceWithoutProcessorTruth() throws Exception {
+        var merchant = createMerchant("merchant-block");
+        var customerId = createCustomer(merchant, "block@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "block-pm", "4242424242424242");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "block-pi", 5_000_000L);
+
+        JsonNode response = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "block-confirm");
+        UUID decisionId = UUID.fromString(response.get("fraudDecisionId").asText());
+
+        assertThat(response.get("status").asText()).isEqualTo("BLOCKED");
+        assertThat(response.get("processorAuthorizationId").isNull()).isTrue();
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("BLOCKED");
+        assertThat(fraudDecisionById(decisionId).get("ACTION")).isEqualTo("BLOCK");
+        assertThat(fraudDecisionById(decisionId).get("RISK_SCORE").toString()).isEqualTo("0.9500");
+        assertThat(countRuleResults(decisionId)).isEqualTo(3);
+        assertThat(countRows("authorizations")).isZero();
+        assertThat(countRows("ledger_entries")).isZero();
+    }
+
+    @Test
+    void fraudStepUpIsDistinctFromProcessorThreeDsAndCreatesNoAuthorization() throws Exception {
+        var merchant = createMerchant("merchant-step-up");
+        var customerId = createCustomer(merchant, "step-up@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "step-up-pm", "4242424242424242");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "step-up-pi", 100_000L);
+
+        JsonNode response = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "step-up-confirm");
+        UUID decisionId = UUID.fromString(response.get("fraudDecisionId").asText());
+
+        assertThat(response.get("status").asText()).isEqualTo("REQUIRES_ACTION");
+        assertThat(response.get("threeDsStatus").asText()).isEqualTo("REQUESTED");
+        assertThat(response.get("processorAuthorizationId").isNull()).isTrue();
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_ACTION");
+        assertThat(fraudDecisionById(decisionId).get("ACTION")).isEqualTo("REQUEST_3DS");
+        assertThat(countRuleResults(decisionId)).isEqualTo(3);
+        assertThat(countRows("authorizations")).isZero();
+    }
+
+    @Test
+    void thirdAttemptCreatesOneOpenReviewCaseAndCompleteEvidenceWithoutProcessorCall() throws Exception {
+        var merchant = createMerchant("merchant-review");
+        var customerId = createCustomer(merchant, "review@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "review-pm", "4999990000000003");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "review-pi", 99_999L);
+
+        assertThat(confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-confirm-1")
+                .get("status").asText()).isEqualTo("DECLINED");
+        assertThat(confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-confirm-2")
+                .get("status").asText()).isEqualTo("DECLINED");
+        JsonNode review = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-confirm-3");
+        UUID decisionId = UUID.fromString(review.get("fraudDecisionId").asText());
+
+        assertThat(review.get("status").asText()).isEqualTo("IN_REVIEW");
+        assertThat(review.get("processorAuthorizationId").isNull()).isTrue();
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("REQUIRES_REVIEW");
+        assertThat(fraudDecisionById(decisionId).get("ACTION")).isEqualTo("REVIEW");
+        assertThat(countRuleResults(decisionId)).isEqualTo(3);
+        assertThat(countRows("manual_review_cases")).isEqualTo(1);
+        assertThat(countRows("authorizations")).isEqualTo(2);
+    }
+
+    @Test
+    void reviewReadsAreTenantScopedAndMerchantCancelAtomicallyClosesPaymentAttemptAndCase() throws Exception {
+        var merchant = createMerchant("merchant-review-owner");
+        var otherMerchant = createMerchant("merchant-review-other");
+        var customerId = createCustomer(merchant, "review-owner@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "review-owner-pm", "4999990000000003");
+        var paymentIntentId = createPaymentIntent(merchant, customerId, "review-owner-pi", 99_999L);
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-owner-confirm-1");
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-owner-confirm-2");
+        JsonNode reviewAttempt = confirmPaymentIntent(
+                merchant, paymentIntentId, paymentMethodId, "review-owner-confirm-3");
+        UUID attemptId = UUID.fromString(reviewAttempt.get("id").asText());
+        UUID decisionId = UUID.fromString(reviewAttempt.get("fraudDecisionId").asText());
+
+        JsonNode list = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "1")
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(list).hasSize(1);
+        UUID reviewCaseId = UUID.fromString(list.get(0).get("id").asText());
+        assertThat(list.get(0).get("paymentIntentId").asText()).isEqualTo(paymentIntentId.toString());
+        mockMvc.perform(get("/fraud/reviews/{id}", reviewCaseId).header(API_KEY, otherMerchant.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/fraud/reviews").param("limit", "101").header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isBadRequest());
+
+        cancelPaymentIntent(merchant, paymentIntentId, "review-owner-cancel");
+
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText()).isEqualTo("CANCELED");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM payment_attempts WHERE id = ?",
+                String.class, attemptId)).isEqualTo("CANCELED");
+        java.util.Map<String, Object> canceledCase = jdbcTemplate.queryForMap(
+                "SELECT status, cancellation_reason, canceled_at FROM manual_review_cases WHERE id = ?",
+                reviewCaseId);
+        assertThat(canceledCase.get("STATUS")).isEqualTo("CANCELED");
+        assertThat(canceledCase.get("CANCELLATION_REASON")).isEqualTo("MERCHANT_CANCELED");
+        assertThat(canceledCase.get("CANCELED_AT")).isNotNull();
+        assertThat(fraudDecisionById(decisionId).get("ACTION")).isEqualTo("REVIEW");
+        assertThat(countRows("authorization_voids")).isZero();
+        assertThat(countRows("ledger_entries")).isZero();
+        JsonNode openCases = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        JsonNode canceledCases = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "CANCELED").header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(openCases).isEmpty();
+        assertThat(canceledCases).hasSize(1);
+    }
+
+    @Test
+    void reviewCancellationRollbackRetainsOpenTruthAndEmitsBoundedFailureMetrics() throws Exception {
+        MerchantAccess merchant = createMerchant("merchant-review-rollback");
+        UUID customerId = createCustomer(merchant, "review-rollback@example.com");
+        UUID paymentMethodId = createPaymentMethod(
+                merchant, customerId, "review-rollback-pm", "4999990000000003");
+        UUID paymentIntentId = createPaymentIntent(merchant, customerId, "review-rollback-pi", 99_999L);
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-rollback-confirm-1");
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-rollback-confirm-2");
+        JsonNode reviewAttempt = confirmPaymentIntent(
+                merchant, paymentIntentId, paymentMethodId, "review-rollback-confirm-3");
+        UUID attemptId = UUID.fromString(reviewAttempt.get("id").asText());
+        WebhookDeliveryService webhookDeliveryServiceTarget =
+                AopTestUtils.getUltimateTargetObject(webhookDeliveryService);
+        doThrow(new IllegalStateException("review webhook unavailable"))
+                .when(webhookDeliveryServiceTarget).createDeliveriesInCurrentTransaction(
+                        eq(merchant.id()), eq("fraud_review.canceled"), any(UUID.class),
+                        eq(TrafficOrigin.MERCHANT_API));
+
+        mockMvc.perform(post("/payment_intents/{id}/cancel", paymentIntentId)
+                        .header(API_KEY, merchant.apiKey())
+                        .header(IDEMPOTENCY_KEY, "review-rollback-cancel"))
+                .andExpect(status().isInternalServerError());
+
+        assertThat(getPaymentIntent(merchant, paymentIntentId).get("status").asText())
+                .isEqualTo("REQUIRES_REVIEW");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM payment_attempts WHERE id = ?",
+                String.class, attemptId)).isEqualTo("IN_REVIEW");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM manual_review_cases",
+                String.class)).isEqualTo("OPEN");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM idempotency_records
+                WHERE merchant_id = ? AND idempotency_key = 'review-rollback-cancel'
+                """, Integer.class, merchant.id())).isZero();
+        assertThat(meterRegistry.get("fraud_review_case_cancellation_failures_total")
+                .tags("status", "ROLLED_BACK", "traffic_origin", "MERCHANT_API",
+                        "cause", "TRANSACTION_ROLLED_BACK")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("fraud_decision_failures_total")
+                .tags("stage", "REVIEW_CANCELLATION", "cause", "TRANSACTION_ROLLED_BACK",
+                        "feature_code", "NONE")
+                .counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void reviewListUsesStableBoundedTenantOwnedCursorPagination() throws Exception {
+        var merchant = createMerchant("merchant-review-pagination");
+        var otherMerchant = createMerchant("merchant-review-pagination-other");
+        var emptyMerchant = createMerchant("merchant-review-pagination-empty");
+        var customerId = createCustomer(merchant, "review-pages@example.com");
+        var paymentMethodId = createPaymentMethod(merchant, customerId, "review-pages-pm", "4999990000000003");
+        createReviewCase(merchant, customerId, paymentMethodId, "page-a");
+        createReviewCase(merchant, customerId, paymentMethodId, "page-b");
+        createReviewCase(merchant, customerId, paymentMethodId, "page-c");
+        jdbcTemplate.update("UPDATE manual_review_cases SET created_at = ?",
+                OffsetDateTime.parse("2026-07-13T00:00:00Z"));
+
+        JsonNode firstPage = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "2")
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(firstPage).hasSize(2);
+        String cursor = firstPage.get(1).get("id").asText();
+        JsonNode secondPage = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "2").param("starting_after", cursor)
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(secondPage).hasSize(1);
+        assertThat(secondPage.get(0).get("id").asText())
+                .isNotEqualTo(firstPage.get(0).get("id").asText())
+                .isNotEqualTo(firstPage.get(1).get("id").asText());
+        JsonNode repeatedSecondPage = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "2").param("starting_after", cursor)
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(repeatedSecondPage).isEqualTo(secondPage);
+        JsonNode maximumPage = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "100")
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(maximumPage).hasSize(3);
+        JsonNode emptyPage = objectMapper.readTree(mockMvc.perform(get("/fraud/reviews")
+                        .param("status", "OPEN").param("limit", "1")
+                        .header(API_KEY, emptyMerchant.apiKey()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(emptyPage).isEmpty();
+        mockMvc.perform(get("/fraud/reviews").param("starting_after", cursor)
+                        .header(API_KEY, otherMerchant.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/fraud/reviews").param("starting_after", UUID.randomUUID().toString())
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/fraud/reviews").param("starting_after", "not-a-uuid")
+                        .header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/fraud/reviews").param("limit", "0").header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/fraud/reviews").header(API_KEY, merchant.apiKey()))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @ParameterizedTest
@@ -478,6 +711,7 @@ class PaymentIntentConfirmContractTests {
         JsonNode detail = objectMapper.readTree(response);
         assertThat(detail.get("decision").get("rulesetVersion").asText()).isEqualTo("rules_stub_v1");
         assertThat(detail.get("decision").get("reasonCodes").get(0).asText()).isEqualTo("RULES_NOT_ENABLED");
+        assertThat(detail.get("ruleExecutionResults")).isEmpty();
         assertThat(detail.get("featureSnapshot").get("features").get("payment_amount").asLong()).isEqualTo(1200L);
         assertThat(detail.get("featureSnapshot").get("features").get("card_bin").asText()).isEqualTo("499999");
         assertThat(jdbcTemplate.queryForObject("""
@@ -738,6 +972,16 @@ class PaymentIntentConfirmContractTests {
         return UUID.fromString(objectMapper.readTree(response).get("id").asText());
     }
 
+    private void createReviewCase(MerchantAccess merchant, UUID customerId, UUID paymentMethodId, String suffix)
+            throws Exception {
+        UUID paymentIntentId = createPaymentIntent(merchant, customerId, "review-" + suffix + "-intent", 99_999L);
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-" + suffix + "-confirm-1");
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "review-" + suffix + "-confirm-2");
+        JsonNode review = confirmPaymentIntent(
+                merchant, paymentIntentId, paymentMethodId, "review-" + suffix + "-confirm-3");
+        assertThat(review.get("status").asText()).isEqualTo("IN_REVIEW");
+    }
+
     private JsonNode confirmPaymentIntent(MerchantAccess merchant, UUID paymentIntentId, UUID paymentMethodId,
             String idempotencyKey) throws Exception {
         var response = mockMvc.perform(post("/payment_intents/{id}/confirm", paymentIntentId)
@@ -815,6 +1059,12 @@ class PaymentIntentConfirmContractTests {
 
     private int countRows(String table) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+    }
+
+    private int countRuleResults(UUID fraudDecisionId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM rule_execution_results WHERE fraud_decision_id = ?",
+                Integer.class, fraudDecisionId);
     }
 
     private java.util.Map<String, Object> authorizationForAttempt(UUID paymentAttemptId) {

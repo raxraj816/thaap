@@ -154,15 +154,20 @@ class PaymentIntentConfirmProcessorAdapterCallTests {
         UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-" + action);
         UUID paymentIntentId = createPaymentIntent(merchant, customerId, "confirm-pi-" + action, 1200);
 
-        confirmPaymentIntentExpectingConflict(merchant, paymentIntentId, paymentMethodId, "confirm-" + action);
+        JsonNode response = confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId, "confirm-" + action);
 
         verifyNoInteractions(processorAdapter);
-        org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isZero();
-        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isZero();
-        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isZero();
+        org.assertj.core.api.Assertions.assertThat(countRows("payment_attempts")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countRows("fraud_decisions")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countRows("feature_snapshots")).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(countRows("authorizations")).isZero();
-        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isZero();
-        org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
+        org.assertj.core.api.Assertions.assertThat(countRows("audit_logs")).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(response.get("status").asText())
+                .isEqualTo(action == FraudDecisionAction.BLOCK ? "BLOCKED" : "IN_REVIEW");
+        org.assertj.core.api.Assertions.assertThat(paymentIntentStatus(paymentIntentId))
+                .isEqualTo(action == FraudDecisionAction.BLOCK ? "BLOCKED" : "REQUIRES_REVIEW");
+        org.assertj.core.api.Assertions.assertThat(countRows("manual_review_cases"))
+                .isEqualTo(action == FraudDecisionAction.REVIEW ? 1 : 0);
     }
 
     @Test

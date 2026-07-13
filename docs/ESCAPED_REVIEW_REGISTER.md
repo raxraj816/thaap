@@ -734,7 +734,7 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: Every immutable FeatureValue must declare the same value type as its referenced immutable FeatureDefinition.
 - Finding: The composite definition foreign key bound definition ID, code, and version but omitted `value_type`, so direct PostgreSQL writes could attach a LONG value to a STRING definition and make the corrupt row immutable.
 - Why prior review missed it: Database tests crossed definition ID with feature code and crossed declared type with populated columns, but never crossed a valid definition triple with each incompatible declared value type.
-- Resolution evidence: V18 and the JPA mapping now make `(definition ID, code, version, value type)` one identity. `databaseBindsEveryDeclaredValueTypeToTheReferencedDefinitionType` crosses every seeded definition with LONG, STRING, BOOLEAN, and DECIMAL, accepts only its required type, and rejects all incompatible types on PostgreSQL while the full 301-test backend suite passes without skips.
+- Resolution evidence: The originally shipped V18 bytes remain unchanged; forward V22 and the JPA mapping make `(definition ID, code, version, value type)` one identity. `databaseBindsEveryDeclaredValueTypeToTheReferencedDefinitionType` crosses every seeded definition with LONG, STRING, BOOLEAN, and DECIMAL, accepts only its required type, and rejects all incompatible types on PostgreSQL while the full suite passes without skips.
 - Process correction: Composite lineage reviews must compare every copied semantic discriminator with the referenced source row; typed-column shape alone cannot certify definition/type agreement.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-12
@@ -772,3 +772,88 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Transaction proof must inject failure at the actual deferred SQL boundary; a mock before SQL and a successful database wait cannot be composed into failure evidence.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-12
+
+## ER-0046
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 22
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-13
+- Escaped gate: Phase 3 retained-database public demo startup
+- Invariant: An already-applied Chapter 22 database must validate and migrate forward without editing the checksum or semantics of V18 in place.
+- Finding: ER-0043 repaired the definition/value type foreign key by editing V18 after the retained local database had already applied the original V18. Flyway therefore rejects startup on checksum validation before any later repair migration can run.
+- Why prior review missed it: Fresh-schema and V17-to-current tests both resolved V18 from the final source tree; neither test recreated the actually shipped original V18 checksum and then upgraded through the post-closure repair.
+- Resolution evidence: V18 is restored to the exact shipped checksum `1512291140`; V22 forward-migrates the three-column definition identity to the required four-column type-bound identity. `chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage` stops a real PostgreSQL schema at V19, asserts the shipped checksum and historical bytes, then migrates through V24 and proves immutable catalogues, legacy preservation, semantic foreign keys, append-only review history, and selective webhook-subscription preservation. The retained local V19 database validated without repair, migrated through V22, passed Hibernate/readiness, and completed the all-action demo; it later migrated V22→V24 successfully before correctly failing unrelated webhook-key readiness when that historical key was intentionally unavailable.
+- Process correction: Once any migration has been applied by a supported demo or environment, every later repair must use a new forward migration; upgrade proof must start from the exact shipped migration bytes/checksum, not only an older target resolved from the current source tree.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-13
+
+## ER-0047
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 25
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-13
+- Escaped gate: Post-closure Senior Staff webhook-consent review
+- Invariant: A migration may not subscribe an existing merchant endpoint to newly introduced fraud or review event types without durable evidence of explicit wildcard consent.
+- Finding: V20 added four new fraud subscriptions to every endpoint and V23 removed them only from endpoints with fewer than all five legacy subscriptions. Because the old schema stored the same five rows for an explicitly selected full set and the omitted-field default, an exact-five endpoint was silently expanded without distinguishable consent.
+- Why prior review missed it: Upgrade proof covered a selective one-event endpoint but omitted the equally valid exact-all legacy partition and treated row-count equality as wildcard intent without a durable subscription-mode field.
+- Resolution evidence: Forward-only V25 removes the four V20-added event rows from every legacy endpoint whose old and new subscriptions have different creation cohorts. `PostgreSqlMigrationTests.chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage` proves an explicit one-event endpoint remains at one, an exact-five legacy endpoint is repaired from nine at V24 to five at V25, and a post-Phase-3 endpoint whose nine rows share one cohort remains at nine. Fresh H2/PostgreSQL migration and Hibernate validation also pass through V25.
+- Process correction: Every subscription expansion must enumerate explicit subset, explicit full set, omitted default, and durable wildcard representations; absence of a wildcard discriminator requires conservative no-expansion migration behavior.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-13
+
+## ER-0048
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 23
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-13
+- Escaped gate: Post-closure Senior Staff transaction-boundary review
+- Invariant: A real PostgreSQL rule-result constraint failure at flush must occur before processor authorization and roll back every confirm artifact while permitting one coherent same-key retry.
+- Finding: Rule-result rollback tests failed mocked repository save calls, while the only real confirm-path PostgreSQL failure corrupted a FeatureValue. Direct rule semantic constraint tests did not execute through confirm, idempotency ownership, or the processor boundary.
+- Why prior review missed it: The closure composed mock position coverage, isolated SQL rejection, and successful rule-table lock waits into a claim about deferred rule-result flush failure.
+- Resolution evidence: `Chapter22FeatureLineagePostgreSqlConcurrencyTests.realRuleResultFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` corrupts copied action semantics so `fk_rule_results_rule_semantics` fails at the production `ruleExecutionResultRepository.flush()` boundary. It proves zero processor calls and zero attempt/decision/snapshot/value/result/authorization rows, reservation deletion, restored intent state, then one coherent same-key retry with exactly one complete lineage and processor call.
+- Process correction: Each new deferred SQL family requires at least one constraint failure through the production transaction, not evidence borrowed from an adjacent persistence family.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-13
+
+## ER-0049
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 24
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-13
+- Escaped gate: Post-closure Senior Staff observability review
+- Invariant: Decision and review-cancellation success or rollback must emit bounded, contract-named operational signals only after the transaction outcome is known.
+- Finding: Engine failure used `fraud_rule_decision_failures_total` instead of the frozen `fraud_decision_failures_total` family, decision/review rollback after evaluation had no outcome observer, and cancellation exposed only a success counter.
+- Why prior review missed it: The metric test invoked failure recording but asserted neither its meter name nor count, and happy-path after-commit tests were treated as proof of rollback observability.
+- Resolution evidence: `FraudDecisionMetrics` now uses the frozen `fraud_decision_failures_total{stage,cause,feature_code}` family and transaction-completion observers for decision and cancellation success/rollback. Cancellation rollback also emits `fraud_review_case_cancellation_failures_total{status,traffic_origin,cause}`. `FraudDecisionMetricsTests` proves exact commit/rollback meter names, tags, and counts; `PaymentIntentConfirmContractTests.cancelReviewWebhookFailureRollsBackAllStateAndEmitsBoundedFailureMetrics` proves the real cancellation/webhook rollback retains open payment/review truth and releases idempotency ownership while emitting only bounded failure signals.
+- Process correction: Metric proof must assert exact names, complete tag sets, timing relative to commit, and every promised rollback partition.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-13
+
+## ER-0050
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 24
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-13
+- Escaped gate: Post-closure Senior Staff API boundary-family review
+- Invariant: A PASS pagination claim must enumerate limits, empty and repeated pages, equal sort timestamps, malformed/missing/foreign cursors, status filters, and unsupported mutation methods at the public API boundary.
+- Finding: C24-API-001 claimed all named partitions, but tests covered only ordinary pagination, a foreign cursor, 0/101 limits, and a one-row PostgreSQL cursor query.
+- Why prior review missed it: The proof review matched broad test names to matrix prose without tracing each enumerated partition to an executable assertion.
+- Resolution evidence: `PaymentIntentConfirmContractTests.reviewListIsBoundedStableAndTenantScoped` now proves empty and status-filtered reads, limits 0/1/100, repeated-page equality, malformed/missing/foreign cursors, and unsupported POST as bounded 405; the 101 upper bound remains covered by the existing validation assertion. `Chapter22FeatureLineagePostgreSqlConcurrencyTests.reviewCursorPaginationUsesStablePostgreSqlOrderingForEqualTimestamps` forces three same-merchant rows to one timestamp and proves 2+1 keyset pages with no skips or duplicates on PostgreSQL. The 405 repair is enforced centrally by `GlobalApiExceptionHandler` with an `Allow` header.
+- Process correction: Every matrix partition must map to a named assertion or be explicitly rejected as unreachable with enforcement evidence.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-13

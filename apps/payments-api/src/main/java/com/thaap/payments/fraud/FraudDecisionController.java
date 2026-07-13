@@ -17,11 +17,14 @@ public class FraudDecisionController {
 
     private final FraudDecisionRepository fraudDecisionRepository;
     private final FeatureSnapshotRepository featureSnapshotRepository;
+    private final RuleExecutionResultRepository ruleExecutionResultRepository;
 
     public FraudDecisionController(FraudDecisionRepository fraudDecisionRepository,
-            FeatureSnapshotRepository featureSnapshotRepository) {
+            FeatureSnapshotRepository featureSnapshotRepository,
+            RuleExecutionResultRepository ruleExecutionResultRepository) {
         this.fraudDecisionRepository = fraudDecisionRepository;
         this.featureSnapshotRepository = featureSnapshotRepository;
+        this.ruleExecutionResultRepository = ruleExecutionResultRepository;
     }
 
     @GetMapping("/fraud/decisions")
@@ -39,7 +42,11 @@ public class FraudDecisionController {
                 .findByFraudDecisionIdAndMerchantId(decision.getId(), merchantContext.merchantId())
                 .map(FeatureSnapshotResponse::from)
                 .orElse(null);
-        return FraudDecisionDetailResponse.from(decision, featureSnapshot);
+        List<RuleExecutionResultResponse> ruleResults = ruleExecutionResultRepository
+                .findByFraudDecisionIdAndMerchantIdOrderByPriorityAscRuleCodeAsc(
+                        decision.getId(), merchantContext.merchantId())
+                .stream().map(RuleExecutionResultResponse::from).toList();
+        return FraudDecisionDetailResponse.from(decision, featureSnapshot, ruleResults);
     }
 
     public record FraudDecisionResponse(UUID id, UUID merchantId, UUID paymentAttemptId, BigDecimal riskScore,
@@ -58,9 +65,24 @@ public class FraudDecisionController {
         }
     }
 
-    public record FraudDecisionDetailResponse(FraudDecisionResponse decision, FeatureSnapshotResponse featureSnapshot) {
-        static FraudDecisionDetailResponse from(FraudDecision decision, FeatureSnapshotResponse featureSnapshot) {
-            return new FraudDecisionDetailResponse(FraudDecisionResponse.from(decision), featureSnapshot);
+    public record FraudDecisionDetailResponse(FraudDecisionResponse decision, FeatureSnapshotResponse featureSnapshot,
+            List<RuleExecutionResultResponse> ruleExecutionResults) {
+        static FraudDecisionDetailResponse from(FraudDecision decision, FeatureSnapshotResponse featureSnapshot,
+                List<RuleExecutionResultResponse> ruleExecutionResults) {
+            return new FraudDecisionDetailResponse(FraudDecisionResponse.from(decision), featureSnapshot,
+                    List.copyOf(ruleExecutionResults));
+        }
+    }
+
+    public record RuleExecutionResultResponse(UUID id, String ruleCode, String ruleVersion, int priority,
+            boolean matched, FraudDecisionAction action, FraudDecisionReasonCode reasonCode,
+            RuleEvaluationOutcome evaluationOutcome, long latencyUs,
+            com.thaap.payments.tenant.TrafficOrigin trafficOrigin, Instant createdAt) {
+        static RuleExecutionResultResponse from(RuleExecutionResult result) {
+            return new RuleExecutionResultResponse(result.getId(), result.getRuleCode(), result.getRuleVersion(),
+                    result.getPriority(), result.isMatched(), result.getAction(), result.getReasonCode(),
+                    result.getEvaluationOutcome(), result.getLatencyUs(), result.getTrafficOrigin(),
+                    result.getCreatedAt());
         }
     }
 

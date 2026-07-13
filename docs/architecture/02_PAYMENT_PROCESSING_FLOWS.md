@@ -634,8 +634,8 @@ Simulator response should include:
 The public fixture table lives in
 [`PROCESSOR_AUTHORIZATION.md`](../learning/concepts/PROCESSOR_AUTHORIZATION.md).
 A processor `SUSPECTED_FRAUD` decline is issuer/network evidence; it does not
-become a THAAP FraudDecision. Phase 3 owns the first real `BLOCK`,
-`REQUEST_3DS`, and `REVIEW` decisions.
+become a THAAP FraudDecision. Phase 3 now supplies real `BLOCK`,
+`REQUEST_3DS`, and `REVIEW` decisions before the processor boundary.
 
 ## 18. Failure Modes
 

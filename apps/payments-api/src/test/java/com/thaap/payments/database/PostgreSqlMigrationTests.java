@@ -909,7 +909,7 @@ class PostgreSqlMigrationTests {
     }
 
     @Test
-    void chapter21ToChapter22UpgradePreservesHistoricalStubDecisionAndSeedsImmutableCatalogue() {
+    void chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage() {
         String schema = "chapter22_upgrade_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
@@ -971,8 +971,97 @@ class PostgreSqlMigrationTests {
                     VALUES (?, ?, ?, ?, 'features_v1', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'FRESH',
                             '[]', '[]', 'MERCHANT_API', CURRENT_TIMESTAMP)
                     """.formatted(schema), snapshotId, merchantId, decisionId, paymentAttemptId, historicalSnapshot);
+            UUID legacyRuleId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.fraud_rules (id, merchant_id, name, created_at)
+                    VALUES (?, ?, 'legacy-placeholder-rule', CURRENT_TIMESTAMP)
+                    """.formatted(schema), legacyRuleId, merchantId);
 
             migrateSchema(upgradeDataSource, schema, "19");
+
+            UUID subsetWebhookEndpointId = UUID.randomUUID();
+            UUID fullSetWebhookEndpointId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints
+                        (id, merchant_id, url, operational_status, signing_secret_prefix,
+                         signing_secret_hash, signing_secret_generation, created_at)
+                    VALUES (?, ?, 'https://subset.example/webhooks', 'DISABLED', 'whsec_', ?, ?,
+                            CURRENT_TIMESTAMP - INTERVAL '2 seconds')
+                    """.formatted(schema), subsetWebhookEndpointId, merchantId,
+                    "subset-webhook-" + subsetWebhookEndpointId, UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_event_subscriptions
+                        (merchant_id, webhook_endpoint_id, event_type, created_at)
+                    VALUES (?, ?, 'payment_intent.created', CURRENT_TIMESTAMP - INTERVAL '1 second')
+                    """.formatted(schema), merchantId, subsetWebhookEndpointId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints
+                        (id, merchant_id, url, operational_status, signing_secret_prefix,
+                         signing_secret_hash, signing_secret_generation, created_at)
+                    VALUES (?, ?, 'https://full-set.example/webhooks', 'DISABLED', 'whsec_', ?, ?,
+                            CURRENT_TIMESTAMP - INTERVAL '2 seconds')
+                    """.formatted(schema), fullSetWebhookEndpointId, merchantId,
+                    "full-set-webhook-" + fullSetWebhookEndpointId, UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_event_subscriptions
+                        (merchant_id, webhook_endpoint_id, event_type, created_at)
+                    SELECT ?, ?, event.event_type, CURRENT_TIMESTAMP - INTERVAL '1 second'
+                    FROM (VALUES
+                        ('payment_intent.created'),
+                        ('payment_attempt.created'),
+                        ('payment_intent.captured'),
+                        ('payment_intent.canceled'),
+                        ('refund.created')
+                    ) AS event(event_type)
+                    """.formatted(schema), merchantId, fullSetWebhookEndpointId);
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT checksum FROM %s.flyway_schema_history WHERE version = '18'
+                    """.formatted(schema), Integer.class)).isEqualTo(1512291140);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT ruleset_version FROM %s.fraud_decisions WHERE id = ?
+                    """.formatted(schema), String.class, decisionId)).isEqualTo("rules_stub_v1");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT features_json FROM %s.feature_snapshots WHERE id = ?
+                    """.formatted(schema), String.class, snapshotId)).isEqualTo(historicalSnapshot);
+
+            migrateSchema(upgradeDataSource, schema, "24");
+
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ?
+                    """.formatted(schema), Integer.class, fullSetWebhookEndpointId)).isEqualTo(9);
+
+            UUID postPhaseThreeWebhookEndpointId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints
+                        (id, merchant_id, url, operational_status, signing_secret_prefix,
+                         signing_secret_hash, signing_secret_generation, created_at)
+                    VALUES (?, ?, 'https://post-phase-three.example/webhooks', 'DISABLED', 'whsec_', ?, ?,
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), postPhaseThreeWebhookEndpointId, merchantId,
+                    "post-phase-three-webhook-" + postPhaseThreeWebhookEndpointId, UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_event_subscriptions
+                        (merchant_id, webhook_endpoint_id, event_type, created_at)
+                    SELECT ?, ?, event.event_type, endpoint.created_at
+                    FROM %s.webhook_endpoints endpoint
+                    CROSS JOIN (VALUES
+                        ('payment_intent.created'),
+                        ('payment_attempt.created'),
+                        ('payment_intent.captured'),
+                        ('payment_intent.canceled'),
+                        ('payment_intent.blocked'),
+                        ('payment_intent.requires_action'),
+                        ('fraud_review.opened'),
+                        ('fraud_review.canceled'),
+                        ('refund.created')
+                    ) AS event(event_type)
+                    WHERE endpoint.id = ?
+                    """.formatted(schema, schema), merchantId, postPhaseThreeWebhookEndpointId,
+                    postPhaseThreeWebhookEndpointId);
+
+            migrateSchema(upgradeDataSource, schema, "25");
 
             assertThat(upgradeJdbcTemplate.queryForObject("""
                     SELECT ruleset_version FROM %s.fraud_decisions WHERE id = ?
@@ -986,6 +1075,27 @@ class PostgreSqlMigrationTests {
             assertThat(upgradeJdbcTemplate.queryForObject("""
                     SELECT COUNT(*) FROM %s.feature_definitions WHERE feature_version = 'v1'
                     """.formatted(schema), Integer.class)).isEqualTo(7);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.fraud_rules WHERE ruleset_version = 'rules_v1'
+                    """.formatted(schema), Integer.class)).isEqualTo(3);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT name FROM %s.legacy_fraud_rules WHERE id = ?
+                    """.formatted(schema), String.class, legacyRuleId)).isEqualTo("legacy-placeholder-rule");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.rule_execution_results
+                    """.formatted(schema), Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ?
+                    """.formatted(schema), Integer.class, subsetWebhookEndpointId)).isEqualTo(1);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ?
+                    """.formatted(schema), Integer.class, fullSetWebhookEndpointId)).isEqualTo(5);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ?
+                    """.formatted(schema), Integer.class, postPhaseThreeWebhookEndpointId)).isEqualTo(9);
             assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
                     UPDATE %s.feature_definitions SET value_type = 'STRING'
                     WHERE feature_code = 'payment.amount_minor'
@@ -997,6 +1107,33 @@ class PostgreSqlMigrationTests {
                     VALUES (?, 'unsafe.extra', 'PAYMENT_ATTEMPT', 'STRING', 'TEST', 'v1', 'unsafe',
                             CURRENT_TIMESTAMP)
                     """.formatted(schema), UUID.randomUUID())).hasMessageContaining("feature lineage is immutable");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.fraud_rules SET long_threshold = 1
+                    WHERE rule_code = 'BLOCK_USD_EXTREME_AMOUNT_V1'
+                    """.formatted(schema))).hasMessageContaining("rule lineage is immutable");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    DELETE FROM %s.fraud_rules
+                    WHERE rule_code = 'REVIEW_REPEATED_ATTEMPT_V1'
+                    """.formatted(schema))).hasMessageContaining("rule lineage is immutable");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.rule_execution_results
+                        (id, merchant_id, fraud_decision_id, rule_id, rule_code, rule_version,
+                         priority, matched, action, reason_code, evaluation_outcome, latency_us,
+                         traffic_origin, created_at)
+                    VALUES (?, ?, ?, '23000000-0000-0000-0000-000000000001',
+                            'BLOCK_USD_EXTREME_AMOUNT_V1', 'rules_v1', 100, FALSE, 'REVIEW',
+                            'EXTREME_AMOUNT', 'NO_MATCH', 0, 'MERCHANT_API', CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID(), merchantId, decisionId))
+                    .hasMessageContaining("fk_rule_results_rule_semantics");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.manual_review_cases
+                        (id, merchant_id, payment_intent_id, payment_attempt_id, fraud_decision_id,
+                         decision_action, status, reason_codes, traffic_origin, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'REVIEW', 'OPEN', '["RULES_NOT_ENABLED"]',
+                            'MERCHANT_API', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """.formatted(schema), UUID.randomUUID(), merchantId, paymentIntentId,
+                    paymentAttemptId, decisionId))
+                    .hasMessageContaining("fk_manual_reviews_decision_lineage");
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
