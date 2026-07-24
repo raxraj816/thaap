@@ -57,7 +57,7 @@
 | Processor catalog | Eight mapped outcomes plus unmapped default approval; status, network, code, amounts, CVC, both AVS fields, 3DS, and fraud action | `SimulatorProcessorCatalogTests`, `PaymentIntentConfirmContractTests`, and fresh Chapter 20 runner |
 | Lifecycle | Approved/declined/action-required crossed with automatic/manual capture and capture/cancel/refund attempts | Capture, cancel/void, refund, lifecycle, rollback, and fresh Chapter 17–18 proof |
 | Concurrency | Capture/cancel, refund/refund, webhook claim/disable, retry-finalize/disable, route/disable, and rotate/disable orderings | Forced PostgreSQL suites with lock-wait evidence and durable postconditions |
-| Report privacy | Nine card values, API key, signing secret, buyer identity, and payment-method/intent/confirm idempotency keys | `Chapter20ProcessorCatalogTests.test_sensitive_report_scan_rejects_card_credentials_and_idempotency` plus fresh report scan |
+| Report privacy | Nine card values, API key, signing secret, buyer identity, and payment-method/intent/confirm idempotency keys | `ProcessorOutcomeCatalogDemoTests.test_sensitive_report_scan_rejects_card_credentials_and_idempotency` plus fresh report scan |
 | Demo origin/output | Loopback IPv4/IPv6 versus remote, path, user-info, query, and non-HTTP origins; 301/302/303/307/308 rejection before a second request; atomic success versus no report on failure | Chapter 20 Python origin, real-server redirect, and atomic-write tests |
 | Webhook protocol | Authenticated bytes, identity, grammar, size, timeout, DNS, retry, stale worker, disable, duplicate, and restart partitions | Chapter 19 socket/security/concurrency/callback suites rerun in full readiness |
 | Migration | Clean schema plus supported/invalid V5–V9 parent/child state partitions on H2 and PostgreSQL | `DatabaseMigrationTests` and `PostgreSqlMigrationTests` |
@@ -111,7 +111,7 @@ the redirect target.
   `python3 -m unittest discover -s scripts -p '*_tests.py'`
   passed 49 tests.
 - Catalog Python:
-  `python3 -m unittest scripts/chapter20_processor_catalog_tests.py`
+  `python3 -m unittest scripts/processor_outcome_catalog_demo_tests.py`
   passed five tests covering catalog enumeration, origin partitions, all 30x
   redirect statuses, sensitive values, and atomic owner-only output.
 - Existing forced PostgreSQL suites cover one capture/cancel winner, one

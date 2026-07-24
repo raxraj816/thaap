@@ -67,7 +67,7 @@ startup correctly remained fail-closed without the historical webhook key.
 
 ## Demo evidence
 
-`demo-chapter-25-fraud-decision-mvp.py` accepts only loopback HTTP, disables
+`demo-fraud-decision-loop.py` accepts only loopback HTTP, disables
 environment proxies, rejects redirects, uses public writes, and reconciles with
 read-only PostgreSQL. It passed with actions ALLOW/REQUEST_3DS/BLOCK/REVIEW,
 6 decisions, 42 values, 18 results, 3 authorizations, 1 canceled review, exact

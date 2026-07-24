@@ -2,6 +2,8 @@ package com.thaap.payments.idempotency;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thaap.payments.authentication.AuthenticationReplayCipher;
+import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import java.time.Clock;
@@ -27,13 +29,15 @@ public class IdempotencyService {
     private final IdempotencyRepository idempotencyRepository;
     private final ObjectMapper objectMapper;
     private final SensitiveValueHasher sensitiveValueHasher;
+    private final AuthenticationReplayCipher authenticationReplayCipher;
     private final TransactionTemplate operationTransaction;
     private final TransactionTemplate reservationTransaction;
     private final Clock clock;
     private final Duration reservationLease;
 
     public IdempotencyService(IdempotencyRepository idempotencyRepository, ObjectMapper objectMapper,
-            SensitiveValueHasher sensitiveValueHasher, PlatformTransactionManager transactionManager,
+            SensitiveValueHasher sensitiveValueHasher, AuthenticationReplayCipher authenticationReplayCipher,
+            PlatformTransactionManager transactionManager,
             Clock clock,
             @Value("${thaap.idempotency.reservation-lease:30s}") Duration reservationLease) {
         if (reservationLease.isZero() || reservationLease.isNegative()) {
@@ -42,6 +46,7 @@ public class IdempotencyService {
         this.idempotencyRepository = idempotencyRepository;
         this.objectMapper = objectMapper;
         this.sensitiveValueHasher = sensitiveValueHasher;
+        this.authenticationReplayCipher = authenticationReplayCipher;
         this.clock = clock;
         this.reservationLease = reservationLease;
         this.operationTransaction = new TransactionTemplate(transactionManager);
@@ -51,6 +56,18 @@ public class IdempotencyService {
 
     public <T> ResponseEntity<T> execute(MerchantContext merchantContext, String key, String operation, Object request,
             Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
+        return execute(IdempotencyPrincipal.merchant(merchantContext), key, operation,
+                request, responseType, operationSupplier);
+    }
+
+    public <T> ResponseEntity<T> execute(RiskOperatorContext operatorContext, String key, String operation,
+            Object request, Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
+        return execute(IdempotencyPrincipal.riskOperator(operatorContext), key, operation,
+                request, responseType, operationSupplier);
+    }
+
+    private <T> ResponseEntity<T> execute(IdempotencyPrincipal principal, String key, String operation,
+            Object request, Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
         if (key == null || key.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
         }
@@ -63,7 +80,7 @@ public class IdempotencyService {
         String currentRequestHash = requestHash(
                 serializedRequest, sensitiveValueHasher.currentKeyVersion());
         IdempotencyReservation reservation = reserve(
-                merchantContext.merchantId(), key, operation, serializedRequest,
+                principal, key, operation, serializedRequest,
                 currentRequestHash, sensitiveValueHasher.currentKeyVersion());
         if (reservation.replayRecord() != null) {
             return replay(reservation.replayRecord(), responseType);
@@ -80,31 +97,32 @@ public class IdempotencyService {
 
     private <T> ResponseEntity<T> replay(IdempotencyRecord record, Class<T> responseType) {
         try {
-            T response = objectMapper.readValue(record.getResponseBody(), responseType);
+            String responseBody = unprotectResponse(record);
+            T response = objectMapper.readValue(responseBody, responseType);
             return ResponseEntity.status(record.getHttpStatus()).body(response);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Stored idempotency response is not readable", exception);
         }
     }
 
-    private IdempotencyReservation reserve(UUID merchantId, String key, String operation,
+    private IdempotencyReservation reserve(IdempotencyPrincipal principal, String key, String operation,
             String serializedRequest, String currentRequestHash,
             String currentRequestHashKeyVersion) {
         try {
             return reservationTransaction.execute(status -> reserveOnce(
-                    merchantId, key, operation, serializedRequest,
+                    principal, key, operation, serializedRequest,
                     currentRequestHash, currentRequestHashKeyVersion));
         } catch (DataIntegrityViolationException exception) {
             return reservationTransaction.execute(status -> handleExisting(
-                    merchantId, key, operation, serializedRequest,
+                    principal, key, operation, serializedRequest,
                     currentRequestHash, currentRequestHashKeyVersion));
         }
     }
 
-    private IdempotencyReservation reserveOnce(UUID merchantId, String key, String operation,
+    private IdempotencyReservation reserveOnce(IdempotencyPrincipal principal, String key, String operation,
             String serializedRequest, String currentRequestHash,
             String currentRequestHashKeyVersion) {
-        return idempotencyRepository.findByMerchantIdAndKeyForUpdate(merchantId, key)
+        return findPrincipalRecord(principal, key)
                 .map(record -> handleExisting(
                         record, operation, serializedRequest,
                         currentRequestHash, currentRequestHashKeyVersion))
@@ -112,7 +130,7 @@ public class IdempotencyService {
                     Instant now = clock.instant();
                     UUID leaseToken = UUID.randomUUID();
                     IdempotencyRecord record = new IdempotencyRecord(
-                            merchantId, key, operation, currentRequestHash,
+                            principal, key, operation, currentRequestHash,
                             currentRequestHashKeyVersion,
                             leaseToken, now.plus(reservationLease),
                             now, now.plus(DEFAULT_KEY_TTL));
@@ -121,14 +139,21 @@ public class IdempotencyService {
                 });
     }
 
-    private IdempotencyReservation handleExisting(UUID merchantId, String key, String operation,
+    private IdempotencyReservation handleExisting(IdempotencyPrincipal principal, String key, String operation,
             String serializedRequest, String currentRequestHash,
             String currentRequestHashKeyVersion) {
-        IdempotencyRecord record = idempotencyRepository.findByMerchantIdAndKeyForUpdate(merchantId, key)
+        IdempotencyRecord record = findPrincipalRecord(principal, key)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                         "Idempotency key reservation could not be completed"));
         return handleExisting(record, operation, serializedRequest,
                 currentRequestHash, currentRequestHashKeyVersion);
+    }
+
+    private java.util.Optional<IdempotencyRecord> findPrincipalRecord(
+            IdempotencyPrincipal principal, String key) {
+        return idempotencyRepository.findByPrincipalAndKeyForUpdate(
+                principal.merchantId(), principal.type(), principal.principalId(),
+                principal.credentialPrefix(), key);
     }
 
     private IdempotencyReservation handleExisting(IdempotencyRecord record, String operation,
@@ -169,8 +194,9 @@ public class IdempotencyService {
             record.requireOwnedInProgress(leaseToken);
             ResponseEntity<T> response = operationSupplier.get();
             Instant completedAt = clock.instant();
+            String responseBody = protectResponse(record, write(response.getBody()));
             record.complete(leaseToken, response.getStatusCode().value(),
-                    write(response.getBody()), completedAt,
+                    responseBody, completedAt,
                     completedAt.plus(DEFAULT_KEY_TTL));
             return response;
         });
@@ -196,6 +222,28 @@ public class IdempotencyService {
         }
     }
 
+    private String protectResponse(IdempotencyRecord record, String responseBody) {
+        if (!responseBody.matches("(?s).*\\\"clientSecret\\\"\\s*:\\s*\\\"authc_[A-Za-z0-9_-]{43}\\\".*")) {
+            return responseBody;
+        }
+        AuthenticationReplayCipher.EncryptedReplay replay = authenticationReplayCipher.encrypt(
+                responseBody, record.getMerchantId(), record.getId());
+        return write(new ProtectedAuthenticationReplay("authentication-replay-v1",
+                replay.ciphertext(), replay.nonce(), replay.keyVersion()));
+    }
+
+    private String unprotectResponse(IdempotencyRecord record) throws JsonProcessingException {
+        String responseBody = record.getResponseBody();
+        if (responseBody == null || !responseBody.contains("\"format\":\"authentication-replay-v1\"")) {
+            return responseBody;
+        }
+        ProtectedAuthenticationReplay protectedReplay = objectMapper.readValue(
+                responseBody, ProtectedAuthenticationReplay.class);
+        return authenticationReplayCipher.decrypt(new AuthenticationReplayCipher.EncryptedReplay(
+                        protectedReplay.ciphertext(), protectedReplay.nonce(), protectedReplay.keyVersion()),
+                record.getMerchantId(), record.getId());
+    }
+
     private record IdempotencyReservation(
             UUID recordId, UUID leaseToken, IdempotencyRecord replayRecord) {
         static IdempotencyReservation reserved(UUID recordId, UUID leaseToken) {
@@ -205,5 +253,9 @@ public class IdempotencyService {
         static IdempotencyReservation replay(IdempotencyRecord record) {
             return new IdempotencyReservation(record.getId(), null, record);
         }
+    }
+
+    private record ProtectedAuthenticationReplay(
+            String format, String ciphertext, String nonce, String keyVersion) {
     }
 }

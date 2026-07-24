@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.security.SensitiveValueHasher;
+import com.thaap.payments.authentication.AuthenticationReplayCipher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import java.time.Instant;
@@ -151,7 +152,7 @@ class IdempotencyServiceTests {
         Instant oldStartedAt = Instant.now().minus(2, ChronoUnit.DAYS);
         UUID oldLeaseToken = UUID.randomUUID();
         IdempotencyRecord expired = new IdempotencyRecord(
-                merchant.getId(), "reusable-expired-key", "test.old",
+                IdempotencyPrincipal.merchant(context), "reusable-expired-key", "test.old",
                 oldHasher.hmacSha256(
                         "idempotency.request", serializedOldRequest, "expired-v1"),
                 "expired-v1", oldLeaseToken, oldStartedAt.plusSeconds(30),
@@ -318,7 +319,7 @@ class IdempotencyServiceTests {
         TestRequest request = new TestRequest("expired-request");
         Instant now = Instant.now();
         IdempotencyRecord expired = new IdempotencyRecord(
-                merchant.getId(), "expired-key", "test.create", requestHash(request),
+                IdempotencyPrincipal.merchant(merchantContext), "expired-key", "test.create", requestHash(request),
                 sensitiveValueHasher.currentKeyVersion(),
                 UUID.randomUUID(), now.minusSeconds(1), now.minusSeconds(60),
                 now.plus(1, ChronoUnit.DAYS));
@@ -342,7 +343,10 @@ class IdempotencyServiceTests {
 
     private IdempotencyService idempotencyService(SensitiveValueHasher hasher) {
         return new IdempotencyService(
-                idempotencyRepository, objectMapper, hasher, transactionManager,
+                idempotencyRepository, objectMapper, hasher,
+                new AuthenticationReplayCipher(
+                        "dGVzdC1hdXRoLXJlcGxheS1rZXktMzItYnl0ZXMtMTI=", "test-v1", ""),
+                transactionManager,
                 Clock.systemUTC(), Duration.ofSeconds(30));
     }
 

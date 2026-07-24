@@ -35,9 +35,20 @@ thaap:
     correlation-pepper: test-hash-pepper-for-sensitive-value-contracts
   idempotency:
     reservation-lease: 30s
+  rate-limit:
+    enabled: false
+  card-testing-incidents:
+    enabled: false
+  authentication:
+    challenge-ttl: 5m
+    replay-encryption-key: dGVzdC1hdXRoLXJlcGxheS1rZXktMzItYnl0ZXMtMTI=
+    replay-key-version: test-v1
+    replay-decryption-keys:
   fraud:
     feature-snapshot:
       max-json-bytes: 16384
+    velocity:
+      enabled: false
   webhook:
     execution-enabled: false
     secret-encryption-key: dGVzdC13ZWJob29rLWtleS0zMi1ieXRlcy0xMjM0NTY=

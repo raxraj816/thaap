@@ -754,24 +754,68 @@ returned in public responses.
 `ManualReviewCase`
 
 - `id`
+- `merchantId`
 - `paymentAttemptId`
 - `fraudDecisionId`
+- `stage`
 - `status`
-- `assignedTo`
-- `analystDecision`
-- `notes`
+- `assignedOperatorId`
+- `assignmentVersion`
 - `createdAt`
-- `closedAt`
+- `terminalAt`
+
+Phase 4 keeps assignment history, structured annotations, and terminal
+resolution in separate append-only tables. `assignedOperatorId` is a current
+projection, not the audit record. Free-form notes are excluded until Phase 4.5
+defines encryption, retention, redaction, access, and export policy.
+
+`RiskOperator`
+
+- `id`
+- `merchantId`
+- `operatorCode`
+- `role`
+- `status`
+- `credentialLifecycleEpoch`
+- `createdAt`
+- `disabledAt`
+
+Operator credentials use a separate versioned prefix/hash/HMAC boundary and are
+never interchangeable with merchant API credentials.
+
+`ReviewResolution`
+
+- `id`
+- `merchantId`
+- `manualReviewCaseId`
+- `reviewStage`
+- `outcome`
+- `reasonCode`
+- `actorOperatorId`
+- `actorRole`
+- `createdAt`
 
 `FraudLabel`
 
 - `id`
+- `merchantId`
+- `paymentIntentId`
 - `paymentAttemptId`
+- `fraudDecisionId`
 - `source`
-- `label`
+- `labelValue`
 - `fraudType`
-- `confidence`
-- `labelTime`
+- `evidenceOccurredAt`
+- `availableAt`
+- `sourceEntityId`
+- `actorOperatorId`
+- `supersedesLabelId`
+- `trafficOrigin`
+- `createdAt`
+
+Fraud labels are append-only evidence. Payment action and fraud classification
+are separate; plain cancel/refund operations do not manufacture fraud labels.
+Training joins use `availableAt` to prevent future leakage.
 
 `CardTestingIncident`
 
@@ -820,22 +864,45 @@ payments, refund history, and device/IP continuity.
 
 - `id`
 - `merchantId`
+- `version`
 - `riskTier`
-- `blockThreshold`
-- `reviewThreshold`
-- `requestThreeDsThreshold`
 - `maxReviewQueuePerDay`
 - `maxThreeDsFrictionRate`
 - `cardTestingSensitivity`
-- `allowRulesetVersion`
-- `blockRulesetVersion`
 - `status`
+- `createdByOperatorId`
+- `approvedByOperatorId`
 - `createdAt`
-- `updatedAt`
+- `activatedAt`
+- `retiredAt`
 
-Merchant risk policy turns fraud thresholds into product controls. Policy
-changes must be replayed or simulated before activation once ReplayEngine
-exists.
+Phase 4 policy versions own separate typed threshold rows over allowlisted
+FeatureDefinitions with only `EQ`, `GTE`, and `IN` operators and BLOCK, REVIEW,
+or REQUEST_3DS actions. They contain no executable expression and cannot
+suppress stronger protected actions. Creating and approving operators must be
+different RISK_MANAGER principals. Policy changes use deterministic validation
+and fixture preview in Phase 4; historical replay becomes mandatory once the
+ReplayEngine exists.
+
+`MerchantRiskProfile`
+
+- `id`
+- `merchantId`
+- `version`
+- `riskTier`
+- `source`
+- `reasonCode`
+- `status`
+- `createdByOperatorId`
+- `approvedByOperatorId`
+- `createdAt`
+- `activatedAt`
+- `retiredAt`
+
+Phase 4 profiles are explicit versioned classifications, not fabricated
+analytics. STANDARD is the safe application default. ELEVATED/HIGH activation
+uses the same RiskManager dual-control and one-active-version boundary as
+merchant policy; automated rate-derived profiling begins in Phase 4.5.
 
 `PostAuthorizationRiskSignal`
 
@@ -888,18 +955,28 @@ Only these fraud decision actions are valid:
 
 ### 7.2 Rule Ordering
 
-Evaluate active rules in this behavior order:
+Evaluate every active deterministic control and preserve both matches and
+non-matches. Aggregate matched candidates using the implemented Phase 3
+precedence:
 
-1. `REQUEST_3DS`
-2. `ALLOW`
-3. `BLOCK`
-4. `REVIEW`
+1. `BLOCK`
+2. `REVIEW`
+3. `REQUEST_3DS`
+4. `ALLOW` only when no stronger control matches
 
-`ALLOW` short-circuits block/review rules. `BLOCK` short-circuits review rules.
+Evaluation does not short-circuit. A lower-severity match remains visible even
+when a stronger action wins. Phase 4 merchant policies and fraud lists may add
+only `BLOCK`, `REVIEW`, or `REQUEST_3DS` candidates; they cannot suppress a
+stronger protected action.
 
 ### 7.3 Rule DSL
 
-Use a constrained JSON DSL. Do not execute arbitrary JavaScript or user-provided code.
+The implemented Phase 3 engine uses typed application-owned predicates. Phase 4
+adds only typed merchant threshold rows over allowlisted FeatureDefinitions; it
+does not add a general DSL. A constrained JSON DSL belongs to Phase 4.5
+Governed Rule Authoring after an accepted grammar/security ADR, simulation,
+approval, canary, and rollback boundaries exist. Never execute arbitrary
+JavaScript or user-provided code.
 
 Supported operators:
 
@@ -925,30 +1002,37 @@ Rules must have explicit missing-value behavior. A comparison against a missing 
 
 ### 7.4 Initial Deterministic Rules
 
-Seed these rules for learning and testing:
+The implemented immutable `rules_v1` catalogue is:
 
-- `ALLOW` low-risk low-amount card payment.
-- `BLOCK` blocked test card.
-- `REVIEW` suspicious high amount.
-- `REQUEST_3DS` configured 3DS test card.
-- `BLOCK` excessive card velocity.
-- `REVIEW` billing/card country mismatch.
-- `BLOCK` card-testing pattern with many low-amount attempts.
-- `REVIEW` new customer, high amount, mismatched shipping/card geography.
-- `REQUEST_3DS` elevated risk above merchant policy threshold.
+- `BLOCK_USD_EXTREME_AMOUNT_V1`
+- `REVIEW_REPEATED_ATTEMPT_V1`
+- `REQUEST_3DS_USD_ELEVATED_AMOUNT_V1`
+
+No explicit ALLOW rule exists; ALLOW is the result when no stronger control
+matches. Phase 4 adds governed velocity, country/context, typed negative-list,
+and merchant-threshold control evaluations without rewriting `rules_v1`.
+Card-testing incident controls and richer policy breadth are sequenced in
+Chapters 30–34 of the Phase 4 detailed plan.
 
 ### 7.5 Risk Levels
 
-Use configurable thresholds. Start with:
+The implemented deterministic rules score is action severity, not probability:
 
-- `LOW`: score < `0.30`
-- `MEDIUM`: `0.30` to `0.65`
-- `HIGH`: `0.65` to `0.85`
-- `CRITICAL`: score > `0.85`
+- ALLOW -> `0.0500` / LOW
+- REQUEST_3DS -> `0.5500` / MEDIUM
+- REVIEW -> `0.7500` / HIGH
+- BLOCK -> `0.9500` / HIGH
 
-These thresholds are initial defaults and must be merchant-configurable later.
+Phase 4 merchant policy tunes typed feature thresholds that produce actions; it
+does not reinterpret this score as calibrated risk. Probability thresholds and
+CRITICAL calibration belong to the governed ML lifecycle after Phase 7.
 
 ### 7.6 Rule Lifecycle
+
+This lifecycle is planned for Phase 4.5 Governed Rule Authoring, not the Phase
+4 typed merchant-threshold slice. Phase 3 `rules_v1` remains immutable and
+application-owned; Phase 4 policy versions use their narrower
+`DRAFT -> PENDING_APPROVAL -> ACTIVE -> RETIRED` lifecycle.
 
 Rule statuses:
 
@@ -2030,7 +2114,7 @@ Detailed Phase 2 chapter plan:
      payment state, rollback of automatic capture or cancel when ledger/audit
      persistence fails, and one coherent winner under concurrent capture and
      cancel.
-   - `scripts/demo-chapter-17-flow.sh` fails closed unless automatic capture,
+   - `scripts/demo-payment-cancel-void-flow.sh` fails closed unless automatic capture,
      manual void, and ledger invariants agree, and rejects non-loopback targets
      unless an authenticated scenario-runner credential assigns trusted
      synthetic origin.
@@ -2794,7 +2878,7 @@ Detailed Phase 2 chapter plan:
    - The processor-authorization concept note documents the full test-card
      contract and distinguishes issuer/processor `SUSPECTED_FRAUD` truth from
      THAAP's independent stub FraudDecision.
-   - `scripts/demo-chapter-20-processor-catalog.py` accepts only a loopback API,
+   - `scripts/demo-processor-outcome-catalog.py` accepts only a loopback API,
      rejects every HTTP redirect before credential forwarding, creates all nine
      outcome partitions through public APIs, reconciles
      PaymentIntent, PaymentAttempt, Authorization, FraudDecision,
@@ -3094,6 +3178,67 @@ remains, and Phase 4 is next.
    review. Phase 3 closes only when its dossier recommends `MERGE`.
 
 ### Phase 4: Features, Velocity, Lists, Reviews, Chargebacks
+
+Detailed source of truth:
+[`PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md).
+The detailed plan proposes the Phase 4 actor and authorization model, review
+and label semantics, RiskContext privacy contract, Redis ambiguity policy,
+merchant policy grammar, authentication completion, dispute accounting,
+transaction ordering, hostile failure inventory, proof strategy, and Chapter
+26–35 sequence.
+
+Current state: founder/domain review confirmed the eight Phase 4 product
+decisions on 2026-07-13. Chapter 26 is complete: its pre-implementation matrix
+is `FROZEN`/`VERIFIED`, all rows pass, and its dossier recommends `MERGE` after
+real API, PostgreSQL, migration, privacy, observability, and live-demo proof.
+The detailed plan is now `COMPLETE`; Phase 4 closed through Chapter 35 with
+full regression, migration, all-demo, traceability, hostile-review, learning,
+debt, and source-reconciliation proof.
+
+Chapter sequence:
+
+1. Chapter 26: Analyst Identity, Review Claim, And Label Truth.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 351
+   backend and 80 Python tests green, retained V25→V28 and live demo passed.
+2. Chapter 27: Pre-Authorization Review Approval.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 373
+   backend and 83 Python tests green, retained V25→V29 and live demo passed.
+3. Chapter 28: Payment Authentication Completion.
+   Status: complete; Chapter 28 is complete with matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 404
+   backend and 86 Python tests green, fresh/retained V31 and two-source live
+   authentication demo passed.
+4. Chapter 29: Safe RiskContext And Real-Time Feature Extraction.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 432
+   backend and 89 Python tests green, fresh/retained V34, deterministic
+   PostgreSQL proof, privacy/HMAC proof, and all-action live demo passed.
+5. Chapter 30: Redis Velocity And Typed Fraud Lists.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 541
+   backend and 94 Python tests green, fresh/retained V40, real Redis,
+   deterministic PostgreSQL concurrency, and live outage/recovery demo passed.
+6. Chapter 31: Merchant Risk Policy And Decision Integration.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 572
+   backend and 97 Python tests green, fresh/retained V42, deterministic
+   PostgreSQL concurrency, and live merchant-policy demo passed.
+7. Chapter 32: Chargebacks, Dispute Offsets, And Evidence Packets.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 587
+   backend and 100 Python tests green, fresh/retained V44, deterministic
+   PostgreSQL refund/chargeback and external-event ordering, and live
+   captured/refunded chargeback demo passed.
+8. Chapter 33: Post-Authorization Signals And Review Money Actions.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 13
+   targeted PostgreSQL contracts, V45/V46 fresh/retained proof, forced refund
+   ordering, rollback proof, and the retained signal-to-refund demo passed.
+9. Chapter 34: Card-Testing Incidents And Rate Limits.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 12
+   targeted PostgreSQL/Redis contracts, exact Lua/HMAC/429/503 proof, V47/V48,
+   concurrent detector proof, and the retained abuse-traffic demo passed.
+10. Chapter 35: Integrated Phase 4 Closure.
+    Status: complete; matrix `FROZEN`/`VERIFIED`, dossier `READY_TO_MERGE`, 629
+    backend tests, 114 Python tests, 14 migration contracts, all Chapter 26–34
+    public demos, retained V48-to-V49 upgrade proof, and all structural gates
+    passed. ER-0052 through ER-0057 close retained-window rotation,
+    token-guarded Redis compensation, nested identity rotation,
+    operator-principal replay, exact signal lineage, and proof-count drift.
 
 Build:
 

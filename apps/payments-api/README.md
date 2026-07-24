@@ -47,8 +47,10 @@ curl -X POST http://localhost:8080/admin/merchants \
 
 Merchant-facing APIs derive tenant scope from `X-Api-Key`; only the API key
 prefix and hash are stored. Clients must not be trusted to choose `merchantId`
-in request bodies. Mutating payment APIs require `Idempotency-Key`, and
-idempotency records are unique per `(merchant_id, key)`. Merchant and customer
+in request bodies. Mutating payment APIs require `Idempotency-Key`. Merchant
+API replay remains account-scoped; risk-operator mutation replay is additionally
+scoped to the authenticated operator and credential lifecycle so a different
+analyst or manager cannot consume a stored privileged response. Merchant and customer
 creation accept the header for safe retry and reconciliation. Legacy callers
 may omit it, but a present blank or oversized header is rejected; the
 synthetic generator always supplies one.
@@ -147,7 +149,7 @@ Run the loopback-only public-API proof with:
 
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
-scripts/demo-chapter-20-processor-catalog.py
+scripts/demo-processor-outcome-catalog.py
 ```
 
 The runner rejects all HTTP redirects before a second request is created, so
@@ -311,7 +313,7 @@ Run the signed failure-to-retry-to-success demonstration after starting the API
 with execution enabled:
 
 ```bash
-scripts/demo-chapter-19-webhook-flow.sh
+scripts/demo-webhook-delivery-flow.sh
 ```
 
 Chapter 5 contract tests also cover merchant admin setup, including bootstrap-token
@@ -533,11 +535,38 @@ cancel endpoint is the only Phase 3 review mutation and moves `OPEN` to
 `CANCELED` with `MERCHANT_CANCELED`. Assignment, analyst resolution, notes,
 labels, and review-triggered payment actions remain Phase 4 scope.
 
+The confirmed Phase 4 plan sequences dedicated risk-operator identity, review
+assignment/resolution and label truth before approval/refund actions,
+authentication completion, RiskContext, Redis velocity/lists, merchant policy,
+chargebacks, post-authorization actions, incidents, and rate limiting. The plan
+and Chapter 26 proof artifacts were confirmed by founder/domain review before
+code. Chapters 26–32 are complete. Their operator, assignment, annotation,
+cancel/report-fraud, approval, same-attempt processor continuation, capture, and
+typed label boundaries plus source-bound authentication, safe RiskContext,
+typed real-time context features, exact Redis velocity, typed fraud lists, and
+V26–V40 schema pass verified matrices, closure dossiers, retained migration
+proof, real Redis/deterministic PostgreSQL interleavings, full regression
+suites, and public live demos. Chapter 31 additionally proves immutable
+merchant risk profiles/policies, dual control, typed threshold evaluation,
+protected action aggregation, V41/V42 lineage, and a retained-database public
+demo. Chapter 32 adds merchant-ingested simulator chargebacks, exact refund
+offsets, balanced dispute ledger groups, reason-qualified label availability,
+and bounded DRAFT evidence packets with V43/V44 PostgreSQL protection. Phase 4
+is complete through Chapter 35 integrated closure. Chapter 33 adds append-only
+merchant-ingested signals, recommendation-versus-action truth, manager-
+authorized full-refund reuse, balanced ledger, and label lineage. Chapter 34
+adds durable suspected card-testing incidents plus exact Redis fixed-window
+limits: definite exceedance is `429`, dependency ambiguity is `503`, and Redis
+identities are HMAC-only.
+The final Phase 4 gate passes 629 backend tests, 114 repository Python tests,
+fresh V1-to-V49 and retained V48-to-V49 proof, and all nine public
+implementation-chapter demos.
+
 Run the complete loopback-only Phase 3 proof with:
 
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
-scripts/demo-chapter-25-fraud-decision-mvp.py
+scripts/demo-fraud-decision-loop.py
 ```
 `GET /fraud/decisions/{id}` returns a tenant-scoped decision plus its linked
 feature snapshot.

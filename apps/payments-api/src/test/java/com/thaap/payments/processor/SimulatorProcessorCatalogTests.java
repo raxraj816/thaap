@@ -52,6 +52,10 @@ class SimulatorProcessorCatalogTests {
                 new ExpectedFixture("three_ds_required", "0008", AuthorizationStatus.REQUIRES_ACTION,
                         NetworkStatus.REQUIRES_ACTION, "THREE_DS_REQUIRED", VerificationResult.PASS,
                         VerificationResult.PASS, VerificationResult.PASS,
+                        ThreeDsResult.REQUIRED, 0L),
+                new ExpectedFixture("repeated_three_ds_required", "0009", AuthorizationStatus.REQUIRES_ACTION,
+                        NetworkStatus.REQUIRES_ACTION, "REPEATED_THREE_DS_REQUIRED", VerificationResult.PASS,
+                        VerificationResult.PASS, VerificationResult.PASS,
                         ThreeDsResult.REQUIRED, 0L));
 
         assertThat(catalog.documentedFixtures())
@@ -86,7 +90,21 @@ class SimulatorProcessorCatalogTests {
         assertThat(result.responseCode()).isEqualTo("APPROVED");
         assertThat(result.authorizedAmount()).isEqualTo(REQUESTED_AMOUNT);
         assertThat(result.threeDsResult()).isEqualTo(ThreeDsResult.NOT_REQUIRED);
-        assertThat(catalog.documentedFixtures()).hasSize(8);
+        assertThat(catalog.documentedFixtures()).hasSize(9);
+    }
+
+    @Test
+    void authenticatedContinuationPreservesAuthenticationEvidenceAcrossApprovalAndDecline() {
+        ProcessorAuthorizationResult approval = authorizeAuthenticated("499999", "0008");
+        ProcessorAuthorizationResult decline = authorizeAuthenticated("499999", "0003");
+        ProcessorAuthorizationResult repeatedChallenge = authorizeAuthenticated("499999", "0009");
+
+        assertThat(approval.status()).isEqualTo(AuthorizationStatus.APPROVED);
+        assertThat(approval.threeDsResult()).isEqualTo(ThreeDsResult.AUTHENTICATED);
+        assertThat(decline.status()).isEqualTo(AuthorizationStatus.DECLINED);
+        assertThat(decline.threeDsResult()).isEqualTo(ThreeDsResult.AUTHENTICATED);
+        assertThat(repeatedChallenge.status()).isEqualTo(AuthorizationStatus.REQUIRES_ACTION);
+        assertThat(repeatedChallenge.threeDsResult()).isEqualTo(ThreeDsResult.REQUIRED);
     }
 
     @Test
@@ -97,10 +115,39 @@ class SimulatorProcessorCatalogTests {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    @Test
+    void processorOperationIdentityIsStableForTheSameAttemptAndDistinctAcrossAttempts() {
+        UUID merchantId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        UUID paymentMethodId = UUID.randomUUID();
+        UUID firstAttemptId = UUID.randomUUID();
+
+        ProcessorAuthorizationResult first = adapter.authorize(new ProcessorAuthorizationRequest(
+                merchantId, paymentIntentId, firstAttemptId, paymentMethodId,
+                REQUESTED_AMOUNT, "USD", "424242", "4242"));
+        ProcessorAuthorizationResult retry = adapter.authorize(new ProcessorAuthorizationRequest(
+                merchantId, paymentIntentId, firstAttemptId, paymentMethodId,
+                REQUESTED_AMOUNT, "USD", "424242", "4242"));
+        ProcessorAuthorizationResult distinctAttempt = adapter.authorize(new ProcessorAuthorizationRequest(
+                merchantId, paymentIntentId, UUID.randomUUID(), paymentMethodId,
+                REQUESTED_AMOUNT, "USD", "424242", "4242"));
+
+        assertThat(retry.processorReferenceId()).isEqualTo(first.processorReferenceId());
+        assertThat(distinctAttempt.processorReferenceId()).isNotEqualTo(first.processorReferenceId());
+        assertThat(first.processorReferenceId())
+                .isEqualTo("auth_sim_" + firstAttemptId.toString().replace("-", ""));
+    }
+
     private ProcessorAuthorizationResult authorize(String cardBin, String cardLast4) {
         return adapter.authorize(new ProcessorAuthorizationRequest(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 REQUESTED_AMOUNT, "USD", cardBin, cardLast4));
+    }
+
+    private ProcessorAuthorizationResult authorizeAuthenticated(String cardBin, String cardLast4) {
+        return adapter.authorize(new ProcessorAuthorizationRequest(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                REQUESTED_AMOUNT, "USD", cardBin, cardLast4, true));
     }
 
     private record ExpectedFixture(String fixtureId, String cardLast4,

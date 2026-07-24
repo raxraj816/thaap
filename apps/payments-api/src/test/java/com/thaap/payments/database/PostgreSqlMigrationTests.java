@@ -122,7 +122,24 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("refunds", "payment_intent_id")).isTrue();
         assertThat(columnExists("refunds", "payment_attempt_id")).isTrue();
         assertThat(columnExists("refunds", "authorization_id")).isTrue();
+        assertThat(columnExists("refunds", "reason_catalog_version")).isTrue();
+        assertThat(columnExists("refunds", "reason_code")).isTrue();
+        assertThat(columnExists("refunds", "source_review_resolution_id")).isTrue();
         assertThat(indexExists("refunds", "uk_refunds_payment_intent")).isTrue();
+        assertThat(columnExists("post_authorization_signals", "external_event_key")).isTrue();
+        assertThat(columnExists("post_authorization_signals", "recommendation")).isTrue();
+        assertThat(columnExists("review_refund_actions", "review_resolution_id")).isTrue();
+        assertThat(columnExists("manual_review_cases", "source_post_authorization_signal_id")).isTrue();
+        assertThat(columnExists("fraud_labels", "source_post_authorization_signal_id")).isTrue();
+        assertThat(columnExists("card_testing_incidents", "source_attestation")).isTrue();
+        assertThat(columnExists("incident_evidence_links", "payment_attempt_id")).isTrue();
+        assertThat(columnExists("card_testing_incident_resolutions", "mitigation_code")).isTrue();
+        assertThat(columnExists("chargebacks", "external_event_key")).isTrue();
+        assertThat(columnExists("chargebacks", "allocated_amount")).isTrue();
+        assertThat(columnExists("dispute_offset_allocations", "chargeback_id")).isTrue();
+        assertThat(columnExists("dispute_evidence_packets", "authorization_id")).isTrue();
+        assertThat(columnExists("fraud_labels", "source_chargeback_id")).isTrue();
+        assertThat(columnExists("ledger_entries", "chargeback_id")).isTrue();
         assertThat(columnExists("idempotency_records", "operation")).isTrue();
         assertThat(columnExists("idempotency_records", "expires_at")).isTrue();
         assertThat(columnExists("idempotency_records", "lease_token")).isTrue();
@@ -149,8 +166,8 @@ class PostgreSqlMigrationTests {
     }
 
     @Test
-    void chapter17UpgradePreservesLegacyOpenAutomaticPaymentSemanticsOnPostgreSql() {
-        String schema = "chapter17_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+    void authorizationVoidUpgradePreservesLegacyOpenAutomaticPaymentSemanticsOnPostgreSql() {
+        String schema = "auth_void_upgrade_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
@@ -229,8 +246,8 @@ class PostgreSqlMigrationTests {
     }
 
     @Test
-    void chapter18UpgradeBackfillsCaptureLedgerPaymentLineageOnPostgreSql() {
-        String schema = "chapter18_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+    void refundLedgerUpgradeBackfillsCaptureLedgerPaymentLineageOnPostgreSql() {
+        String schema = "refund_ledger_upgrade_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
@@ -266,8 +283,8 @@ class PostgreSqlMigrationTests {
     }
 
     @Test
-    void chapter18UpgradeRejectsLegacyRefundedPaymentIntentsOnPostgreSql() {
-        String schema = "chapter18_guard_" + UUID.randomUUID().toString().replace("-", "");
+    void refundLedgerUpgradeRejectsLegacyRefundedPaymentIntentsOnPostgreSql() {
+        String schema = "refund_ledger_guard_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
@@ -909,8 +926,8 @@ class PostgreSqlMigrationTests {
     }
 
     @Test
-    void chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage() {
-        String schema = "chapter22_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+    void fraudLineageUpgradePreservesHistoricalTruthAndBindsFraudActionLineage() {
+        String schema = "fraud_lineage_upgrade_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
@@ -927,11 +944,11 @@ class PostgreSqlMigrationTests {
             String historicalSnapshot = "{\"card_bin\":\"499999\",\"payment_amount\":1200}";
             upgradeJdbcTemplate.update("""
                     INSERT INTO %s.merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
-                    VALUES (?, 'chapter22-upgrade', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
-                    """.formatted(schema), merchantId, "chapter22-" + merchantId);
+                    VALUES (?, 'fraud-lineage-upgrade', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "fraud-lineage-" + merchantId);
             upgradeJdbcTemplate.update("""
                     INSERT INTO %s.customers (id, merchant_id, email_hash, created_at)
-                    VALUES (?, ?, 'chapter22-email', CURRENT_TIMESTAMP)
+                    VALUES (?, ?, 'fraud-lineage-email', CURRENT_TIMESTAMP)
                     """.formatted(schema), customerId, merchantId);
             upgradeJdbcTemplate.update("""
                     INSERT INTO %s.payment_methods
@@ -1139,6 +1156,505 @@ class PostgreSqlMigrationTests {
         }
     }
 
+    @Test
+    void reviewResolutionUpgradePreservesRetainedReviewsAndWebhookConsentWithoutTriggerBypass() {
+        String schema = "review_resolution_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        migrateSchema(upgradeDataSource, schema, "25");
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID customerId = UUID.randomUUID();
+            UUID paymentMethodId = UUID.randomUUID();
+            UUID webhookEndpointId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                    VALUES (?, 'review-resolution-upgrade', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "review-resolution-" + merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.customers (id, merchant_id, email_hash, created_at)
+                    VALUES (?, ?, 'review-resolution-email', CURRENT_TIMESTAMP)
+                    """.formatted(schema), customerId, merchantId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.payment_methods
+                        (id, merchant_id, customer_id, type, token, card_fingerprint, card_bin, card_last4,
+                         card_funding, card_country, created_at)
+                    VALUES (?, ?, ?, 'CARD', 'tok-review-resolution', 'fp-review-resolution', '499999', '0003',
+                            'CREDIT', 'US', CURRENT_TIMESTAMP)
+                    """.formatted(schema), paymentMethodId, merchantId, customerId);
+
+            for (String status : List.of("OPEN", "CANCELED")) {
+                UUID paymentIntentId = UUID.randomUUID();
+                UUID paymentAttemptId = UUID.randomUUID();
+                UUID fraudDecisionId = UUID.randomUUID();
+                UUID reviewCaseId = UUID.randomUUID();
+                upgradeJdbcTemplate.update("""
+                        INSERT INTO %s.payment_intents
+                            (id, merchant_id, customer_id, amount, currency, capture_method, status, metadata,
+                             traffic_origin, created_at, updated_at)
+                        VALUES (?, ?, ?, 99999, 'USD', 'MANUAL', ?, '{}', 'MERCHANT_API',
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """.formatted(schema), paymentIntentId, merchantId, customerId,
+                        "OPEN".equals(status) ? "REQUIRES_REVIEW" : "CANCELED");
+                upgradeJdbcTemplate.update("""
+                        INSERT INTO %s.payment_attempts
+                            (id, merchant_id, payment_intent_id, payment_method_id, idempotency_key, status,
+                             attempt_number, fraud_decision_id, traffic_origin, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, 3, ?, 'MERCHANT_API', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """.formatted(schema), paymentAttemptId, merchantId, paymentIntentId, paymentMethodId,
+                        "review-resolution-" + status.toLowerCase(),
+                        "OPEN".equals(status) ? "IN_REVIEW" : "CANCELED", fraudDecisionId);
+                upgradeJdbcTemplate.update("""
+                        INSERT INTO %s.fraud_decisions
+                            (id, merchant_id, payment_attempt_id, risk_score, risk_level, action,
+                             ruleset_version, latency_ms, decision_started_at, decision_completed_at,
+                             feature_freshness_status, max_feature_age_ms, reason_codes,
+                             traffic_origin, created_at)
+                        VALUES (?, ?, ?, 0.7300, 'HIGH', 'REVIEW', 'rules_v1', 2,
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'FRESH', 0,
+                                '["REPEATED_PAYMENT_ATTEMPT"]', 'MERCHANT_API', CURRENT_TIMESTAMP)
+                        """.formatted(schema), fraudDecisionId, merchantId, paymentAttemptId);
+                upgradeJdbcTemplate.update("""
+                        INSERT INTO %s.manual_review_cases
+                            (id, merchant_id, payment_intent_id, payment_attempt_id, fraud_decision_id,
+                             decision_action, status, reason_codes, traffic_origin, cancellation_reason,
+                             created_at, updated_at, canceled_at)
+                        VALUES (?, ?, ?, ?, ?, 'REVIEW', ?, '["REPEATED_PAYMENT_ATTEMPT"]',
+                                'MERCHANT_API', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                                CASE WHEN ? = 'CANCELED' THEN CURRENT_TIMESTAMP ELSE NULL END)
+                        """.formatted(schema), reviewCaseId, merchantId, paymentIntentId, paymentAttemptId,
+                        fraudDecisionId, status,
+                        "CANCELED".equals(status) ? "MERCHANT_CANCELED" : null, status);
+            }
+
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints
+                        (id, merchant_id, url, signing_secret_prefix, signing_secret_hash,
+                         operational_status, signing_secret_generation, created_at)
+                    VALUES (?, ?, 'https://review-resolution.example.test/hooks', 'whsec_review_resolution', ?,
+                            'DISABLED', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), webhookEndpointId, merchantId,
+                    "a".repeat(64), UUID.randomUUID());
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoint_event_subscriptions
+                        (merchant_id, webhook_endpoint_id, event_type, created_at)
+                    VALUES (?, ?, 'payment_intent.canceled', CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, webhookEndpointId);
+
+            List<Map<String, Object>> historicalRows = upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema));
+
+            migrateSchema(upgradeDataSource, schema, "28");
+
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.manual_review_cases
+                    WHERE review_stage = 'PRE_AUTHORIZATION' AND assignment_version = 0
+                      AND assigned_operator_id IS NULL AND resolved_at IS NULL
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT event_type FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ? ORDER BY event_type
+                    """.formatted(schema), webhookEndpointId))
+                    .extracting(row -> row.get("event_type"))
+                    .containsExactly("payment_intent.canceled");
+            assertThatThrownBy(() -> upgradeJdbcTemplate.update("""
+                    UPDATE %s.manual_review_cases
+                    SET reason_codes = '["RULES_NOT_ENABLED"]'
+                    WHERE merchant_id = ?
+                    """.formatted(schema), merchantId))
+                    .hasMessageContaining("manual review history is immutable");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(3);
+
+            migrateSchema(upgradeDataSource, schema, "29");
+
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(4);
+            String approvalSemantics = upgradeJdbcTemplate.queryForObject("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE connamespace = ?::regnamespace
+                      AND conname = 'ck_review_resolutions_semantics'
+                    """, String.class, schema);
+            assertThat(approvalSemantics)
+                    .contains("APPROVE", "CONFIRMED_LEGITIMATE", "MANUAL_REVIEW_APPROVED");
+
+            migrateSchema(upgradeDataSource, schema, "30");
+
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT event_type FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ? ORDER BY event_type
+                    """.formatted(schema), webhookEndpointId))
+                    .extracting(row -> row.get("event_type"))
+                    .containsExactly("payment_intent.canceled");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(5);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = ? AND table_name = 'authentication_challenges'
+                    """, Integer.class, schema)).isOne();
+
+            migrateSchema(upgradeDataSource, schema, "31");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30', '31') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(6);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid = ?::regclass AND NOT tgisinternal
+                      AND tgname IN ('trg_authentication_challenge_history',
+                                     'trg_authentication_challenge_insert')
+                    """, Integer.class, schema + ".authentication_challenges")).isEqualTo(2);
+
+            migrateSchema(upgradeDataSource, schema, "32");
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".risk_contexts", Integer.class)).isZero();
+
+            migrateSchema(upgradeDataSource, schema, "33");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".feature_definitions", Integer.class)).isEqualTo(17);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid = ?::regclass AND NOT tgisinternal
+                      AND tgname = 'trg_feature_definitions_immutable'
+                    """, Integer.class, schema + ".feature_definitions")).isOne();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "34");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30', '31', '32', '33', '34')
+                      AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(9);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid = ?::regclass AND NOT tgisinternal
+                      AND tgname IN ('trg_risk_context_insert', 'trg_risk_context_history',
+                                     'trg_risk_context_complete_lineage')
+                    """, Integer.class, schema + ".risk_contexts")).isEqualTo(3);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "35");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".velocity_observations", Integer.class)).isZero();
+
+            migrateSchema(upgradeDataSource, schema, "36");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid = ?::regclass AND NOT tgisinternal
+                      AND tgname = 'trg_velocity_observations_immutable'
+                    """, Integer.class, schema + ".velocity_observations")).isOne();
+
+            migrateSchema(upgradeDataSource, schema, "37");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".feature_definitions", Integer.class)).isEqualTo(21);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37')
+                      AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(12);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "38");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = ? AND table_name = 'customers'
+                      AND column_name = 'email_domain_hash'
+                    """, Integer.class, schema)).isOne();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".fraud_lists", Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".fraud_list_evaluations", Integer.class)).isZero();
+
+            migrateSchema(upgradeDataSource, schema, "39");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid IN (?::regclass, ?::regclass, ?::regclass, ?::regclass, ?::regclass)
+                      AND NOT tgisinternal AND tgname LIKE 'trg_fraud_list%'
+                    """, Integer.class, schema + ".fraud_lists", schema + ".fraud_list_versions",
+                    schema + ".fraud_list_entries", schema + ".fraud_list_lifecycle_events",
+                    schema + ".fraud_list_evaluations")).isEqualTo(6);
+            migrateSchema(upgradeDataSource, schema, "40");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30', '31', '32', '33', '34',
+                                      '35', '36', '37', '38', '39', '40') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(15);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "41");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".merchant_risk_configuration_guards",
+                    Integer.class)).isOne();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".merchant_risk_profile_versions",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".merchant_risk_policy_versions",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".risk_control_evaluations",
+                    Integer.class)).isZero();
+
+            migrateSchema(upgradeDataSource, schema, "42");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".feature_definitions", Integer.class)).isEqualTo(22);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('26', '27', '28', '29', '30', '31', '32', '33', '34',
+                                      '35', '36', '37', '38', '39', '40', '41', '42')
+                      AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(17);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid IN (?::regclass, ?::regclass, ?::regclass, ?::regclass,
+                                      ?::regclass, ?::regclass, ?::regclass)
+                      AND NOT tgisinternal
+                    """, Integer.class,
+                    schema + ".merchant_risk_configuration_guards",
+                    schema + ".merchant_risk_profile_versions",
+                    schema + ".merchant_risk_profile_events",
+                    schema + ".merchant_risk_policy_versions",
+                    schema + ".merchant_risk_policy_thresholds",
+                    schema + ".merchant_risk_policy_events",
+                    schema + ".risk_control_evaluations")).isEqualTo(10);
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "43");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".chargebacks", Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".dispute_offset_allocations", Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".dispute_evidence_packets", Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT event_type FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ? ORDER BY event_type
+                    """.formatted(schema), webhookEndpointId))
+                    .extracting(row -> row.get("event_type"))
+                    .containsExactly("payment_intent.canceled");
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+
+            migrateSchema(upgradeDataSource, schema, "44");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM pg_trigger
+                    WHERE tgrelid IN (?::regclass, ?::regclass, ?::regclass)
+                      AND NOT tgisinternal
+                      AND tgname LIKE 'trg_%'
+                    """, Integer.class, schema + ".chargebacks",
+                    schema + ".dispute_offset_allocations",
+                    schema + ".dispute_evidence_packets")).isEqualTo(6);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('43', '44') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+
+            migrateSchema(upgradeDataSource, schema, "46");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".post_authorization_signals",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".review_refund_actions",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT event_type FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ? ORDER BY event_type
+                    """.formatted(schema), webhookEndpointId))
+                    .extracting(row -> row.get("event_type"))
+                    .containsExactly("payment_intent.canceled");
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('45', '46') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+
+            migrateSchema(upgradeDataSource, schema, "48");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".card_testing_incidents",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".incident_evidence_links",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".card_testing_incident_resolutions",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT event_type FROM %s.webhook_endpoint_event_subscriptions
+                    WHERE webhook_endpoint_id = ? ORDER BY event_type
+                    """.formatted(schema), webhookEndpointId))
+                    .extracting(row -> row.get("event_type"))
+                    .containsExactly("payment_intent.canceled");
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('47', '48') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+
+            UUID legacyIdempotencyId = UUID.randomUUID();
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.idempotency_records
+                        (id, merchant_id, idempotency_key, operation, request_hash,
+                         request_hash_key_version, status, http_status, response_body,
+                         created_at, updated_at, expires_at)
+                    VALUES (?, ?, 'retained-principal-key', 'customers.create', ?, 'v1',
+                            'COMPLETED', 201, '{"id":"retained"}',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                            CURRENT_TIMESTAMP + INTERVAL '24 hours')
+                    """.formatted(schema), legacyIdempotencyId, merchantId, "d".repeat(64));
+
+            migrateSchema(upgradeDataSource, schema, "49");
+            Map<String, Object> principal = upgradeJdbcTemplate.queryForMap("""
+                    SELECT principal_type, principal_id, principal_credential_prefix
+                    FROM %s.idempotency_records WHERE id = ?
+                    """.formatted(schema), legacyIdempotencyId);
+            assertThat(principal.get("principal_type")).isEqualTo("MERCHANT_API");
+            assertThat(principal.get("principal_id")).isEqualTo(merchantId);
+            assertThat(principal.get("principal_credential_prefix"))
+                    .isEqualTo("thaap_");
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = ? AND table_name = 'risk_contexts'
+                      AND column_name IN ('ip_identity_hmac_aliases',
+                                          'device_identity_hmac_aliases',
+                                          'session_identity_hmac_aliases')
+                    """, Integer.class, schema)).isEqualTo(3);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version = '49' AND success = TRUE
+                    """.formatted(schema), Integer.class)).isOne();
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
     private void migrateSchema(DriverManagerDataSource source, String schema, String target) {
         Flyway.configure()
                 .dataSource(source)
@@ -1154,11 +1670,11 @@ class PostgreSqlMigrationTests {
             UUID customerId, UUID paymentIntentId, String status) {
         source.update("""
                 INSERT INTO %s.merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
-                VALUES (?, 'chapter18-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
-                """.formatted(schema), merchantId, "chapter18-" + paymentIntentId);
+                VALUES (?, 'refund-ledger-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """.formatted(schema), merchantId, "refund-ledger-" + paymentIntentId);
         source.update("""
                 INSERT INTO %s.customers (id, merchant_id, email_hash, created_at)
-                VALUES (?, ?, 'chapter18-email-hash', CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'refund-ledger-email-hash', CURRENT_TIMESTAMP)
                 """.formatted(schema), customerId, merchantId);
         source.update("""
                 INSERT INTO %s.payment_intents (

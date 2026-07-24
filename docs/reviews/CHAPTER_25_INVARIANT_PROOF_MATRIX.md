@@ -25,7 +25,7 @@ closure disposition.
 - Invariant: Public confirms produce coherent ALLOW, BLOCK, REQUEST_3DS, and REVIEW truth, and only ALLOW can reach the processor or create Authorization and money-side state.
 - Failure sequence: A non-allow decision reaches the processor, a winning action is not applied to payment state, or review cancellation creates void or ledger truth.
 - Implementation: The locked confirm transaction applies the aggregated decision before its branch-specific processor boundary; review cancellation has a separate zero-money transition.
-- Proof: `PaymentIntentConfirmContractTests`, `PaymentIntentConfirmProcessorAdapterCallTests`, PostgreSQL forced interleavings, and `demo-chapter-25-fraud-decision-mvp.py` reconcile all four branches.
+- Proof: `PaymentIntentConfirmContractTests`, `PaymentIntentConfirmProcessorAdapterCallTests`, PostgreSQL forced interleavings, and `demo-fraud-decision-loop.py` reconcile all four branches.
 - Adversarial evidence: Amount/attempt precedence, replay, distinct keys, and review cancel partitions prove exact state and zero forbidden rows.
 - Status: PASS
 
@@ -55,7 +55,7 @@ closure disposition.
 - Invariant: Confirm and review-cancel commit one all-or-nothing lineage under the global order idempotency ownership, PaymentIntent, decision evidence, then ManualReviewCase.
 - Failure sequence: A partial result/case survives rollback, same-key calls diverge, distinct keys duplicate work, or confirm/cancel deadlock into split state.
 - Implementation: Transactional orchestration, explicit pre-processor flush, pessimistic locks, idempotency fencing, and uniqueness constraints enforce convergence.
-- Proof: Position-by-position rollback tests and `Chapter22FeatureLineagePostgreSqlConcurrencyTests` force waits at feature/result/case/idempotency/intent SQL; its real rule-result FK failure occurs through the production flush and proves zero processor/partial truth plus one same-key retry.
+- Proof: Position-by-position rollback tests and `FeatureLineagePostgreSqlConcurrencyTests` force waits at feature/result/case/idempotency/intent SQL; its real rule-result FK failure occurs through the production flush and proves zero processor/partial truth plus one same-key retry.
 - Adversarial evidence: Same and distinct keys, result positions, review persistence failure, block confirms, and review cancellation are forced on PostgreSQL rather than inferred from thread starts.
 - Status: PASS
 

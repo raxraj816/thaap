@@ -51,7 +51,7 @@ if ! curl -fsS "${BASE_URL}/actuator/health" >/dev/null; then
   exit 1
 fi
 
-echo "THAAP Chapter 13 confirm demo"
+echo "THAAP Payment confirmation confirm demo"
 echo "Base URL: ${BASE_URL}"
 echo "Card: ${CARD_NUMBER}"
 echo
@@ -76,7 +76,7 @@ payment_method_response="$(post_json "/payment_methods" "{\"customerId\":\"${cus
 payment_method_id="$(json_get "$payment_method_response" "id")"
 echo "PaymentMethod: ${payment_method_id}"
 
-payment_intent_response="$(post_json "/payment_intents" "{\"customerId\":\"${customer_id}\",\"amount\":4200,\"currency\":\"USD\",\"captureMethod\":\"MANUAL\",\"description\":\"Chapter 13 demo payment\",\"metadata\":{\"demoRun\":\"${RUN_ID}\"}}" \
+payment_intent_response="$(post_json "/payment_intents" "{\"customerId\":\"${customer_id}\",\"amount\":4200,\"currency\":\"USD\",\"captureMethod\":\"MANUAL\",\"description\":\"Payment confirmation demo payment\",\"metadata\":{\"demoRun\":\"${RUN_ID}\"}}" \
   -H "X-Api-Key: ${api_key}" \
   -H "Idempotency-Key: demo-${RUN_ID}-payment-intent" \
   -H "X-Request-Id: demo-${RUN_ID}-payment-intent")"

@@ -3,12 +3,9 @@ package com.thaap.payments.payment;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
-import com.thaap.payments.authorization.AuthorizationRepository;
-import com.thaap.payments.authorization.AuthorizationStatus;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerService;
-import com.thaap.payments.paymentattempt.PaymentAttemptStatus;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,21 +32,19 @@ import org.springframework.web.server.ResponseStatusException;
 public class RefundController {
 
     private final PaymentIntentRepository paymentIntentRepository;
-    private final AuthorizationRepository authorizationRepository;
     private final RefundRepository refundRepository;
-    private final LedgerService ledgerService;
+    private final FullRefundService fullRefundService;
     private final IdempotencyService idempotencyService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final AuditLogService auditLogService;
 
     public RefundController(PaymentIntentRepository paymentIntentRepository,
-            AuthorizationRepository authorizationRepository, RefundRepository refundRepository,
-            LedgerService ledgerService, IdempotencyService idempotencyService,
+            RefundRepository refundRepository, FullRefundService fullRefundService,
+            IdempotencyService idempotencyService,
             WebhookDeliveryService webhookDeliveryService, AuditLogService auditLogService) {
         this.paymentIntentRepository = paymentIntentRepository;
-        this.authorizationRepository = authorizationRepository;
         this.refundRepository = refundRepository;
-        this.ledgerService = ledgerService;
+        this.fullRefundService = fullRefundService;
         this.idempotencyService = idempotencyService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.auditLogService = auditLogService;
@@ -85,46 +80,12 @@ public class RefundController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         }
-        if (refundRepository.existsByPaymentIntentIdAndMerchantId(paymentIntent.getId(),
-                merchantContext.merchantId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent already has a recorded Refund");
-        }
-
-        Authorization authorization = latestApprovedAuthorization(merchantContext, paymentIntent.getId());
-        requireAuthorizationMatchesPaymentIntent(authorization, paymentIntent);
-        Refund refund = refundRepository.saveAndFlush(new Refund(merchantContext.merchantId(),
-                paymentIntent.getId(), authorization.getPaymentAttemptId(), authorization.getId(), request.amount(),
-                paymentIntent.getCurrency()));
-        LedgerService.RefundLedgerResult ledgerResult = ledgerService.recordRefund(merchantContext.merchantId(),
-                paymentIntent.getId(), refund.getId(), refund.getAmount(), refund.getCurrency());
-        paymentIntent.refund(request.amount());
-        webhookDeliveryService.createDeliveriesInCurrentTransaction(
-                merchantContext.merchantId(), "refund.created", refund.getId(),
-                paymentIntent.getTrafficOrigin());
-        recordRefundAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, refund,
-                ledgerResult);
+        FullRefundService.Result result = fullRefundService.refundLocked(merchantContext.merchantId(),
+                paymentIntent, RefundReasonCode.MERCHANT_REQUESTED, null, false);
+        Refund refund = result.refund();
+        recordRefundAuditLog(merchantContext, requestId, startingStatus, paymentIntent,
+                result.authorization(), refund, result.ledgerResult());
         return ResponseEntity.status(HttpStatus.CREATED).body(RefundResponse.from(refund));
-    }
-
-    private Authorization latestApprovedAuthorization(MerchantContext merchantContext, UUID paymentIntentId) {
-        return authorizationRepository.findApprovedAuthorizationsForPaymentIntent(merchantContext.merchantId(),
-                        paymentIntentId, PaymentAttemptStatus.AUTHORIZED, AuthorizationStatus.APPROVED)
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent does not have approved authorization evidence for Refund"));
-    }
-
-    private void requireAuthorizationMatchesPaymentIntent(Authorization authorization, PaymentIntent paymentIntent) {
-        if (!authorization.getCurrency().equals(paymentIntent.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Approved authorization currency does not match PaymentIntent");
-        }
-        if (authorization.getAuthorizedAmount() != paymentIntent.getAmount()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Approved authorization amount does not match PaymentIntent");
-        }
     }
 
     private void recordRefundAuditLog(MerchantContext merchantContext, String requestId,
@@ -169,11 +130,13 @@ public class RefundController {
     }
 
     public record RefundResponse(UUID id, UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId,
-            UUID authorizationId, long amount, String currency, RefundStatus status, Instant createdAt) {
+            UUID authorizationId, long amount, String currency, RefundStatus status,
+            int reasonCatalogVersion, RefundReasonCode reasonCode, Instant createdAt) {
         static RefundResponse from(Refund refund) {
             return new RefundResponse(refund.getId(), refund.getMerchantId(), refund.getPaymentIntentId(),
                     refund.getPaymentAttemptId(), refund.getAuthorizationId(), refund.getAmount(),
-                    refund.getCurrency(), refund.getStatus(), refund.getCreatedAt());
+                    refund.getCurrency(), refund.getStatus(), refund.getReasonCatalogVersion(),
+                    refund.getReasonCode(), refund.getCreatedAt());
         }
     }
 }

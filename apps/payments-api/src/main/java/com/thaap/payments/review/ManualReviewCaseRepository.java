@@ -15,6 +15,27 @@ public interface ManualReviewCaseRepository extends JpaRepository<ManualReviewCa
     Optional<ManualReviewCase> findByIdAndMerchantId(UUID id, UUID merchantId);
     Optional<ManualReviewCase> findByPaymentIntentIdAndMerchantIdAndStatus(
             UUID paymentIntentId, UUID merchantId, ManualReviewCaseStatus status);
+    Optional<ManualReviewCase> findByPaymentIntentIdAndMerchantIdAndReviewStage(
+            UUID paymentIntentId, UUID merchantId, ReviewStage reviewStage);
+
+    @Query("""
+            SELECT reviewCase.paymentIntentId AS paymentIntentId,
+                   reviewCase.paymentAttemptId AS paymentAttemptId
+            FROM ManualReviewCase reviewCase
+            WHERE reviewCase.id = :id AND reviewCase.merchantId = :merchantId
+            """)
+    Optional<PaymentLineage> findPaymentLineageByIdAndMerchantId(
+            @Param("id") UUID id, @Param("merchantId") UUID merchantId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT reviewCase FROM ManualReviewCase reviewCase WHERE reviewCase.id = :id AND reviewCase.merchantId = :merchantId")
+    Optional<ManualReviewCase> findByIdAndMerchantIdForUpdate(@Param("id") UUID id,
+            @Param("merchantId") UUID merchantId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT reviewCase FROM ManualReviewCase reviewCase WHERE reviewCase.paymentIntentId = :paymentIntentId AND reviewCase.merchantId = :merchantId")
+    Optional<ManualReviewCase> findByPaymentIntentIdAndMerchantIdForUpdate(
+            @Param("paymentIntentId") UUID paymentIntentId, @Param("merchantId") UUID merchantId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
@@ -47,4 +68,10 @@ public interface ManualReviewCaseRepository extends JpaRepository<ManualReviewCa
             @Param("status") ManualReviewCaseStatus status,
             @Param("cursorCreatedAt") Instant cursorCreatedAt,
             @Param("cursorId") UUID cursorId, Pageable pageable);
+
+    interface PaymentLineage {
+        UUID getPaymentIntentId();
+
+        UUID getPaymentAttemptId();
+    }
 }

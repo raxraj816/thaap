@@ -584,14 +584,17 @@ Output:
 
 ### 8.3 Decision Ordering
 
-Rule behavior order:
+Evaluate all deterministic controls and aggregate matched candidates using:
 
-1. `REQUEST_3DS`
-2. `ALLOW`
-3. `BLOCK`
-4. `REVIEW`
+1. `BLOCK`
+2. `REVIEW`
+3. `REQUEST_3DS`
+4. `ALLOW` when no stronger control matches
 
-Then combine with ML thresholds and merchant policy once model scoring exists.
+Do not short-circuit evaluation; lower-severity matches remain explanation
+evidence. Phase 4 adds list, velocity, and merchant-policy candidates without
+allowing them to suppress a stronger protected action. Combine with calibrated
+ML thresholds only after model scoring and governance exist.
 
 ### 8.4 Latency Budget
 

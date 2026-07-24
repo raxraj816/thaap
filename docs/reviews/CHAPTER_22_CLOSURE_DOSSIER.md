@@ -50,7 +50,7 @@ Chapter 22 matrix and Phase 3 detailed plan.
 
 | Family | Partitions | Real-boundary proof |
 | --- | --- | --- |
-| Type and representation | LONG, STRING, BOOLEAN, DECIMAL; exact/wrong Java type; definition/type cross-product; zero/one/multiple SQL typed columns; integer/decimal JSON | `DecisionFeatureContextTests`, `FeatureValueBoundaryTests`, `FraudJsonConverterTests`, `Chapter22FeatureLineageDatabaseContractTests` |
+| Type and representation | LONG, STRING, BOOLEAN, DECIMAL; exact/wrong Java type; definition/type cross-product; zero/one/multiple SQL typed columns; integer/decimal JSON | `DecisionFeatureContextTests`, `FeatureValueBoundaryTests`, `FraudJsonConverterTests`, `FeatureLineageDatabaseContractTests` |
 | Size and time | Empty, maximum, oversized, Unicode bytes; observed before/at/after decision; observed after computed | Boundary tests and PostgreSQL microsecond partitions |
 | Tenant and origin | Correct/cross merchant, attempt, decision, snapshot, four-column definition identity, and traffic origin | Tenant contracts and PostgreSQL composite-FK cases |
 | Transaction | Snapshot failure, FeatureValue positions zero through six, real PostgreSQL flush constraint failure, processor boundary, exact retry | Rollback contracts and PostgreSQL pre-processor flush failure proof |
@@ -99,7 +99,7 @@ also upgraded retained local PostgreSQL state from V13 through V19.
 
 ## Demo evidence
 
-`scripts/demo-chapter-22-feature-lineage.py` ran against the local service and
+`scripts/demo-feature-lineage.py` ran against the local service and
 retained PostgreSQL. It created merchant, customer, method, manual-capture
 intent, and confirm through public APIs; replayed the identical confirm bytes;
 then used a read-only SQL reconciliation to prove one authorized attempt, one

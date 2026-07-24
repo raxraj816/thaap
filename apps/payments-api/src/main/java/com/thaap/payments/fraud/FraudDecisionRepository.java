@@ -10,4 +10,6 @@ public interface FraudDecisionRepository extends JpaRepository<FraudDecision, UU
     List<FraudDecision> findByMerchantIdOrderByCreatedAtAsc(UUID merchantId);
 
     Optional<FraudDecision> findByIdAndMerchantId(UUID id, UUID merchantId);
+
+    Optional<FraudDecision> findByMerchantIdAndPaymentAttemptId(UUID merchantId, UUID paymentAttemptId);
 }

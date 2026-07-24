@@ -3,6 +3,8 @@ package com.thaap.payments.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -34,6 +36,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -64,19 +67,19 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
     @Autowired
     private DatabaseCleaner databaseCleaner;
 
-    @MockitoBean
+    @MockitoSpyBean
     private FeatureSnapshotRepository featureSnapshotRepository;
 
     @MockitoBean
     private ProcessorAdapter processorAdapter;
 
-    @MockitoBean
+    @MockitoSpyBean
     private FeatureValueRepository featureValueRepository;
 
-    @MockitoBean
+    @MockitoSpyBean
     private RuleExecutionResultRepository ruleExecutionResultRepository;
 
-    @MockitoBean
+    @MockitoSpyBean
     private ManualReviewCaseRepository manualReviewCaseRepository;
 
     @BeforeEach
@@ -92,8 +95,8 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
     @Test
     void featureSnapshotPersistenceFailureRollsBackAttemptDecisionSnapshotAuthorizationAndIntentState()
             throws Exception {
-        when(featureSnapshotRepository.save(any(FeatureSnapshot.class)))
-                .thenThrow(new IllegalStateException("feature snapshot unavailable"));
+        doThrow(new IllegalStateException("feature snapshot unavailable"))
+                .when(featureSnapshotRepository).save(any(FeatureSnapshot.class));
         MerchantAccess merchant = createMerchant("merchant-a");
         UUID customerId = createCustomer(merchant, "buyer-a@example.com");
         UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-snapshot-failure");
@@ -121,14 +124,15 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
     @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
     void failureAtEveryFeatureValuePositionRollsBackAllLineageAndKeepsConfirmRetryable(int failingPosition)
             throws Exception {
-        when(featureSnapshotRepository.save(any(FeatureSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(featureSnapshotRepository).save(any(FeatureSnapshot.class));
         AtomicInteger position = new AtomicInteger();
-        when(featureValueRepository.save(any())).thenAnswer(invocation -> {
+        doAnswer(invocation -> {
             if (position.getAndIncrement() == failingPosition) {
                 throw new IllegalStateException("feature value unavailable");
             }
             return invocation.getArgument(0);
-        });
+        }).when(featureValueRepository).save(any());
         MerchantAccess merchant = createMerchant("merchant-feature-value-failure");
         UUID customerId = createCustomer(merchant, "buyer-values@example.com");
         UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-value-failure");
@@ -155,15 +159,16 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
     @ValueSource(ints = {0, 1, 2})
     void failureAtEveryRuleResultPositionRollsBackCompleteDecisionBeforeProcessor(int failingPosition)
             throws Exception {
-        when(featureSnapshotRepository.save(any(FeatureSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(featureValueRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(featureSnapshotRepository).save(any(FeatureSnapshot.class));
+        doAnswer(invocation -> invocation.getArgument(0)).when(featureValueRepository).save(any());
         AtomicInteger position = new AtomicInteger();
-        when(ruleExecutionResultRepository.save(any(RuleExecutionResult.class))).thenAnswer(invocation -> {
+        doAnswer(invocation -> {
             if (position.getAndIncrement() == failingPosition) {
                 throw new IllegalStateException("rule result unavailable");
             }
             return invocation.getArgument(0);
-        });
+        }).when(ruleExecutionResultRepository).save(any(RuleExecutionResult.class));
         MerchantAccess merchant = createMerchant("merchant-rule-result-failure");
         UUID customerId = createCustomer(merchant, "buyer-rules@example.com");
         UUID paymentMethodId = createPaymentMethod(merchant, customerId, "confirm-pm-rule-failure");
@@ -188,12 +193,8 @@ class PaymentIntentConfirmFraudLineageRollbackTests {
 
     @Test
     void reviewCasePersistenceFailureRollsBackThirdAttemptAndKeepsPaymentRetryable() throws Exception {
-        when(featureSnapshotRepository.save(any(FeatureSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(featureValueRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(ruleExecutionResultRepository.save(any(RuleExecutionResult.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-        when(manualReviewCaseRepository.save(any(ManualReviewCase.class)))
-                .thenThrow(new IllegalStateException("review store unavailable"));
+        doThrow(new IllegalStateException("review store unavailable"))
+                .when(manualReviewCaseRepository).save(any(ManualReviewCase.class));
         when(processorAdapter.authorize(any())).thenAnswer(invocation ->
                 new com.thaap.payments.processor.ProcessorAuthorizationResult(
                 "THAAP_SIMULATOR", "auth_review_failure_" + UUID.randomUUID(), "INSUFFICIENT_FUNDS",

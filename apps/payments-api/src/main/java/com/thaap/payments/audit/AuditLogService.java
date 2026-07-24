@@ -1,6 +1,7 @@
 package com.thaap.payments.audit;
 
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.risk.RiskOperatorContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Map;
@@ -28,6 +29,20 @@ public class AuditLogService {
         try {
             auditLogRepository.save(new AuditLog(merchantContext.merchantId(), AuditActorType.MERCHANT_API_KEY,
                     actorId(merchantContext), action, aggregateType, aggregateId, requestId, null, reason,
+                    AuditSanitizer.sanitize(before), AuditSanitizer.sanitize(after)));
+            registerCompletionCounters();
+        } catch (RuntimeException exception) {
+            auditLogsFailedCounter.increment();
+            throw exception;
+        }
+    }
+
+    public void recordRiskOperatorAction(RiskOperatorContext operatorContext, String requestId, String action,
+            String aggregateType, UUID aggregateId, String reason, Map<String, Object> before,
+            Map<String, Object> after) {
+        try {
+            auditLogRepository.save(new AuditLog(operatorContext.merchantId(), AuditActorType.RISK_OPERATOR,
+                    operatorContext.operatorCode(), action, aggregateType, aggregateId, requestId, null, reason,
                     AuditSanitizer.sanitize(before), AuditSanitizer.sanitize(after)));
             registerCompletionCounters();
         } catch (RuntimeException exception) {

@@ -10,6 +10,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface AuthorizationRepository extends JpaRepository<Authorization, UUID> {
 
+    Optional<Authorization> findByIdAndMerchantId(UUID id, UUID merchantId);
+
     Optional<Authorization> findByPaymentAttemptIdAndMerchantId(UUID paymentAttemptId, UUID merchantId);
 
     @Query("""

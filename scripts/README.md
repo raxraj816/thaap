@@ -47,7 +47,7 @@ THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
 Run the Chapter 17 automatic-capture and manual-authorization-void demo:
 
 ```bash
-scripts/demo-chapter-17-flow.sh
+scripts/demo-payment-cancel-void-flow.sh
 ```
 
 The script fails unless approved `AUTOMATIC` confirm reaches `CAPTURED` with
@@ -62,7 +62,7 @@ boundary tracked by `TD-0001`.
 Run the Chapter 18 durable full-refund and ledger-reversal demo:
 
 ```bash
-scripts/demo-chapter-18-refund-flow.sh
+scripts/demo-refund-ledger-flow.sh
 ```
 
 The script accepts only a loopback API origin. It proves automatic capture,
@@ -78,7 +78,7 @@ export THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 export THAAP_WEBHOOK_EXECUTION_ENABLED=true
 scripts/payments-api-run.sh
 # In another terminal:
-scripts/demo-chapter-19-webhook-flow.sh
+scripts/demo-webhook-delivery-flow.sh
 ```
 
 The demo accepts only a loopback API origin and starts a loopback callback
@@ -100,7 +100,7 @@ Run the Chapter 20 complete deterministic processor-catalog demo:
 
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
-scripts/demo-chapter-20-processor-catalog.py
+scripts/demo-processor-outcome-catalog.py
 ```
 
 The runner accepts only a loopback API origin, ignores environment proxy
@@ -120,15 +120,128 @@ PostgreSQL and the API:
 
 ```bash
 export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
-scripts/demo-chapter-22-feature-lineage.py
+scripts/demo-feature-lineage.py
 ```
 
+Chapter 26 public analyst review-to-label reconciliation:
+
+```bash
+THAAP_ADMIN_BOOTSTRAP_TOKEN=... scripts/demo-review-label-loop.py
+```
+
+The Chapter 26 demo accepts only a loopback HTTP API, uses public merchant and
+risk-operator APIs for the workflow, and uses `docker exec ... psql` only for
+read-only reconciliation of payment, review, label, webhook, privacy, tenant,
+and unchanged processor/money truth.
+
+Chapter 27 public approval-to-processor/capture reconciliation:
+
+```bash
+THAAP_ADMIN_BOOTSTRAP_TOKEN=... scripts/demo-review-approval.py
+```
+
+The Chapter 27 demo uses two safe simulator declines to open review, confirms
+the third attempt with an approval fixture without calling the processor,
+assigns an analyst, then approves that same attempt. Read-only PostgreSQL
+reconciliation proves the original REVIEW decision, deterministic attempt-bound
+processor identity, one resolution, no fabricated label, automatic capture's
+two balanced ledger entries, and exact same/distinct-key terminal replay.
 The runner accepts only a loopback API origin, ignores environment proxies,
 and rejects redirects. It creates and confirms a manual-capture payment through
 public APIs, checks exact idempotent replay and the safe lexical decision
 snapshot, then performs a read-only query against the local `thaap-postgres`
 container to reconcile all seven typed values and their point-in-time
 predicate. It prints only non-secret resource IDs and bounded outcomes.
+
+Run the Chapter 28 fraud- and processor-source authentication proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-authentication-challenge.py
+```
+
+The runner requires the loopback API and local `thaap-postgres`, rejects
+redirects and proxy routing, and performs read-only reconciliation. It proves
+zero approved funds before completion, source-bound reveal-once next actions,
+exact replay, one decision/attempt per cohort, automatic capture for the fraud
+source, and manual `REQUIRES_CAPTURE` for the processor source.
+
+Run the Chapter 29 safe RiskContext and all-action parity proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-risk-context.py
+```
+
+The runner accepts only a loopback API origin, rejects redirects and proxy
+routing, and uses read-only local PostgreSQL reconciliation. It compares
+context-absent and context-present ALLOW, BLOCK, REQUEST_3DS, and REVIEW cohorts,
+proves byte-exact confirm replay, complete context/feature/decision lineage,
+and zero raw device-canary occurrences across context, snapshot, audit,
+webhook, and idempotency rows.
+
+Run the Chapter 30 exact Redis velocity, typed fraud-list, and outage-recovery
+proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-velocity-fraud-lists.py
+```
+
+The runner accepts only a loopback API origin and requires local
+`thaap-postgres` and `thaap-redis` containers. It proves list BLOCK and
+append-only deactivation history, fourth-attempt velocity REVIEW, byte-exact
+replay, complete durable lineage, Redis pause→unavailable REVIEW, readiness
+degradation and recovery after unpause, and zero raw card/email canaries across
+Redis and relevant durable surfaces.
+
+Run the Chapter 31 merchant risk profile, policy, and decision-integration proof
+with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-merchant-risk-policy.py
+```
+
+The runner accepts only a loopback API origin and requires local
+`thaap-postgres`. It proves creator/approver dual control, approval without
+decision effect, activation changing only future decisions to REQUEST_3DS,
+REVIEW, and BLOCK, byte-exact replay, fixture-only preview, immutable historical
+lineage, three processor exclusions, and readiness `UP`.
+
+Run the Chapter 32 captured/refunded chargeback and structured-evidence proof
+with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-chargeback-lifecycle.py
+```
+
+The runner accepts only a loopback API origin and requires local
+`thaap-postgres`. It proves captured fraud allocation with a balanced dispute
+ledger and immutable label, refund-first zero offset without a second debit or
+false label, byte-exact idempotency replay, independent external-event
+deduplication, explicit simulator source attestation, pre-deadline bounded DRAFT
+evidence, and read-only durable reconciliation.
+
+Run the Chapter 33 signal-to-review-to-refund proof with:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-post-authorization.py
+```
+
+Run the Chapter 34 durable suspected-incident and exact 429 rate-limit proof:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-card-testing-incidents-rate-limits.py
+```
+
+Both runners accept only a loopback API origin and use read-only container
+reconciliation. Chapter 34 additionally verifies Redis contains only bounded
+HMAC-shaped keys and distinguishes ephemeral rate limiting from durable
+incident truth.
 
 Generate Chapter 16 synthetic payment-risk scenarios through the public API:
 
@@ -238,6 +351,21 @@ operational debt must receive an immutable `TD-NNNN` ID in
 automatically and rejects open entries that have not been reviewed within 35
 days.
 
+## Executable Artifact Naming
+
+Reject roadmap chapter identifiers in production code, test identities,
+migrations, demo scripts, executable fixtures, and runtime messages:
+
+```bash
+scripts/executable-artifact-naming-check.py
+python3 -m unittest scripts/executable_artifact_naming_check_tests.py
+```
+
+Capability names are durable because they describe what the payment-risk system
+does. Chapter identifiers remain valid in plans, learning notes, invariant
+matrices, closure dossiers, and the chapter-closure validator. The checker also
+preserves exact allowlisted references to immutable applied migration history.
+
 ## Technical Blog Workflow
 
 Create a weekly technical blog draft from the post template:
@@ -280,6 +408,7 @@ deferred, or rejected as not applicable before handoff.
 The non-trivial gate also runs:
 
 ```bash
+scripts/executable-artifact-naming-check.py
 scripts/invariant-proof-check.py docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md
 scripts/escaped-review-check.py
 scripts/slice-review-check.py

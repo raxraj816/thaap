@@ -36,6 +36,10 @@ server:
 logging:
   pattern:
     level: "%5p [requestId:%X{requestId:-}]"
+  level:
+    # PostgreSQL includes full failing-row values in constraint messages. The
+    # API emits a bounded requestId/path/exception-type signal instead.
+    org.hibernate.orm.jdbc.error: ERROR
 
 management:
   endpoints:
@@ -47,6 +51,9 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,db,velocityRedis,merchantRiskPolicy
   health:
     db:
       enabled: true
@@ -74,9 +81,33 @@ thaap:
     correlation-pepper: ${THAAP_CORRELATION_PEPPER:}
   idempotency:
     reservation-lease: ${THAAP_IDEMPOTENCY_RESERVATION_LEASE:30s}
+  rate-limit:
+    enabled: ${THAAP_RATE_LIMIT_ENABLED:true}
+    window: ${THAAP_RATE_LIMIT_WINDOW:1m}
+    confirm:
+      merchant: ${THAAP_RATE_LIMIT_CONFIRM_MERCHANT:100}
+      credential: ${THAAP_RATE_LIMIT_CONFIRM_CREDENTIAL:60}
+      client-ip: ${THAAP_RATE_LIMIT_CONFIRM_CLIENT_IP:120}
+    payment-method:
+      merchant: ${THAAP_RATE_LIMIT_PAYMENT_METHOD_MERCHANT:30}
+      credential: ${THAAP_RATE_LIMIT_PAYMENT_METHOD_CREDENTIAL:20}
+      client-ip: ${THAAP_RATE_LIMIT_PAYMENT_METHOD_CLIENT_IP:40}
+  card-testing-incidents:
+    enabled: ${THAAP_CARD_TESTING_INCIDENTS_ENABLED:true}
+    detection-window: ${THAAP_CARD_TESTING_DETECTION_WINDOW:10m}
+    minimum-attempts: ${THAAP_CARD_TESTING_MINIMUM_ATTEMPTS:5}
+    minimum-declines: ${THAAP_CARD_TESTING_MINIMUM_DECLINES:3}
+    minimum-distinct-cards: ${THAAP_CARD_TESTING_MINIMUM_DISTINCT_CARDS:3}
+  authentication:
+    challenge-ttl: ${THAAP_AUTHENTICATION_CHALLENGE_TTL:5m}
+    replay-encryption-key: ${THAAP_AUTHENTICATION_REPLAY_ENCRYPTION_KEY:}
+    replay-key-version: ${THAAP_AUTHENTICATION_REPLAY_KEY_VERSION:v1}
+    replay-decryption-keys: ${THAAP_AUTHENTICATION_REPLAY_DECRYPTION_KEYS:}
   fraud:
     feature-snapshot:
       max-json-bytes: ${THAAP_FEATURE_SNAPSHOT_MAX_JSON_BYTES:16384}
+    velocity:
+      enabled: ${THAAP_VELOCITY_ENABLED:true}
   webhook:
     execution-enabled: ${THAAP_WEBHOOK_EXECUTION_ENABLED:false}
     secret-encryption-key: ${THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY:}

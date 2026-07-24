@@ -19,10 +19,17 @@ public interface IdempotencyRepository extends JpaRepository<IdempotencyRecord, 
             SELECT record
             FROM IdempotencyRecord record
             WHERE record.merchantId = :merchantId
+              AND record.principalType = :principalType
+              AND record.principalId = :principalId
+              AND record.principalCredentialPrefix = :credentialPrefix
               AND record.key = :key
             """)
-    Optional<IdempotencyRecord> findByMerchantIdAndKeyForUpdate(
-            @Param("merchantId") UUID merchantId, @Param("key") String key);
+    Optional<IdempotencyRecord> findByPrincipalAndKeyForUpdate(
+            @Param("merchantId") UUID merchantId,
+            @Param("principalType") IdempotencyPrincipalType principalType,
+            @Param("principalId") UUID principalId,
+            @Param("credentialPrefix") String credentialPrefix,
+            @Param("key") String key);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
@@ -38,4 +45,13 @@ public interface IdempotencyRepository extends JpaRepository<IdempotencyRecord, 
             WHERE record.expiresAt >= :now
             """)
     List<String> findRequiredRequestHashKeyVersions(@Param("now") Instant now);
+
+    @Query("""
+            SELECT record.responseBody
+            FROM IdempotencyRecord record
+            WHERE record.status = com.thaap.payments.idempotency.IdempotencyStatus.COMPLETED
+              AND record.expiresAt > :now
+              AND record.responseBody LIKE '%authentication-replay-v1%'
+            """)
+    List<String> findActiveProtectedAuthenticationReplays(@Param("now") Instant now);
 }

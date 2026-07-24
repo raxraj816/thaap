@@ -6,11 +6,17 @@ This directory is organized to avoid conflicting plans during implementation.
 
 - [IMPLEMENTATION_MASTER_PLAN.md](./IMPLEMENTATION_MASTER_PLAN.md)
 - [PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md)
+- [PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md)
 
 This is the authoritative implementation source of truth. If any reference document disagrees with it, follow the master plan.
-The Phase 3 detailed plan is incorporated by reference from the master plan and
-defines its proposed promises, schemas, rules, failure inventory, proof strategy,
-and Chapters 22–25.
+The completed Phase 3 detailed plan defines Chapters 22–25. The confirmed Phase
+4 detailed plan is incorporated by reference and defines its review/label,
+RiskContext, Redis, policy, authentication, dispute, failure, proof, and
+Chapter 26–35 boundaries. Founder/domain review confirmed it on 2026-07-13;
+Chapters 26–35 and Phase 4 are verified complete. The integrated Chapter 35
+matrix/dossier, 629 Java tests, 114 Python tests, 14 migration contracts,
+retained V48-to-V49 upgrade proof, and all Chapter 26–34 public demos pass
+together.
 
 ## Companion Docs
 

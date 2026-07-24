@@ -94,6 +94,23 @@ Use another branch prefix only when the user explicitly asks for it. Do not use
 tool-default or agent-default branch prefixes when they conflict with this
 repository convention.
 
+## Durable Artifact Naming
+
+Chapters are planning, review, and learning coordinates. They are not product
+domain names. Production classes, test classes and methods, migrations, demo
+scripts, executable fixtures, database objects, runtime messages, report names,
+and other durable executable identifiers must be named for the payment, fraud,
+security, data, or operational capability they implement or prove.
+
+Chapter identifiers are allowed only when the artifact's actual responsibility
+is chapter governance, such as implementation plans, daily notes, invariant
+matrices, closure dossiers, and the chapter-closure validator. Applied Flyway
+migrations are immutable; any historical exception must be exact, allowlisted,
+and protected by a forward-looking naming gate rather than rewritten in place.
+
+Run `scripts/executable-artifact-naming-check.py` before completion. The commit
+readiness gate runs it automatically.
+
 ## Teaching Standard
 
 Treat the founder as a sharp new intern whenever teaching a concept. Do not

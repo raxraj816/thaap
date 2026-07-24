@@ -21,6 +21,7 @@ public class SimulatorProcessorCatalog {
     public static final String FIXTURE_AVS_LINE1_FAILURE = "avs_line1_failure";
     public static final String FIXTURE_AVS_POSTAL_FAILURE = "avs_postal_failure";
     public static final String FIXTURE_THREE_DS_REQUIRED = "three_ds_required";
+    public static final String FIXTURE_REPEATED_THREE_DS_REQUIRED = "repeated_three_ds_required";
     public static final String FIXTURE_UNKNOWN_DEFAULT_APPROVAL = "unknown_default_approval";
 
     private static final SimulatorOutcome DEFAULT_APPROVED_OUTCOME = approvedOutcome();
@@ -48,6 +49,10 @@ public class SimulatorProcessorCatalog {
             new SimulatorFixture(FIXTURE_THREE_DS_REQUIRED, "499999", "0008",
                     new SimulatorOutcome(AuthorizationStatus.REQUIRES_ACTION, NetworkStatus.REQUIRES_ACTION,
                             "THREE_DS_REQUIRED", VerificationResult.PASS, VerificationResult.PASS,
+                            VerificationResult.PASS, ThreeDsResult.REQUIRED)),
+            new SimulatorFixture(FIXTURE_REPEATED_THREE_DS_REQUIRED, "499999", "0009",
+                    new SimulatorOutcome(AuthorizationStatus.REQUIRES_ACTION, NetworkStatus.REQUIRES_ACTION,
+                            "REPEATED_THREE_DS_REQUIRED", VerificationResult.PASS, VerificationResult.PASS,
                             VerificationResult.PASS, ThreeDsResult.REQUIRED)));
 
     private final Map<SimulatorCardKey, SimulatorFixture> fixturesByCardKey;

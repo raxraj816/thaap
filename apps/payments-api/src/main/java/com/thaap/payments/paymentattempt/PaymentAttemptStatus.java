@@ -6,6 +6,8 @@ public enum PaymentAttemptStatus {
     AUTHORIZED,
     DECLINED,
     REQUIRES_ACTION,
+    AUTHENTICATION_FAILED,
+    AUTHENTICATION_EXPIRED,
     BLOCKED,
     IN_REVIEW,
     CANCELED
