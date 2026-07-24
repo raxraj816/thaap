@@ -232,7 +232,7 @@ class DatabaseMigrationTests {
                 "fraud_rules",
                 "review_cases");
 
-        assertIndexExists("idempotency_records", "uk_idempotency_merchant_key");
+        assertIndexExists("idempotency_records", "uk_idempotency_principal_key");
         assertIndexExists("idempotency_records", "idx_idempotency_merchant_status");
         assertIndexExists("merchants", "uk_merchants_api_key_hash");
         assertIndexExists("payment_intents", "uk_payment_intents_merchant_id_id");
@@ -313,7 +313,12 @@ class DatabaseMigrationTests {
                 "created_at");
         assertThat(columnNames("refunds")).contains("merchant_id", "payment_intent_id", "payment_attempt_id",
                 "authorization_id", "amount", "currency", "status", "created_at");
-        assertThat(columnNames("idempotency_records")).contains("operation", "expires_at");
+        assertThat(columnNames("idempotency_records")).contains(
+                "operation", "expires_at", "principal_type", "principal_id",
+                "principal_credential_prefix");
+        assertThat(columnNames("risk_contexts")).contains(
+                "ip_identity_hmac_aliases", "device_identity_hmac_aliases",
+                "session_identity_hmac_aliases");
         assertThat(columnNames("webhook_endpoints")).contains(
                 "operational_status", "signing_secret_prefix", "signing_secret_hash",
                 "signing_secret_ciphertext", "signing_secret_nonce", "signing_secret_key_version")
@@ -530,7 +535,7 @@ class DatabaseMigrationTests {
     }
 
     @Test
-    void legacyOpenAutomaticRowsPreserveExplicitCaptureBehaviorDuringChapter17Migration() {
+    void legacyOpenAutomaticRowsPreserveExplicitCaptureBehaviorDuringAuthorizationVoidMigration() {
         String databaseName = "legacy_capture_method_" + UUID.randomUUID().toString().replace("-", "");
         DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:" + databaseName
@@ -596,8 +601,8 @@ class DatabaseMigrationTests {
     }
 
     @Test
-    void chapter18MigrationBackfillsCaptureLedgerLineageWithoutInventingRefundTruth() {
-        UpgradeDatabase upgrade = createUpgradeDatabase("chapter18_capture_backfill");
+    void refundLedgerMigrationBackfillsCaptureLedgerLineageWithoutInventingRefundTruth() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("refund_ledger_capture_backfill");
         migrate(upgrade.dataSource(), "7");
         UUID merchantId = UUID.randomUUID();
         UUID customerId = UUID.randomUUID();
@@ -626,8 +631,8 @@ class DatabaseMigrationTests {
     }
 
     @Test
-    void chapter18MigrationRejectsLegacyRefundedPaymentIntents() {
-        UpgradeDatabase upgrade = createUpgradeDatabase("chapter18_legacy_refund_guard");
+    void refundLedgerMigrationRejectsLegacyRefundedPaymentIntents() {
+        UpgradeDatabase upgrade = createUpgradeDatabase("refund_ledger_legacy_refund_guard");
         migrate(upgrade.dataSource(), "7");
         UUID merchantId = UUID.randomUUID();
         UUID customerId = UUID.randomUUID();

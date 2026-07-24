@@ -3,6 +3,8 @@ package com.thaap.payments.api;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
+import com.thaap.payments.ratelimit.RateLimitExceededException;
+import com.thaap.payments.ratelimit.RateLimitUnavailableException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,6 +33,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 @RestControllerAdvice
@@ -117,6 +120,14 @@ public class GlobalApiExceptionHandler {
                 request, response, List.of());
     }
 
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiErrorResponse> handleMediaTypeNotSupported(
+            HttpMediaTypeNotSupportedException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        return error(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type",
+                "Request content type is not supported", request, response, List.of());
+    }
+
     @ExceptionHandler(ErrorResponseException.class)
     public ResponseEntity<ApiErrorResponse> handleErrorResponse(ErrorResponseException exception,
             HttpServletRequest request, HttpServletResponse response) {
@@ -129,7 +140,9 @@ public class GlobalApiExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception exception, HttpServletRequest request,
             HttpServletResponse response) {
-        log.error("Unhandled API exception", exception);
+        String requestId = requestId(request, response);
+        log.error("Unhandled API exception requestId={} path={} exceptionType={}",
+                requestId, request.getRequestURI(), exception.getClass().getSimpleName());
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error", "Internal server error", request,
                 response,
                 List.of());
@@ -237,5 +250,21 @@ public class GlobalApiExceptionHandler {
             return propertyPath;
         }
         return propertyPath.substring(dot + 1);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleRateLimitExceeded(RateLimitExceededException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(exception.getRetryAfterSeconds()));
+        return error(HttpStatus.TOO_MANY_REQUESTS, "rate_limit_exceeded",
+                "Application-owned request rate limit exceeded", request, response, List.of());
+    }
+
+    @ExceptionHandler(RateLimitUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleRateLimitUnavailable(RateLimitUnavailableException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.RETRY_AFTER, "1");
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "rate_limit_unavailable",
+                "Request rate-limit dependency is unavailable", request, response, List.of());
     }
 }

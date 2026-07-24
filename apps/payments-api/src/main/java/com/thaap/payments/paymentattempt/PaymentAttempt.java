@@ -198,6 +198,15 @@ public class PaymentAttempt {
         this.updatedAt = Instant.now();
     }
 
+    public void markReadyForProcessorAfterReview() {
+        if (status != PaymentAttemptStatus.IN_REVIEW) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot continue after review from status " + status);
+        }
+        this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
+        this.updatedAt = Instant.now();
+    }
+
     public void markAuthorized(String processorAuthorizationId) {
         requireProcessorReady("authorized");
         this.status = PaymentAttemptStatus.AUTHORIZED;
@@ -218,6 +227,37 @@ public class PaymentAttempt {
         this.processorAuthorizationId = processorAuthorizationId;
         this.threeDsStatus = ThreeDsStatus.REQUESTED;
         this.updatedAt = Instant.now();
+    }
+
+    public void markReadyForProcessorAfterAuthentication() {
+        if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot continue authentication from status " + status);
+        }
+        status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
+        threeDsStatus = ThreeDsStatus.COMPLETED;
+        updatedAt = Instant.now();
+    }
+
+    public void markAuthenticationFailed(boolean expired) {
+        if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot fail authentication from status " + status);
+        }
+        status = expired ? PaymentAttemptStatus.AUTHENTICATION_EXPIRED
+                : PaymentAttemptStatus.AUTHENTICATION_FAILED;
+        threeDsStatus = ThreeDsStatus.FAILED;
+        updatedAt = Instant.now();
+    }
+
+    public void cancelFromAuthentication() {
+        if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentAttempt cannot cancel authentication from status " + status);
+        }
+        status = PaymentAttemptStatus.CANCELED;
+        threeDsStatus = ThreeDsStatus.FAILED;
+        updatedAt = Instant.now();
     }
 
     private void requireProcessorReady(String targetStatus) {

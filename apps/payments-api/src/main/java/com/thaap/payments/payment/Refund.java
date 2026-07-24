@@ -54,6 +54,16 @@ public class Refund {
     @Column(nullable = false, length = 32)
     private RefundStatus status;
 
+    @Column(name = "reason_catalog_version", nullable = false)
+    private int reasonCatalogVersion;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason_code", nullable = false, length = 64)
+    private RefundReasonCode reasonCode;
+
+    @Column(name = "source_review_resolution_id")
+    private UUID sourceReviewResolutionId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -62,6 +72,12 @@ public class Refund {
 
     public Refund(UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId, UUID authorizationId,
             long amount, String currency) {
+        this(merchantId, paymentIntentId, paymentAttemptId, authorizationId, amount, currency,
+                RefundReasonCode.MERCHANT_REQUESTED, null);
+    }
+
+    public Refund(UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId, UUID authorizationId,
+            long amount, String currency, RefundReasonCode reasonCode, UUID sourceReviewResolutionId) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.paymentIntentId = paymentIntentId;
@@ -70,6 +86,9 @@ public class Refund {
         this.amount = amount;
         this.currency = currency;
         this.status = RefundStatus.RECORDED;
+        this.reasonCatalogVersion = 1;
+        this.reasonCode = reasonCode;
+        this.sourceReviewResolutionId = sourceReviewResolutionId;
         this.createdAt = Instant.now();
     }
 
@@ -104,6 +123,12 @@ public class Refund {
     public RefundStatus getStatus() {
         return status;
     }
+
+    public int getReasonCatalogVersion() { return reasonCatalogVersion; }
+
+    public RefundReasonCode getReasonCode() { return reasonCode; }
+
+    public UUID getSourceReviewResolutionId() { return sourceReviewResolutionId; }
 
     public Instant getCreatedAt() {
         return createdAt;

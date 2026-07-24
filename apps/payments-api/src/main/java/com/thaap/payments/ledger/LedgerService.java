@@ -64,6 +64,31 @@ public class LedgerService {
         return new RefundLedgerResult(captureTransactionGroupId, refundTransactionGroupId, savedEntries);
     }
 
+    public ChargebackLedgerResult recordChargeback(UUID merchantId, UUID paymentIntentId, UUID chargebackId,
+            long capturedAmount, long allocatedAmount, String currency) {
+        requirePositiveAmountAndCurrency(allocatedAmount, currency, "Chargeback");
+        List<LedgerEntry> existingEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(
+                merchantId, LedgerSourceType.CHARGEBACK, chargebackId);
+        if (!existingEntries.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Chargeback ledger entries already exist for Chargeback");
+        }
+        List<LedgerEntry> captureEntries = ledgerEntryRepository.findByMerchantIdAndPaymentIntentIdAndSourceType(
+                merchantId, paymentIntentId, LedgerSourceType.PAYMENT_INTENT_CAPTURE);
+        UUID captureTransactionGroupId = requireValidCaptureLedger(captureEntries, capturedAmount, currency);
+        UUID transactionGroupId = UUID.randomUUID();
+        List<LedgerEntry> entries = List.of(
+                new LedgerEntry(merchantId, transactionGroupId, LedgerSourceType.CHARGEBACK, chargebackId,
+                        paymentIntentId, null, chargebackId, LedgerAccount.MERCHANT_PAYABLE,
+                        LedgerDirection.DEBIT, allocatedAmount, currency.toUpperCase()),
+                new LedgerEntry(merchantId, transactionGroupId, LedgerSourceType.CHARGEBACK, chargebackId,
+                        paymentIntentId, null, chargebackId, LedgerAccount.CUSTOMER_RECEIVABLE,
+                        LedgerDirection.CREDIT, allocatedAmount, currency.toUpperCase()));
+        requireBalanced(entries);
+        return new ChargebackLedgerResult(captureTransactionGroupId, transactionGroupId,
+                ledgerEntryRepository.saveAll(entries));
+    }
+
     private void requirePositiveAmountAndCurrency(long amount, String currency, String operation) {
         if (amount <= 0) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, operation + " amount must be positive");
@@ -141,6 +166,10 @@ public class LedgerService {
     }
 
     public record RefundLedgerResult(UUID captureTransactionGroupId, UUID transactionGroupId,
+            List<LedgerEntry> entries) {
+    }
+
+    public record ChargebackLedgerResult(UUID captureTransactionGroupId, UUID transactionGroupId,
             List<LedgerEntry> entries) {
     }
 }

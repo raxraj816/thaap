@@ -1,6 +1,8 @@
 package com.thaap.payments.payment;
 
 import com.thaap.payments.api.RequestIdFilter;
+import com.thaap.payments.authentication.AuthenticationChallengeService;
+import com.thaap.payments.authentication.AuthenticationChallengeSource;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
@@ -24,6 +26,12 @@ import com.thaap.payments.fraud.MaterializedFeatureSet;
 import com.thaap.payments.fraud.RuleEvaluation;
 import com.thaap.payments.fraud.RuleExecutionResult;
 import com.thaap.payments.fraud.RuleExecutionResultRepository;
+import com.thaap.payments.fraudlist.FraudListAssessment;
+import com.thaap.payments.fraudlist.FraudListDecisionAggregator;
+import com.thaap.payments.fraudlist.FraudListEvaluationRecord;
+import com.thaap.payments.fraudlist.FraudListEvaluation;
+import com.thaap.payments.fraudlist.FraudListEvaluationRecordRepository;
+import com.thaap.payments.fraudlist.FraudListEvaluator;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerService;
@@ -39,7 +47,20 @@ import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.review.ManualReviewCase;
 import com.thaap.payments.review.ManualReviewCaseRepository;
 import com.thaap.payments.review.ManualReviewCaseStatus;
+import com.thaap.payments.riskcontext.RiskContext;
+import com.thaap.payments.riskcontext.RiskContextRequest;
+import com.thaap.payments.riskcontext.RiskContextService;
+import com.thaap.payments.riskpolicy.MerchantPolicyAssessment;
+import com.thaap.payments.riskpolicy.MerchantRiskConfiguration;
+import com.thaap.payments.riskpolicy.MerchantRiskPolicyDecisionAggregator;
+import com.thaap.payments.incident.CardTestingIncidentService;
+import com.thaap.payments.ratelimit.RateLimitOperation;
+import com.thaap.payments.ratelimit.RequestRateLimitService;
+import com.thaap.payments.riskpolicy.MerchantRiskPolicyEvaluator;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.velocity.VelocityAssessment;
+import com.thaap.payments.velocity.VelocityDecisionAggregator;
+import com.thaap.payments.velocity.VelocityRiskCoordinator;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -97,6 +118,17 @@ public class PaymentIntentController {
     private final FraudDecisionMetrics fraudDecisionMetrics;
     private final AuditLogService auditLogService;
     private final LedgerService ledgerService;
+    private final AuthenticationChallengeService authenticationChallengeService;
+    private final RiskContextService riskContextService;
+    private final VelocityRiskCoordinator velocityRiskCoordinator;
+    private final VelocityDecisionAggregator velocityDecisionAggregator;
+    private final FraudListEvaluator fraudListEvaluator;
+    private final FraudListDecisionAggregator fraudListDecisionAggregator;
+    private final FraudListEvaluationRecordRepository fraudListEvaluationRecordRepository;
+    private final MerchantRiskPolicyEvaluator merchantRiskPolicyEvaluator;
+    private final MerchantRiskPolicyDecisionAggregator merchantRiskPolicyDecisionAggregator;
+    private final RequestRateLimitService requestRateLimitService;
+    private final CardTestingIncidentService cardTestingIncidentService;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
@@ -109,7 +141,16 @@ public class PaymentIntentController {
             RuleExecutionResultRepository ruleExecutionResultRepository,
             ManualReviewCaseRepository manualReviewCaseRepository,
             FraudDecisionMetrics fraudDecisionMetrics,
-            AuditLogService auditLogService, LedgerService ledgerService) {
+            AuditLogService auditLogService, LedgerService ledgerService,
+            AuthenticationChallengeService authenticationChallengeService,
+            RiskContextService riskContextService, VelocityRiskCoordinator velocityRiskCoordinator,
+            VelocityDecisionAggregator velocityDecisionAggregator, FraudListEvaluator fraudListEvaluator,
+            FraudListDecisionAggregator fraudListDecisionAggregator,
+            FraudListEvaluationRecordRepository fraudListEvaluationRecordRepository,
+            MerchantRiskPolicyEvaluator merchantRiskPolicyEvaluator,
+            MerchantRiskPolicyDecisionAggregator merchantRiskPolicyDecisionAggregator,
+            RequestRateLimitService requestRateLimitService,
+            CardTestingIncidentService cardTestingIncidentService) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -130,6 +171,17 @@ public class PaymentIntentController {
         this.fraudDecisionMetrics = fraudDecisionMetrics;
         this.auditLogService = auditLogService;
         this.ledgerService = ledgerService;
+        this.authenticationChallengeService = authenticationChallengeService;
+        this.riskContextService = riskContextService;
+        this.velocityRiskCoordinator = velocityRiskCoordinator;
+        this.velocityDecisionAggregator = velocityDecisionAggregator;
+        this.fraudListEvaluator = fraudListEvaluator;
+        this.fraudListDecisionAggregator = fraudListDecisionAggregator;
+        this.fraudListEvaluationRecordRepository = fraudListEvaluationRecordRepository;
+        this.merchantRiskPolicyEvaluator = merchantRiskPolicyEvaluator;
+        this.merchantRiskPolicyDecisionAggregator = merchantRiskPolicyDecisionAggregator;
+        this.requestRateLimitService = requestRateLimitService;
+        this.cardTestingIncidentService = cardTestingIncidentService;
     }
 
     @PostMapping
@@ -168,11 +220,13 @@ public class PaymentIntentController {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.confirm:" + id,
                 request, PaymentAttemptResponse.class,
                 () -> confirmPaymentIntentOnce(merchantContext, id, idempotencyKey, request,
-                        requestIdFrom(httpServletRequest)));
+                        requestIdFrom(httpServletRequest), httpServletRequest.getRemoteAddr()));
     }
 
     protected ResponseEntity<PaymentAttemptResponse> confirmPaymentIntentOnce(MerchantContext merchantContext, UUID id,
-            String idempotencyKey, ConfirmPaymentIntentRequest request, String requestId) {
+            String idempotencyKey, ConfirmPaymentIntentRequest request, String requestId, String clientIp) {
+        requestRateLimitService.enforce(RateLimitOperation.PAYMENT_INTENT_CONFIRM,
+                merchantContext, idempotencyKey, clientIp);
         PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION
@@ -189,13 +243,27 @@ public class PaymentIntentController {
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
         PaymentAttempt paymentAttempt = paymentAttemptRepository.save(new PaymentAttempt(merchantContext.merchantId(), id,
                 paymentMethod.getId(), idempotencyKey, attemptNumber, paymentIntent.getTrafficOrigin()));
+        RiskContext riskContext = riskContextService.create(merchantContext.merchantId(), paymentIntent.getId(),
+                paymentAttempt.getId(), request.riskContext(), paymentAttempt.getTrafficOrigin());
+        VelocityAssessment velocityAssessment = velocityRiskCoordinator.assess(
+                paymentIntent, paymentAttempt, paymentMethod, riskContext);
+        FraudListAssessment fraudListAssessment = fraudListEvaluator.evaluate(
+                paymentIntent, paymentMethod, riskContext);
         Instant decisionStartedAt = Instant.now();
+        MerchantRiskConfiguration merchantRiskConfiguration = merchantRiskPolicyEvaluator.loadConfiguration(
+                merchantContext.merchantId(), decisionStartedAt);
         MaterializedFeatureSet materializedFeatures = featureMaterializer.materialize(
-                paymentIntent, paymentAttempt, paymentMethod, decisionStartedAt);
+                paymentIntent, paymentAttempt, paymentMethod, riskContext, velocityAssessment,
+                merchantRiskConfiguration.riskTier(), decisionStartedAt);
+        MerchantPolicyAssessment merchantPolicyAssessment = merchantRiskPolicyEvaluator.evaluate(
+                merchantRiskConfiguration, materializedFeatures, paymentIntent.getCurrency());
         long engineStartedNanos = System.nanoTime();
         ConfirmDecision decision;
         try {
-            decision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
+            ConfirmDecision baseDecision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
+            ConfirmDecision velocityDecision = velocityDecisionAggregator.aggregate(baseDecision, velocityAssessment);
+            ConfirmDecision listDecision = fraudListDecisionAggregator.aggregate(velocityDecision, fraudListAssessment);
+            decision = merchantRiskPolicyDecisionAggregator.aggregate(listDecision, merchantPolicyAssessment);
         } catch (RuntimeException exception) {
             fraudDecisionMetrics.recordFailure("EVALUATION", "ENGINE_FAILURE");
             throw exception;
@@ -206,11 +274,17 @@ public class PaymentIntentController {
         Instant decisionCompletedAt = Instant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
         FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, materializedFeatures,
-                decision, latencyMs, decisionStartedAt, decisionCompletedAt);
+                fraudListAssessment, merchantPolicyAssessment, decision, latencyMs,
+                decisionStartedAt, decisionCompletedAt);
+        if (riskContext != null) {
+            riskContext.attachFraudDecision(fraudDecision.getId());
+        }
+        velocityAssessment.attachFraudDecision(fraudDecision.getId());
         paymentAttempt.attachFraudDecision(fraudDecision.getId());
         applyConfirmDecision(paymentIntent, paymentAttempt, decision);
         Authorization authorization = null;
         ManualReviewCase manualReviewCase = null;
+        AuthenticationChallengeService.CreatedChallenge createdChallenge = null;
         if (decision.action() == FraudDecisionAction.ALLOW) {
             ProcessorAuthorizationResult processorResult = processorAdapter.authorize(new ProcessorAuthorizationRequest(
                     merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(), paymentMethod.getId(),
@@ -218,6 +292,17 @@ public class PaymentIntentController {
                     paymentMethod.getCardLast4()));
             authorization = persistAuthorization(merchantContext, paymentAttempt, processorResult);
             applyProcessorResult(paymentIntent, paymentAttempt, authorization);
+            if (authorization.getStatus() == AuthorizationStatus.REQUIRES_ACTION) {
+                createdChallenge = authenticationChallengeService.create(
+                        merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(),
+                        fraudDecision.getId(), authorization.getId(), AuthenticationChallengeSource.PROCESSOR,
+                        paymentAttempt.getTrafficOrigin());
+            }
+        } else if (decision.action() == FraudDecisionAction.REQUEST_3DS) {
+            createdChallenge = authenticationChallengeService.create(
+                    merchantContext.merchantId(), paymentIntent.getId(), paymentAttempt.getId(),
+                    fraudDecision.getId(), null, AuthenticationChallengeSource.FRAUD_ENGINE,
+                    paymentAttempt.getTrafficOrigin());
         } else if (decision.action() == FraudDecisionAction.REVIEW) {
             manualReviewCase = manualReviewCaseRepository.save(new ManualReviewCase(
                     merchantContext.merchantId(), paymentIntent.getId(),
@@ -240,11 +325,19 @@ public class PaymentIntentController {
             captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
                     CaptureTrigger.AUTOMATIC_CONFIRM);
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt));
+        paymentAttemptRepository.flush();
+        fraudDecisionRepository.flush();
+        if (authorization != null) {
+            authorizationRepository.flush();
+        }
+        cardTestingIncidentService.detectFromPersistedEvidence(merchantContext, requestId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt,
+                createdChallenge == null ? null : createdChallenge.nextAction()));
     }
 
     private FraudDecision persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
-            MaterializedFeatureSet materializedFeatures, ConfirmDecision decision, long latencyMs,
+            MaterializedFeatureSet materializedFeatures, FraudListAssessment fraudListAssessment,
+            MerchantPolicyAssessment merchantPolicyAssessment, ConfirmDecision decision, long latencyMs,
             Instant decisionStartedAt, Instant decisionCompletedAt) {
         // IdempotencyService keeps lineage, attempt mutation, authorization, and completion in one transaction.
         // A later failure rolls these writes back together instead of leaving partial confirm evidence.
@@ -269,6 +362,15 @@ public class PaymentIntentController {
                         fraudDecision.getId(), evaluation, paymentAttempt.getTrafficOrigin()));
             }
             ruleExecutionResultRepository.flush();
+            for (FraudListEvaluation evaluation : fraudListAssessment.evaluations()) {
+                fraudListEvaluationRecordRepository.save(new FraudListEvaluationRecord(
+                        merchantContext.merchantId(), paymentAttempt.getId(), fraudDecision.getId(), evaluation,
+                        paymentAttempt.getTrafficOrigin(), decisionCompletedAt));
+            }
+            fraudListEvaluationRecordRepository.flush();
+            merchantRiskPolicyEvaluator.persist(merchantPolicyAssessment, paymentAttempt,
+                    fraudDecision.getId(), materializedFeatures, decisionCompletedAt,
+                    paymentAttempt.getTrafficOrigin());
             return fraudDecision;
         } catch (RuntimeException exception) {
             featureMaterializationMetrics.recordFailure("PERSISTENCE", "LINEAGE_WRITE_FAILED");
@@ -437,6 +539,9 @@ public class PaymentIntentController {
         Authorization authorization = null;
         AuthorizationVoid authorizationVoid = null;
         ManualReviewCase reviewCase = null;
+        if (startingStatus == PaymentIntentStatus.REQUIRES_ACTION) {
+            authenticationChallengeService.cancelPending(merchantContext, paymentIntent.getId(), requestId);
+        }
         if (startingStatus == PaymentIntentStatus.AUTHORIZED
                 || startingStatus == PaymentIntentStatus.REQUIRES_CAPTURE) {
             authorization = latestApprovedAuthorization(merchantContext, id);
@@ -444,14 +549,21 @@ public class PaymentIntentController {
                     authorization.getId(), authorization.getPaymentAttemptId(), paymentIntent.getId()));
         } else if (startingStatus == PaymentIntentStatus.REQUIRES_REVIEW) {
             fraudDecisionMetrics.observeReviewCancellation(paymentIntent.getTrafficOrigin());
-            reviewCase = manualReviewCaseRepository.findForUpdate(paymentIntent.getId(), merchantContext.merchantId(),
-                            ManualReviewCaseStatus.OPEN)
+            ManualReviewCase reviewCandidate = manualReviewCaseRepository
+                    .findByPaymentIntentIdAndMerchantIdAndStatus(paymentIntent.getId(),
+                            merchantContext.merchantId(), ManualReviewCaseStatus.OPEN)
+                    .or(() -> manualReviewCaseRepository.findByPaymentIntentIdAndMerchantIdAndStatus(
+                            paymentIntent.getId(), merchantContext.merchantId(), ManualReviewCaseStatus.ASSIGNED))
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                            "PaymentIntent review case is not open"));
-            PaymentAttempt reviewAttempt = paymentAttemptRepository
-                    .findByIdAndMerchantId(reviewCase.getPaymentAttemptId(), merchantContext.merchantId())
+                            "PaymentIntent review case is not active"));
+            PaymentAttempt reviewAttempt = paymentAttemptRepository.findByIdAndMerchantIdForUpdate(
+                            reviewCandidate.getPaymentAttemptId(), merchantContext.merchantId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                             "PaymentIntent review attempt was not found"));
+            reviewCase = manualReviewCaseRepository.findByIdAndMerchantIdForUpdate(
+                            reviewCandidate.getId(), merchantContext.merchantId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                            "PaymentIntent review case was not found"));
             reviewAttempt.cancelFromReview();
             reviewCase.cancelByMerchant();
         }
@@ -586,7 +698,7 @@ public class PaymentIntentController {
         }
     }
 
-    public record ConfirmPaymentIntentRequest(@NotNull UUID paymentMethodId) {
+    public record ConfirmPaymentIntentRequest(@NotNull UUID paymentMethodId, @Valid RiskContextRequest riskContext) {
     }
 
     private record EmptyMutationRequest() {

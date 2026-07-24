@@ -14,8 +14,11 @@ import jakarta.validation.constraints.Min;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -31,6 +34,7 @@ import org.springframework.web.context.WebApplicationContext;
 @ActiveProfiles("test")
 @SpringBootTest
 @Import(ApiErrorContractTests.ErrorEndpointConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class ApiErrorContractTests {
 
     private static final String API_KEY = "X-Api-Key";
@@ -216,6 +220,24 @@ class ApiErrorContractTests {
     }
 
     @Test
+    void unsupportedMediaTypeUsesStandardClientErrorInsteadOfInternalError() throws Exception {
+        MerchantAccess merchant = createMerchant("merchant-media-type");
+
+        String response = mockMvc.perform(post("/customers")
+                        .header(API_KEY, merchant.apiKey())
+                        .header(REQUEST_ID, "req_unsupported_media")
+                        .contentType("text/plain")
+                        .content("buyer@example.com"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode error = objectMapper.readTree(response);
+        assertStandardError(error, 415, "unsupported_media_type",
+                "req_unsupported_media", "/customers");
+        assertThat(error.get("message").asText()).isEqualTo("Request content type is not supported");
+    }
+
+    @Test
     void conflictErrorsUseStandardShape() throws Exception {
         var merchant = createMerchant("merchant-a");
         var customer = createCustomer(merchant, "buyer-a@example.com");
@@ -245,7 +267,7 @@ class ApiErrorContractTests {
     }
 
     @Test
-    void unexpectedErrorsUseStandardShapeWithoutLeakingDetails() throws Exception {
+    void unexpectedErrorsUseStandardShapeWithoutLeakingDetails(CapturedOutput output) throws Exception {
         var response = mockMvc.perform(get("/test-errors/explode")
                         .header(REQUEST_ID, "req_unexpected"))
                 .andExpect(status().isInternalServerError())
@@ -256,6 +278,9 @@ class ApiErrorContractTests {
         var error = objectMapper.readTree(response);
         assertStandardError(error, 500, "internal_server_error", "req_unexpected", "/test-errors/explode");
         assertThat(error.get("message").asText()).isEqualTo("Internal server error");
+        assertThat(output.getOut()).contains(
+                "requestId=req_unexpected path=/test-errors/explode exceptionType=IllegalStateException");
+        assertThat(output.getAll()).doesNotContain("simulated internal implementation detail");
     }
 
     private MerchantAccess createMerchant(String name) throws Exception {

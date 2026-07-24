@@ -14,7 +14,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "idempotency_records",
-        uniqueConstraints = @UniqueConstraint(name = "uk_idempotency_merchant_key", columnNames = {"merchant_id", "idempotency_key"}),
+        uniqueConstraints = @UniqueConstraint(name = "uk_idempotency_principal_key", columnNames = {
+                "merchant_id", "principal_type", "principal_id", "principal_credential_prefix", "idempotency_key"}),
         indexes = {
                 @Index(name = "idx_idempotency_merchant", columnList = "merchant_id"),
                 @Index(name = "idx_idempotency_merchant_status", columnList = "merchant_id,status")
@@ -29,6 +30,16 @@ public class IdempotencyRecord {
 
     @Column(name = "idempotency_key", nullable = false)
     private String key;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "principal_type", nullable = false, length = 32)
+    private IdempotencyPrincipalType principalType;
+
+    @Column(name = "principal_id", nullable = false)
+    private UUID principalId;
+
+    @Column(name = "principal_credential_prefix", nullable = false, length = 32)
+    private String principalCredentialPrefix;
 
     @Column(nullable = false)
     private String operation;
@@ -81,9 +92,21 @@ public class IdempotencyRecord {
     public IdempotencyRecord(UUID merchantId, String key, String operation, String requestHash,
             String requestHashKeyVersion, UUID leaseToken, Instant leaseExpiresAt,
             Instant now, Instant expiresAt) {
+        this(new IdempotencyPrincipal(merchantId, IdempotencyPrincipalType.MERCHANT_API,
+                        merchantId, "test-merchant"),
+                key, operation, requestHash, requestHashKeyVersion,
+                leaseToken, leaseExpiresAt, now, expiresAt);
+    }
+
+    IdempotencyRecord(IdempotencyPrincipal principal, String key, String operation, String requestHash,
+            String requestHashKeyVersion, UUID leaseToken, Instant leaseExpiresAt,
+            Instant now, Instant expiresAt) {
         this.id = UUID.randomUUID();
-        this.merchantId = merchantId;
+        this.merchantId = principal.merchantId();
         this.key = key;
+        this.principalType = principal.type();
+        this.principalId = principal.principalId();
+        this.principalCredentialPrefix = principal.credentialPrefix();
         this.operation = operation;
         this.requestHash = requestHash;
         this.requestHashKeyVersion = requestHashKeyVersion;
@@ -106,6 +129,10 @@ public class IdempotencyRecord {
     public String getKey() {
         return key;
     }
+
+    public IdempotencyPrincipalType getPrincipalType() { return principalType; }
+    public UUID getPrincipalId() { return principalId; }
+    public String getPrincipalCredentialPrefix() { return principalCredentialPrefix; }
 
     public String getOperation() {
         return operation;

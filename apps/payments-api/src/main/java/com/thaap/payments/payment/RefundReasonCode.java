@@ -1,0 +1,9 @@
+package com.thaap.payments.payment;
+
+public enum RefundReasonCode {
+    LEGACY_UNSPECIFIED,
+    MERCHANT_REQUESTED,
+    RISK_REVIEW_REMEDIATION,
+    CONFIRMED_FRAUD_CUSTOMER_PROTECTION,
+    CUSTOMER_SERVICE_REMEDIATION
+}

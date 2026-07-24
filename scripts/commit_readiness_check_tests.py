@@ -35,6 +35,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
             for checker in (
                     "technical-debt-check.py",
                     "escaped-review-check.py",
+                    "executable-artifact-naming-check.py",
                     "invariant-proof-check.py",
                     "chapter-closure-check.py",
                     "learning-day-check.sh"):

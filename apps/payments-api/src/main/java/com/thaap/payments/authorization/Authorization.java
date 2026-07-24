@@ -180,4 +180,22 @@ public class Authorization {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public void approveAfterAuthentication(String responseCode, long approvedAmount,
+            ThreeDsResult authenticationResult) {
+        if (status != AuthorizationStatus.REQUIRES_ACTION
+                || threeDsResult != ThreeDsResult.REQUIRED) {
+            throw new IllegalStateException("Authorization is not awaiting authentication");
+        }
+        if (approvedAmount != requestedAmount
+                || authenticationResult != ThreeDsResult.AUTHENTICATED) {
+            throw new IllegalArgumentException("Authenticated authorization result is inconsistent");
+        }
+        processorResponseCode = responseCode;
+        networkStatus = NetworkStatus.APPROVED;
+        authorizedAmount = approvedAmount;
+        status = AuthorizationStatus.APPROVED;
+        threeDsResult = authenticationResult;
+        simulatorOutcomeCode = responseCode;
+    }
 }

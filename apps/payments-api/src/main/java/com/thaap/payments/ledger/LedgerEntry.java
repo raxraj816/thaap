@@ -50,6 +50,9 @@ public class LedgerEntry {
     @Column(name = "refund_id")
     private UUID refundId;
 
+    @Column(name = "chargeback_id")
+    private UUID chargebackId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 64)
     private LedgerAccount account;
@@ -73,6 +76,13 @@ public class LedgerEntry {
     public LedgerEntry(UUID merchantId, UUID transactionGroupId, LedgerSourceType sourceType, UUID sourceId,
             UUID paymentIntentId, UUID refundId, LedgerAccount account, LedgerDirection direction, long amount,
             String currency) {
+        this(merchantId, transactionGroupId, sourceType, sourceId, paymentIntentId, refundId, null,
+                account, direction, amount, currency);
+    }
+
+    public LedgerEntry(UUID merchantId, UUID transactionGroupId, LedgerSourceType sourceType, UUID sourceId,
+            UUID paymentIntentId, UUID refundId, UUID chargebackId, LedgerAccount account,
+            LedgerDirection direction, long amount, String currency) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.transactionGroupId = transactionGroupId;
@@ -80,6 +90,7 @@ public class LedgerEntry {
         this.sourceId = sourceId;
         this.paymentIntentId = paymentIntentId;
         this.refundId = refundId;
+        this.chargebackId = chargebackId;
         this.account = account;
         this.direction = direction;
         this.amount = amount;
@@ -113,6 +124,10 @@ public class LedgerEntry {
 
     public UUID getRefundId() {
         return refundId;
+    }
+
+    public UUID getChargebackId() {
+        return chargebackId;
     }
 
     public LedgerAccount getAccount() {

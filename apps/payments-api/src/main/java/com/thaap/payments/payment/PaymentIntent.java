@@ -180,6 +180,15 @@ public class PaymentIntent {
         this.updatedAt = Instant.now();
     }
 
+    public void markProcessingAfterReviewApproval() {
+        if (status != PaymentIntentStatus.REQUIRES_REVIEW) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot continue after review from status " + status);
+        }
+        this.status = PaymentIntentStatus.PROCESSING;
+        this.updatedAt = Instant.now();
+    }
+
     public void markRequiresPaymentMethodAfterProcessorDecline() {
         if (status != PaymentIntentStatus.PROCESSING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -196,6 +205,24 @@ public class PaymentIntent {
         }
         this.status = PaymentIntentStatus.REQUIRES_ACTION;
         this.updatedAt = Instant.now();
+    }
+
+    public void markProcessingAfterAuthentication() {
+        if (status != PaymentIntentStatus.REQUIRES_ACTION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot continue authentication from status " + status);
+        }
+        status = PaymentIntentStatus.PROCESSING;
+        updatedAt = Instant.now();
+    }
+
+    public void markRequiresPaymentMethodAfterAuthenticationFailure() {
+        if (status != PaymentIntentStatus.REQUIRES_ACTION) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot fail authentication from status " + status);
+        }
+        status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
+        updatedAt = Instant.now();
     }
 
     public void capture() {
@@ -236,6 +263,15 @@ public class PaymentIntent {
                     "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         }
         this.status = PaymentIntentStatus.REFUNDED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void dispute() {
+        if (status != PaymentIntentStatus.CAPTURED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "PaymentIntent cannot be disputed from status " + status);
+        }
+        this.status = PaymentIntentStatus.DISPUTED;
         this.updatedAt = Instant.now();
     }
 

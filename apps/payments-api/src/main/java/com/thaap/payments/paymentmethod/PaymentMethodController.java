@@ -3,7 +3,10 @@ package com.thaap.payments.paymentmethod;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.security.CorrelationValueHasher;
+import com.thaap.payments.ratelimit.RateLimitOperation;
+import com.thaap.payments.ratelimit.RequestRateLimitService;
 import com.thaap.payments.tenant.MerchantContext;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -27,26 +30,32 @@ public class PaymentMethodController {
     private final CustomerRepository customerRepository;
     private final IdempotencyService idempotencyService;
     private final CorrelationValueHasher correlationValueHasher;
+    private final RequestRateLimitService requestRateLimitService;
 
     public PaymentMethodController(PaymentMethodRepository paymentMethodRepository, CustomerRepository customerRepository,
-            IdempotencyService idempotencyService, CorrelationValueHasher correlationValueHasher) {
+            IdempotencyService idempotencyService, CorrelationValueHasher correlationValueHasher,
+            RequestRateLimitService requestRateLimitService) {
         this.paymentMethodRepository = paymentMethodRepository;
         this.customerRepository = customerRepository;
         this.idempotencyService = idempotencyService;
         this.correlationValueHasher = correlationValueHasher;
+        this.requestRateLimitService = requestRateLimitService;
     }
 
     @PostMapping
     public ResponseEntity<PaymentMethodResponse> createPaymentMethod(MerchantContext merchantContext,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            @Valid @RequestBody CreatePaymentMethodRequest request) {
+            @Valid @RequestBody CreatePaymentMethodRequest request, HttpServletRequest servletRequest) {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_methods.create", request,
-                PaymentMethodResponse.class, () -> createPaymentMethodOnce(merchantContext, request));
+                PaymentMethodResponse.class, () -> createPaymentMethodOnce(
+                        merchantContext, idempotencyKey, request, servletRequest.getRemoteAddr()));
     }
 
     @Transactional
     protected ResponseEntity<PaymentMethodResponse> createPaymentMethodOnce(MerchantContext merchantContext,
-            CreatePaymentMethodRequest request) {
+            String idempotencyKey, CreatePaymentMethodRequest request, String clientIp) {
+        requestRateLimitService.enforce(RateLimitOperation.PAYMENT_METHOD_CREATE,
+                merchantContext, idempotencyKey, clientIp);
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
         }

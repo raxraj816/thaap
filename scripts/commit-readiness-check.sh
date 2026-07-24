@@ -83,6 +83,10 @@ echo "Checking escaped-review quality records..."
 scripts/escaped-review-check.py
 
 echo
+echo "Checking durable executable artifact naming..."
+scripts/executable-artifact-naming-check.py
+
+echo
 echo "Checking chapter invariant-to-proof traceability..."
 if [[ -n "$invariant_matrix" ]]; then
   scripts/invariant-proof-check.py "$invariant_matrix"

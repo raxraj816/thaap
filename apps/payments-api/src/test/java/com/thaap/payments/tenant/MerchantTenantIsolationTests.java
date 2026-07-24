@@ -368,8 +368,8 @@ class MerchantTenantIsolationTests {
         List<String> featureNames = new java.util.ArrayList<>();
         features.fieldNames().forEachRemaining(featureNames::add);
         assertThat(featureNames).containsExactly(
-                "card.country", "card.funding", "payment.amount_minor", "payment.attempt_number",
-                "payment.capture_method", "payment.currency", "traffic.origin");
+                "card.country", "card.funding", "merchant.risk_tier", "payment.amount_minor", "payment.attempt_number",
+                "payment.capture_method", "payment.currency", "risk.context_present", "traffic.origin");
         assertThat(features.toString()).doesNotContain(
                 "card_bin", "card_last4", "fingerprint", "customer", "payment_intent_id",
                 "payment_attempt_id", "payment_method_id", "metadata", "description", "idempotency");

@@ -17,8 +17,12 @@ public record DecisionFeatureContext(Map<String, Object> features) {
     public DecisionFeatureContext {
         Objects.requireNonNull(features, "features");
         Map<String, Object> lexicalCopy = new TreeMap<>(features);
-        if (!lexicalCopy.keySet().equals(FeatureCatalogue.requiredCodes())) {
-            throw new IllegalArgumentException("Decision feature context must contain the exact V1 catalogue");
+        boolean legacyContext = lexicalCopy.size() == 7 && !lexicalCopy.containsKey("risk.context_present");
+        if ((!legacyContext && !lexicalCopy.containsKey("risk.context_present"))
+                || !FeatureCatalogue.requiredCodes().containsAll(lexicalCopy.keySet())
+                || (!legacyContext && FeatureCatalogue.requiredCodes().stream()
+                        .filter(FeatureCatalogue::isAlwaysPresent).anyMatch(code -> !lexicalCopy.containsKey(code)))) {
+            throw new IllegalArgumentException("Decision feature context must contain the governed V1 catalogue");
         }
         for (Map.Entry<String, Object> entry : lexicalCopy.entrySet()) {
             Object value = Objects.requireNonNull(entry.getValue(), "feature value");

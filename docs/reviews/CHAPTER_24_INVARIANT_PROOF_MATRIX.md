@@ -82,7 +82,7 @@ and provides the only Phase 3 exit, without claiming analyst resolution.
 - Invariant: Review list is status-filtered, limit-bounded, stable, cursor-based, and tenant-scoped; detail returns the exact case; no assignment or analyst-resolution mutation exists.
 - Failure sequence: Unbounded list exhausts service, unstable ordering skips/duplicates cases, cross-tenant cursor leaks position, or an accidental generic update endpoint expands scope.
 - Implementation: `limit` 1–100, `(created_at,id)` ordering, owned cursor lookup, dedicated GET endpoints, and no review mutation controller enforce the contract.
-- Proof: `PaymentIntentConfirmContractTests.reviewListIsBoundedStableAndTenantScoped` proves empty and status-filtered reads, 0/1/100/101 limits, repeated-page equality, malformed/missing/foreign cursors, and unsupported POST as 405; `Chapter22FeatureLineagePostgreSqlConcurrencyTests.reviewCursorPaginationUsesStablePostgreSqlOrderingForEqualTimestamps` proves 2+1 pages without skips/duplicates for three equal-timestamp rows.
+- Proof: `PaymentIntentConfirmContractTests.reviewListIsBoundedStableAndTenantScoped` proves empty and status-filtered reads, 0/1/100/101 limits, repeated-page equality, malformed/missing/foreign cursors, and unsupported POST as 405; `FeatureLineagePostgreSqlConcurrencyTests.reviewCursorPaginationUsesStablePostgreSqlOrderingForEqualTimestamps` proves 2+1 pages without skips/duplicates for three equal-timestamp rows.
 - Adversarial evidence: A deleted cursor is unreachable because V24 rejects case deletion; missing and cross-tenant cursor identities return missing-equivalent 404, while equal-timestamp and repeated pages retain stable `(created_at,id)` order.
 - Status: PASS
 

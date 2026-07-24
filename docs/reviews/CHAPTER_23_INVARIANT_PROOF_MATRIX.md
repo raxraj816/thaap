@@ -26,7 +26,7 @@ promise that every computed action is applied before processor authorization.
 - Invariant: Every committed confirm evaluates the complete immutable `rules_v1` catalogue and applies exactly one `ALLOW`, `BLOCK`, `REQUEST_3DS`, or `REVIEW` branch before any processor authorization.
 - Failure sequence: A rule computes a non-allow action but the attempt remains ready for processor, or the processor is called before aggregation and creates authorization or money truth.
 - Implementation: `DeterministicConfirmDecisionEngine`, the locked confirm transaction, and explicit PaymentAttempt/PaymentIntent transition methods enforce decision-before-processor ordering.
-- Proof: `DeterministicConfirmDecisionEngineTests`, `PaymentIntentConfirmContractTests`, and `Chapter22FeatureLineagePostgreSqlConcurrencyTests` must prove all actions and processor exclusion.
+- Proof: `DeterministicConfirmDecisionEngineTests`, `PaymentIntentConfirmContractTests`, and `FeatureLineagePostgreSqlConcurrencyTests` must prove all actions and processor exclusion.
 - Adversarial evidence: Below/at/above boundaries, every action, and forced confirm orderings must reconcile decision, payment, processor, authorization, capture, ledger, audit, webhook, and review postconditions.
 - Status: PASS
 
@@ -76,7 +76,7 @@ promise that every computed action is applied before processor authorization.
 - Invariant: Feature lineage, all three rule results, FraudDecision, payment transitions, optional review case, optional processor/money truth, audit, webhook, and idempotency completion commit atomically or roll back together.
 - Failure sequence: Result N commits while N+1 fails, a case/audit/webhook failure leaves payment state changed, or processor work survives local rollback.
 - Implementation: One confirm transaction flushes complete local decision evidence before the external processor boundary and retains existing fenced idempotency ownership.
-- Proof: Position-by-position rollback tests plus `Chapter22FeatureLineagePostgreSqlConcurrencyTests.realRuleResultFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` prove an actual copied-semantics FK failure at `ruleExecutionResultRepository.flush()`, zero processor/lineage rows, reservation release, and one complete same-key retry.
+- Proof: Position-by-position rollback tests plus `FeatureLineagePostgreSqlConcurrencyTests.realRuleResultFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` prove an actual copied-semantics FK failure at `ruleExecutionResultRepository.flush()`, zero processor/lineage rows, reservation release, and one complete same-key retry.
 - Adversarial evidence: Failures at rule-result, decision, state, review, audit, webhook, and idempotency boundaries must produce exact zero/one cardinalities.
 - Status: PASS
 
@@ -86,7 +86,7 @@ promise that every computed action is applied before processor authorization.
 - Invariant: Same-key replay and distinct-key concurrent confirm converge to one attempt, decision, three results, one action branch, and at most one review case or authorization.
 - Failure sequence: Two callers evaluate different attempt numbers or actions, duplicate a case/authorization, or complete divergent replay responses.
 - Implementation: Idempotency-row fencing, PaymentIntent `FOR UPDATE`, attempt numbering, and unique composite constraints serialize decision creation.
-- Proof: `Chapter22FeatureLineagePostgreSqlConcurrencyTests` forces same/distinct-key ALLOW and BLOCK at feature/result SQL, plus REVIEW confirm/cancel conflicts at case and intent locks, and reconciles exact postconditions.
+- Proof: `FeatureLineagePostgreSqlConcurrencyTests` forces same/distinct-key ALLOW and BLOCK at feature/result SQL, plus REVIEW confirm/cancel conflicts at case and intent locks, and reconciles exact postconditions.
 - Adversarial evidence: ALLOW and BLOCK span processor versus local-only confirm boundaries; REVIEW adds unique case state. REQUEST_3DS shares the proven local-only transaction/lock path and has separate exact processor-exclusion contracts.
 - Status: PASS
 

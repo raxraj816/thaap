@@ -51,10 +51,15 @@ public class CustomerController {
         Customer customer = customerRepository.save(new Customer(
                 merchantContext.merchantId(),
                 correlationValueHasher.hmacSha256Lowercase("customer.email", request.email()),
+                correlationValueHasher.hmacSha256Lowercase("customer.email_domain", emailDomain(request.email())),
                 request.phone() == null || request.phone().isBlank()
                         ? null
                         : correlationValueHasher.hmacSha256Lowercase("customer.phone", request.phone())));
         return CustomerResponse.from(customer);
+    }
+
+    private String emailDomain(String email) {
+        return email.substring(email.lastIndexOf('@') + 1);
     }
 
     public record CreateCustomerRequest(@NotBlank @Email String email, String phone) {

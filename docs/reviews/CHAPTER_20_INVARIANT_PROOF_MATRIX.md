@@ -68,7 +68,7 @@
 - Invariant: Processor catalog documentation and executable evidence never persist or emit raw PAN, CVV, buyer PII, API keys, signing secrets, card fingerprints, or idempotency hashes.
 - Failure sequence: A demo report records the submitted test-card number or one-time API key, an audit/webhook payload captures raw input, a loopback response redirects a credential-bearing request to another origin, or a fixture encourages real-card use.
 - Implementation: The tokenization boundary reduces transient card input to safe metadata; audit/webhook allowlists and the report sanitizer expose fixture labels rather than submitted PAN values; the demo HTTP client rejects every redirect before a follow-up request is created.
-- Proof: CustomerAndPaymentMethodContractTests, AuditSanitizerTests, WebhookSecurityAndRetryTests, generate_synthetic_scenarios_tests.py, Chapter20ProcessorCatalogTests.test_sensitive_report_scan_rejects_card_credentials_and_idempotency, and test_api_client_rejects_every_redirect_without_forwarding_credentials.
+- Proof: CustomerAndPaymentMethodContractTests, AuditSanitizerTests, WebhookSecurityAndRetryTests, generate_synthetic_scenarios_tests.py, ProcessorOutcomeCatalogDemoTests.test_sensitive_report_scan_rejects_card_credentials_and_idempotency, and test_api_client_rejects_every_redirect_without_forwarding_credentials.
 - Adversarial evidence: Exact submitted fixture values, buyer identifiers, API credential, one-time webhook signing secret, all three per-fixture idempotency keys, and prohibited field classes are scanned across persistence, logs, payloads, and the generated report; real loopback servers prove 301, 302, 303, 307, and 308 responses create no request at the redirect target.
 - Status: PASS
 
@@ -118,7 +118,7 @@
 - Invariant: The documented processor catalog is a stable developer contract whose expected PaymentIntent, PaymentAttempt, Authorization, verification, and 3DS projections match public API responses.
 - Failure sequence: Documentation names a fixture outcome that runtime or API projection contradicts, or an internal enum leaks a processor/fraud semantic mismatch.
 - Implementation: One immutable catalog feeds SimulatorProcessorAdapter; service documentation and the Chapter 20 runner derive expected behavior from the same reviewed contract.
-- Proof: SimulatorProcessorCatalogTests, PaymentIntentConfirmContractTests, the processor-authorization fixture table, and scripts/demo-chapter-20-processor-catalog.py.
+- Proof: SimulatorProcessorCatalogTests, PaymentIntentConfirmContractTests, the processor-authorization fixture table, and scripts/demo-processor-outcome-catalog.py.
 - Adversarial evidence: Every mapped fixture plus an unmapped valid test card is exercised; the runner raises before report publication on any field mismatch, non-loopback origin, any HTTP redirect, missing audit/delivery row, ledger entry, or sensitive output.
 - Status: PASS
 

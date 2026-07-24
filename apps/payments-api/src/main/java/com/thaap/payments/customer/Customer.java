@@ -21,6 +21,9 @@ public class Customer {
     @Column(nullable = false)
     private String emailHash;
 
+    @Column(name = "email_domain_hash", length = 64)
+    private String emailDomainHash;
+
     @Column
     private String phoneHash;
 
@@ -31,9 +34,14 @@ public class Customer {
     }
 
     public Customer(UUID merchantId, String emailHash, String phoneHash) {
+        this(merchantId, emailHash, null, phoneHash);
+    }
+
+    public Customer(UUID merchantId, String emailHash, String emailDomainHash, String phoneHash) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.emailHash = emailHash;
+        this.emailDomainHash = emailDomainHash;
         this.phoneHash = phoneHash;
         this.createdAt = Instant.now();
     }
@@ -52,6 +60,10 @@ public class Customer {
 
     public String getPhoneHash() {
         return phoneHash;
+    }
+
+    public String getEmailDomainHash() {
+        return emailDomainHash;
     }
 
     public Instant getCreatedAt() {

@@ -31,27 +31,34 @@ class FeatureMaterializerTests {
                 fixture.paymentIntent(), fixture.paymentAttempt(), fixture.paymentMethod(), decisionStart);
 
         assertThat(materialized.snapshot().keySet()).containsExactly(
-                "card.country", "card.funding", "payment.amount_minor", "payment.attempt_number",
-                "payment.capture_method", "payment.currency", "traffic.origin");
+                "card.country", "card.funding", "merchant.risk_tier", "payment.amount_minor", "payment.attempt_number",
+                "payment.capture_method", "payment.currency", "risk.context_present", "traffic.origin");
         assertThat(materialized.snapshot()).containsAllEntriesOf(Map.of(
                 "card.country", "US",
                 "card.funding", "CREDIT",
+                "merchant.risk_tier", "STANDARD",
                 "payment.amount_minor", 1200L,
                 "payment.attempt_number", 1L,
                 "payment.capture_method", "MANUAL",
                 "payment.currency", "USD",
+                "risk.context_present", false,
                 "traffic.origin", "MERCHANT_API"));
         assertThat(materialized.decisionFeatureContext().features()).isSameAs(materialized.snapshot());
         assertThat(materialized.snapshot().toString()).doesNotContain(
                 "424242", "card-last4", "fingerprint-secret", "token-secret",
                 fixture.paymentIntent().getId().toString(), fixture.paymentMethod().getId().toString());
-        assertThat(materialized.values()).hasSize(7);
+        assertThat(materialized.values()).hasSize(9);
         assertThat(materialized.freshnessStatus()).isEqualTo(FeatureFreshnessStatus.FRESH);
         assertThat(materialized.staleFeatureNames()).isEmpty();
-        assertThat(materialized.missingFeatureNames()).isEmpty();
+        assertThat(materialized.missingFeatureNames()).containsExactly(
+                "risk.ip_country", "risk.shipping_country", "risk.checkout_channel",
+                "risk.customer_account_age_days", "risk.login_age_minutes", "risk.bot_score_bps",
+                "risk.captcha_outcome", "risk.card_ip_country_match", "risk.card_shipping_country_match",
+                "velocity.card_attempts_10m", "velocity.ip_attempts_10m",
+                "velocity.customer_attempts_1h", "velocity.merchant_attempts_1m");
 
         assertThatThrownBy(() -> new MaterializedFeatureSet(materialized.decisionFeatureContext(),
-                materialized.values().subList(0, 6), materialized.computedAt(),
+                materialized.values().subList(0, 8), materialized.computedAt(),
                 materialized.oldestFeatureTimestamp(), materialized.maxFeatureAgeMs(),
                 materialized.freshnessStatus(), materialized.staleFeatureNames(),
                 materialized.missingFeatureNames())).isInstanceOf(IllegalArgumentException.class)

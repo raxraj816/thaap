@@ -100,32 +100,37 @@ Tenant requirement:
 
 ## 4. Decision Ordering
 
-Rule behavior order:
+All active deterministic controls are evaluated. Matches aggregate in this
+implemented behavior order:
 
-1. `REQUEST_3DS`
-2. `ALLOW`
-3. `BLOCK`
-4. `REVIEW`
+1. `BLOCK`
+2. `REVIEW`
+3. `REQUEST_3DS`
+4. `ALLOW` when no stronger control matches
 
 Meaning:
 
-- `REQUEST_3DS` can require authentication before authorization.
-- `ALLOW` short-circuits block/review rules.
-- `BLOCK` short-circuits review rules.
-- `REVIEW` creates a manual review case.
+- `BLOCK` prevents authorization.
+- `REVIEW` creates a manual review case without processor work.
+- `REQUEST_3DS` requires authentication before authorization.
+- `ALLOW` reaches the processor only when no stronger control matches.
+- Evaluation does not short-circuit; shadowed lower-severity matches remain
+  durable explanation evidence.
 
 After ML exists, model thresholds and merchant policy are combined after deterministic rule results. Hard safety/compliance rules should still take precedence.
 
 ## 5. Risk Levels
 
-Initial defaults:
+The implemented Phase 3 rules score is deterministic action severity:
 
-- `LOW`: score < `0.30`
-- `MEDIUM`: `0.30` to `0.65`
-- `HIGH`: `0.65` to `0.85`
-- `CRITICAL`: score > `0.85`
+- `ALLOW`: `0.0500` / `LOW`
+- `REQUEST_3DS`: `0.5500` / `MEDIUM`
+- `REVIEW`: `0.7500` / `HIGH`
+- `BLOCK`: `0.9500` / `HIGH`
 
-Merchant-configurable thresholds come later.
+These values are not fraud probability. Phase 4 merchant policy changes typed
+feature thresholds that produce actions; calibrated probability thresholds and
+CRITICAL risk begin only with the governed ML lifecycle.
 
 ## 6. Feature Architecture
 
@@ -238,15 +243,21 @@ Graph features, later:
 
 Velocity counters must exclude the current payment being evaluated.
 
-Flow:
+The Phase 4 proposal uses one stable logical-attempt member and a versioned
+atomic Redis operation:
 
 ```text
-read counters
-  -> build features
-  -> make decision
-  -> persist decision
-  -> increment counters after decision attempt is recorded
+prune expired members
+  -> count every member except this logical attempt
+  -> add this logical attempt with ZADD NX
+  -> persist count/window/status in the FeatureSnapshot
+  -> compensate on database rollback when possible
 ```
+
+The same logical retry recognizes and excludes its own prior member. Redis
+timeout or ambiguity never becomes zero; it records unavailable lineage and
+creates a minimum REVIEW candidate. PostgreSQL remains authoritative for
+payment, decision, label, and dispute truth.
 
 ### 6.4 Feature Versioning
 
@@ -320,12 +331,11 @@ Do not build training rows by reading current customer/payment state.
 
 ### 7.1 Rule DSL
 
-The constrained JSON DSL is a Phase 4 policy-authoring target, not the Phase 3
-execution boundary. Phase 3 first ships only the application-owned
-`LONG_GTE` and `CURRENCY_AMOUNT_GTE` predicate shapes frozen in
-`docs/PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md`. This keeps the first active
-ruleset reviewable and avoids introducing a parser/authoring boundary before
-decision lineage and action semantics are proven.
+The constrained JSON DSL is a Phase 4.5 governed rule-authoring target, not the
+Phase 3 or Phase 4 execution boundary. Phase 3 ships application-owned typed
+predicates. Phase 4 proposes only typed threshold rows over allowlisted
+FeatureDefinitions. This keeps adaptive policy reviewable and avoids a parser/
+execution boundary before simulation, approval, canary, and rollback exist.
 
 Use constrained JSON, not arbitrary code.
 
@@ -426,7 +436,8 @@ The broader target catalogue is:
 Phase 3 seeds only the three immutable `rules_v1` policies defined in the
 detailed plan: USD extreme amount block, repeated-attempt review, and USD
 elevated-amount step-up. Velocity, geography mismatch, card testing, mutable
-merchant thresholds, and rule approval remain owned by Phase 4.
+merchant thresholds, and typed negative lists are sequenced in Phase 4.
+General rule authoring and the broader target catalogue remain Phase 4.5.
 
 That Phase 3 boundary is now operational. Every new decision evaluates all
 three rules, retains match and non-match evidence, and applies deterministic
@@ -500,10 +511,9 @@ List item fields:
 - optional expiration
 - reason
 
-Default:
-
-- allowlist entries should be time-bounded where possible
-- blocklist entries need review and source metadata
+Phase 4 supports only negative entries with BLOCK, REVIEW, or REQUEST_3DS
+actions. It does not allow an ALLOW entry to suppress a stronger safety action.
+Allow overrides require Phase 4.5 simulation, dual control, canary, and rollback.
 
 ## 10. Manual Review Feedback Loop
 
@@ -513,6 +523,8 @@ Review actions:
 
 - approve
 - cancel
+- cancel-and-report-fraud
+- no-action, for post-authorization review
 - refund
 - refund-and-report-fraud
 
@@ -525,26 +537,20 @@ Review outputs:
 - possible fraud label
 - possible list update, later
 
-Review outcome labels:
-
-- legitimate
-- fraud
-- unknown
+Review outcome and classification are separate facts. Approve/no-action create
+a LEGITIMATE label only with explicit confirmed-legitimate classification;
+cancel-and-report-fraud and refund-and-report-fraud require confirmed-fraud and
+create FRAUD labels. Plain cancel/refund and inconclusive classification create
+no label. Uncertainty is absence of a confirmed label, not an `unknown`
+training label.
 
 Fraud labels can additionally include a fraud type:
 
 - stolen card
 - card testing
 - account takeover
-- synthetic identity
-- friendly fraud
-- refund abuse
-- promo abuse
-- reseller abuse
-- triangulation
-- merchant fraud
-- scam or social engineering
-- unknown fraud
+- first-party misuse
+- other confirmed fraud
 
 These labels feed:
 
@@ -574,9 +580,9 @@ Important:
 
 - not every chargeback is fraud
 - fraud chargebacks are high-value labels
-- chargeback label time is later than event time
-- model training must respect label delay
-- friendly fraud requires separate type/source/confidence handling
+- labels record both evidence time and later system-availability time
+- model training must join on availability time and respect label delay
+- first-party misuse retains separate type/source handling
 - evidence packets are product artifacts, not ML features unless they were
   known at decision time
 
@@ -587,7 +593,7 @@ Dispute evidence MVP:
 - 3DS/liability-shift state
 - AVS/CVC outcomes
 - delivery or fulfillment signal, simulated
-- customer communication notes, simulated
+- allowlisted customer-communication evidence codes, simulated
 - prior undisputed transactions
 - device/IP continuity
 - refund history

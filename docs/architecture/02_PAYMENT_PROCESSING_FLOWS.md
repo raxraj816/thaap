@@ -63,8 +63,8 @@ REQUIRES_REVIEW
   -> PROCESSING             when review later approves in Phase 4
 
 REQUIRES_ACTION
-  -> REQUIRES_FRAUD_CHECK   after successful 3DS completion
-  -> FAILED                 after failed 3DS
+  -> PROCESSING             after successful Phase 4 authenticated continuation
+  -> REQUIRES_PAYMENT_METHOD after failed or expired authentication
   -> CANCELED               if canceled
 
 PROCESSING
@@ -83,6 +83,12 @@ CAPTURED
 
 FAILED, BLOCKED, CANCELED, REFUNDED, DISPUTED are terminal for V1
 ```
+
+Phase 4 authentication completion preserves the original FraudDecision. A
+fraud REQUEST_3DS is not re-evaluated into a fictional ALLOW; an immutable
+challenge completion authorizes continuation of the same attempt to the
+processor. Failed/expired authentication creates explicit attempt and
+challenge evidence and no approved Authorization or Capture.
 
 Partial refunds may keep status as `CAPTURED` with refund records. Full refund moves to `REFUNDED`.
 

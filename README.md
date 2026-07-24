@@ -50,6 +50,20 @@ ER-0047–ER-0050 close the escaped subscription, real SQL-flush, transaction-
 outcome telemetry, and pagination-proof boundaries. Phase 4 owns
 velocity, mutable merchant policies, analyst assignment/resolution, labels,
 and model feedback.
+Founder/domain review confirmed the Phase 4 detailed implementation plan on
+2026-07-13. It sequences Chapters 26–35 and freezes each chapter before code.
+Chapters 26–34 are complete. All nine implementation chapter matrices are
+`FROZEN`/`VERIFIED`, every invariant is `PASS`, and all nine dossiers recommend
+`MERGE`. Chapter 33 is complete with post-authorization recommendation/action,
+manager refund, balanced ledger, label, rollback, forced PostgreSQL ordering,
+V45/V46, and retained live-demo proof. Chapter 34 is complete with durable
+suspected card-testing incidents, manager-only mitigation, exact Redis rate
+limits, HMAC rotation/privacy, 429/503 truth, V47/V48, and a retained abuse-
+traffic demo. The post-closure hardening in V49 resolves HMAC rotation,
+Redis compensation ownership, operator replay authorization, and signal
+lineage findings. Chapter 35 is complete after 629 backend tests, 114 repository
+Python tests, 14 migration contracts, all nine public Phase 4 demos, and the
+integrated matrix/dossier gates. Phase 4 is complete.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation
@@ -246,13 +260,13 @@ scenarios through public APIs:
   proof, Unicode request targets retain exact meaning through percent-encoding,
   and disable metrics count only rows actually changed after PostgreSQL
   predicate re-evaluation.
-- `scripts/demo-chapter-19-webhook-flow.sh` proves a signed callback that fails
+- `scripts/demo-webhook-delivery-flow.sh` proves a signed callback that fails
   once, retries with the same event and payload, succeeds, and leaves payment
   truth unchanged.
 - The immutable Chapter 20 processor catalog names mapped approval, six
   decline/verification outcomes, 3DS-required, and explicit unknown-card
   default approval without coupling processor truth to FraudDecision truth.
-- `scripts/demo-chapter-20-processor-catalog.py` drives all nine outcome
+- `scripts/demo-processor-outcome-catalog.py` drives all nine outcome
   partitions through loopback public APIs, reconciles processor/fraud/audit/
   webhook/ledger evidence, and writes only sanitized atomic evidence.
 - `scripts/demo-confirm-flow.sh` runs a repeatable local merchant -> customer
@@ -373,13 +387,13 @@ THAAP_DEMO_CARD=4999990000000008 scripts/demo-confirm-flow.sh
 Chapter 17 automatic-capture and authorization-void demo:
 
 ```bash
-scripts/demo-chapter-17-flow.sh
+scripts/demo-payment-cancel-void-flow.sh
 ```
 
 Chapter 18 durable-refund and exact ledger-reversal demo:
 
 ```bash
-scripts/demo-chapter-18-refund-flow.sh
+scripts/demo-refund-ledger-flow.sh
 ```
 
 Chapter 13 learning verification:

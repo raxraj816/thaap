@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback-only Chapter 19 webhook receiver with signature verification."""
+"""Loopback-only Webhook delivery webhook receiver with signature verification."""
 
 from __future__ import annotations
 

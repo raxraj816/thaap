@@ -162,17 +162,25 @@ class PaymentIntentConfirmContractTests {
                 .isLessThanOrEqualTo(PaymentIntentController.DEFAULT_MAX_FEATURE_SNAPSHOT_JSON_BYTES);
         assertThat(featureSnapshot.get("FRESHNESS_STATUS")).isEqualTo("FRESH");
         assertThat(featureSnapshot.get("STALE_FEATURE_NAMES")).isEqualTo("[]");
-        assertThat(featureSnapshot.get("MISSING_FEATURE_NAMES")).isEqualTo("[]");
+        assertThat(featureSnapshot.get("MISSING_FEATURE_NAMES")).isEqualTo(
+                "[\"risk.ip_country\",\"risk.shipping_country\",\"risk.checkout_channel\","
+                        + "\"risk.customer_account_age_days\",\"risk.login_age_minutes\","
+                        + "\"risk.bot_score_bps\",\"risk.captcha_outcome\","
+                        + "\"risk.card_ip_country_match\",\"risk.card_shipping_country_match\","
+                        + "\"velocity.card_attempts_10m\",\"velocity.ip_attempts_10m\","
+                        + "\"velocity.customer_attempts_1h\",\"velocity.merchant_attempts_1m\"]");
 
         List<FeatureValue> featureValues = featureValueRepository.findPointInTimeForDecision(
                 merchant.id(), fraudDecisionId);
         assertThat(featureValues).extracting(FeatureValue::getFeatureCode).containsExactly(
                 "card.country",
                 "card.funding",
+                "merchant.risk_tier",
                 "payment.amount_minor",
                 "payment.attempt_number",
                 "payment.capture_method",
                 "payment.currency",
+                "risk.context_present",
                 "traffic.origin");
         assertThat(featureValues).allSatisfy(featureValue -> {
             assertThat(featureValue.getMerchantId()).isEqualTo(merchant.id());
@@ -184,7 +192,7 @@ class PaymentIntentConfirmContractTests {
             assertThat(featureValue.getObservedAt()).isBeforeOrEqualTo(featureValue.getComputedAt());
         });
         assertThat(featureValues).extracting(FeatureValue::typedValue).containsExactly(
-                "US", "CREDIT", 1200L, 1L, "MANUAL", "USD", "MERCHANT_API");
+                "US", "CREDIT", "STANDARD", 1200L, 1L, "MANUAL", "USD", false, "MERCHANT_API");
 
         var authorization = authorizationForAttempt(paymentAttemptId);
         assertThat(authorization.get("MERCHANT_ID")).isEqualTo(merchant.id());
@@ -210,7 +218,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
-        assertThat(countRows("feature_values")).isEqualTo(7);
+        assertThat(countRows("feature_values")).isEqualTo(9);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countAuditLogsByAction("payment_intent.confirmed")).isEqualTo(1);
@@ -586,7 +594,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(featureSnapshotForDecision(fraudDecisionId).get("FEATURE_VERSION")).isEqualTo("features_v1");
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
-        assertThat(countRows("feature_values")).isEqualTo(7);
+        assertThat(countRows("feature_values")).isEqualTo(9);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(3);
         assertThat(countAuditLogsByAction("authorization.declined")).isEqualTo(1);
@@ -639,7 +647,7 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("payment_attempts")).isEqualTo(1);
         assertThat(countRows("fraud_decisions")).isEqualTo(1);
         assertThat(countRows("feature_snapshots")).isEqualTo(1);
-        assertThat(countRows("feature_values")).isEqualTo(7);
+        assertThat(countRows("feature_values")).isEqualTo(9);
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);

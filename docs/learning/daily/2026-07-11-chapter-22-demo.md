@@ -2,7 +2,7 @@
 
 ## Boundary
 
-The demo ran `scripts/demo-chapter-22-feature-lineage.py` against the local
+The demo ran `scripts/demo-feature-lineage.py` against the local
 Spring Boot API and PostgreSQL 16 after upgrading the retained local schema
 from V13 through V19. Product objects were created and read through public APIs;
 the script used one read-only PostgreSQL query to reconcile normalized typed

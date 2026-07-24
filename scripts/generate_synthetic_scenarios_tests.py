@@ -36,14 +36,14 @@ generator = load_generator_module()
 class SyntheticScenarioGeneratorTests(unittest.TestCase):
 
     def test_same_seed_produces_same_public_scenario_plan(self):
-        first_plan = generator.build_scenario_plan("chapter-16-demo")
-        second_plan = generator.build_scenario_plan("chapter-16-demo")
+        first_plan = generator.build_scenario_plan("synthetic-scenario-demo")
+        second_plan = generator.build_scenario_plan("synthetic-scenario-demo")
 
         self.assertEqual(generator.plan_to_public_dict(first_plan), generator.plan_to_public_dict(second_plan))
         self.assertEqual(generator.plan_fingerprint(first_plan), generator.plan_fingerprint(second_plan))
 
     def test_scenario_labels_and_expected_outcomes_are_stable(self):
-        plan = generator.build_scenario_plan("chapter-16-demo")
+        plan = generator.build_scenario_plan("synthetic-scenario-demo")
         public_plan = generator.plan_to_public_dict(plan)
 
         self.assertEqual([
@@ -60,8 +60,8 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
         ], [payment["expectedProcessorOutcomeCode"] for payment in public_plan[2]["payments"]])
 
     def test_generated_customer_phones_are_valid_deterministic_e164_values(self):
-        first_plan = generator.build_scenario_plan("chapter-16-demo")
-        second_plan = generator.build_scenario_plan("chapter-16-demo")
+        first_plan = generator.build_scenario_plan("synthetic-scenario-demo")
+        second_plan = generator.build_scenario_plan("synthetic-scenario-demo")
 
         self.assertEqual(
                 [scenario.customer_phone for scenario in first_plan],
@@ -70,7 +70,7 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
             self.assertRegex(scenario.customer_phone, r"^\+1[0-9]{10}$")
 
     def test_public_plan_contains_card_fixture_labels_not_raw_card_numbers(self):
-        public_plan = generator.plan_to_public_dict(generator.build_scenario_plan("chapter-16-demo"))
+        public_plan = generator.plan_to_public_dict(generator.build_scenario_plan("synthetic-scenario-demo"))
         public_plan_text = repr(public_plan)
 
         self.assertIn("499999:0001", public_plan_text)
@@ -348,8 +348,8 @@ class SyntheticScenarioGeneratorTests(unittest.TestCase):
     def test_run_ids_are_collision_resistant_even_at_the_same_instant(self):
         instant = dt.datetime(2026, 6, 27, 9, 30, 0, tzinfo=dt.timezone.utc)
 
-        first_run_id = generator.new_run_id("chapter-16-demo", instant)
-        second_run_id = generator.new_run_id("chapter-16-demo", instant)
+        first_run_id = generator.new_run_id("synthetic-scenario-demo", instant)
+        second_run_id = generator.new_run_id("synthetic-scenario-demo", instant)
 
         self.assertNotEqual(first_run_id, second_run_id)
         self.assertRegex(first_run_id, r"^20260627093000000000-[0-9a-f]{8}-[0-9a-f]{12}$")

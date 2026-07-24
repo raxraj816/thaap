@@ -785,7 +785,7 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: An already-applied Chapter 22 database must validate and migrate forward without editing the checksum or semantics of V18 in place.
 - Finding: ER-0043 repaired the definition/value type foreign key by editing V18 after the retained local database had already applied the original V18. Flyway therefore rejects startup on checksum validation before any later repair migration can run.
 - Why prior review missed it: Fresh-schema and V17-to-current tests both resolved V18 from the final source tree; neither test recreated the actually shipped original V18 checksum and then upgraded through the post-closure repair.
-- Resolution evidence: V18 is restored to the exact shipped checksum `1512291140`; V22 forward-migrates the three-column definition identity to the required four-column type-bound identity. `chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage` stops a real PostgreSQL schema at V19, asserts the shipped checksum and historical bytes, then migrates through V24 and proves immutable catalogues, legacy preservation, semantic foreign keys, append-only review history, and selective webhook-subscription preservation. The retained local V19 database validated without repair, migrated through V22, passed Hibernate/readiness, and completed the all-action demo; it later migrated V22→V24 successfully before correctly failing unrelated webhook-key readiness when that historical key was intentionally unavailable.
+- Resolution evidence: V18 is restored to the exact shipped checksum `1512291140`; V22 forward-migrates the three-column definition identity to the required four-column type-bound identity. `fraudLineageUpgradePreservesHistoricalTruthAndBindsFraudActionLineage` stops a real PostgreSQL schema at V19, asserts the shipped checksum and historical bytes, then migrates through V24 and proves immutable catalogues, legacy preservation, semantic foreign keys, append-only review history, and selective webhook-subscription preservation. The retained local V19 database validated without repair, migrated through V22, passed Hibernate/readiness, and completed the all-action demo; it later migrated V22→V24 successfully before correctly failing unrelated webhook-key readiness when that historical key was intentionally unavailable.
 - Process correction: Once any migration has been applied by a supported demo or environment, every later repair must use a new forward migration; upgrade proof must start from the exact shipped migration bytes/checksum, not only an older target resolved from the current source tree.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-13
@@ -802,7 +802,7 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: A migration may not subscribe an existing merchant endpoint to newly introduced fraud or review event types without durable evidence of explicit wildcard consent.
 - Finding: V20 added four new fraud subscriptions to every endpoint and V23 removed them only from endpoints with fewer than all five legacy subscriptions. Because the old schema stored the same five rows for an explicitly selected full set and the omitted-field default, an exact-five endpoint was silently expanded without distinguishable consent.
 - Why prior review missed it: Upgrade proof covered a selective one-event endpoint but omitted the equally valid exact-all legacy partition and treated row-count equality as wildcard intent without a durable subscription-mode field.
-- Resolution evidence: Forward-only V25 removes the four V20-added event rows from every legacy endpoint whose old and new subscriptions have different creation cohorts. `PostgreSqlMigrationTests.chapter21ToPhase3UpgradePreservesHistoricalTruthAndBindsFraudActionLineage` proves an explicit one-event endpoint remains at one, an exact-five legacy endpoint is repaired from nine at V24 to five at V25, and a post-Phase-3 endpoint whose nine rows share one cohort remains at nine. Fresh H2/PostgreSQL migration and Hibernate validation also pass through V25.
+- Resolution evidence: Forward-only V25 removes the four V20-added event rows from every legacy endpoint whose old and new subscriptions have different creation cohorts. `PostgreSqlMigrationTests.fraudLineageUpgradePreservesHistoricalTruthAndBindsFraudActionLineage` proves an explicit one-event endpoint remains at one, an exact-five legacy endpoint is repaired from nine at V24 to five at V25, and a post-Phase-3 endpoint whose nine rows share one cohort remains at nine. Fresh H2/PostgreSQL migration and Hibernate validation also pass through V25.
 - Process correction: Every subscription expansion must enumerate explicit subset, explicit full set, omitted default, and durable wildcard representations; absence of a wildcard discriminator requires conservative no-expansion migration behavior.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-13
@@ -819,7 +819,7 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: A real PostgreSQL rule-result constraint failure at flush must occur before processor authorization and roll back every confirm artifact while permitting one coherent same-key retry.
 - Finding: Rule-result rollback tests failed mocked repository save calls, while the only real confirm-path PostgreSQL failure corrupted a FeatureValue. Direct rule semantic constraint tests did not execute through confirm, idempotency ownership, or the processor boundary.
 - Why prior review missed it: The closure composed mock position coverage, isolated SQL rejection, and successful rule-table lock waits into a claim about deferred rule-result flush failure.
-- Resolution evidence: `Chapter22FeatureLineagePostgreSqlConcurrencyTests.realRuleResultFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` corrupts copied action semantics so `fk_rule_results_rule_semantics` fails at the production `ruleExecutionResultRepository.flush()` boundary. It proves zero processor calls and zero attempt/decision/snapshot/value/result/authorization rows, reservation deletion, restored intent state, then one coherent same-key retry with exactly one complete lineage and processor call.
+- Resolution evidence: `FeatureLineagePostgreSqlConcurrencyTests.realRuleResultFlushFailureRollsBackBeforeProcessorReleasesReservationAndAllowsOneRetry` corrupts copied action semantics so `fk_rule_results_rule_semantics` fails at the production `ruleExecutionResultRepository.flush()` boundary. It proves zero processor calls and zero attempt/decision/snapshot/value/result/authorization rows, reservation deletion, restored intent state, then one coherent same-key retry with exactly one complete lineage and processor call.
 - Process correction: Each new deferred SQL family requires at least one constraint failure through the production transaction, not evidence borrowed from an adjacent persistence family.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-13
@@ -853,7 +853,126 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Invariant: A PASS pagination claim must enumerate limits, empty and repeated pages, equal sort timestamps, malformed/missing/foreign cursors, status filters, and unsupported mutation methods at the public API boundary.
 - Finding: C24-API-001 claimed all named partitions, but tests covered only ordinary pagination, a foreign cursor, 0/101 limits, and a one-row PostgreSQL cursor query.
 - Why prior review missed it: The proof review matched broad test names to matrix prose without tracing each enumerated partition to an executable assertion.
-- Resolution evidence: `PaymentIntentConfirmContractTests.reviewListIsBoundedStableAndTenantScoped` now proves empty and status-filtered reads, limits 0/1/100, repeated-page equality, malformed/missing/foreign cursors, and unsupported POST as bounded 405; the 101 upper bound remains covered by the existing validation assertion. `Chapter22FeatureLineagePostgreSqlConcurrencyTests.reviewCursorPaginationUsesStablePostgreSqlOrderingForEqualTimestamps` forces three same-merchant rows to one timestamp and proves 2+1 keyset pages with no skips or duplicates on PostgreSQL. The 405 repair is enforced centrally by `GlobalApiExceptionHandler` with an `Allow` header.
+- Resolution evidence: `PaymentIntentConfirmContractTests.reviewListIsBoundedStableAndTenantScoped` now proves empty and status-filtered reads, limits 0/1/100, repeated-page equality, malformed/missing/foreign cursors, and unsupported POST as bounded 405; the 101 upper bound remains covered by the existing validation assertion. `FeatureLineagePostgreSqlConcurrencyTests.reviewCursorPaginationUsesStablePostgreSqlOrderingForEqualTimestamps` forces three same-merchant rows to one timestamp and proves 2+1 keyset pages with no skips or duplicates on PostgreSQL. The 405 repair is enforced centrally by `GlobalApiExceptionHandler` with an `Allow` header.
 - Process correction: Every matrix partition must map to a named assertion or be explicitly rejected as unreachable with enforcement evidence.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-13
+
+## ER-0051
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: Cross-chapter 17-34 artifact naming
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: NO
+- Date found: 2026-07-25
+- Escaped gate: Completed Chapter 17-25 reviews and Phase 4 pre-closure artifact review
+- Invariant: Durable executable artifacts must be named for the payment, fraud, security, data, or operational capability they implement or prove; chapter identifiers belong only to planning, learning, and chapter-governance artifacts.
+- Finding: Fifty production migration, Java test, demo, and demo-test artifact paths used temporary chapter identifiers, and the same leakage appeared in executable class names, test methods, fixture namespaces, database functions, runtime messages, and report names. Two chapter-closure validator scripts were correctly chapter-named because chapter governance is their actual responsibility.
+- Why prior review missed it: Implementation traceability was optimized by copying chapter identifiers into executable names, an explicit founder warning was not converted into a durable repository rule, and readiness had no automated boundary distinguishing chapter-governance artifacts from product executables.
+- Resolution evidence: All fifty inappropriate artifact paths and their executable symbols/references now use capability names; the clean Maven suite passes 612 tests with zero failures, errors, skips, or stale chapter-named compiled classes; all 113 repository Python tests pass; Flyway 11.14.1 repair and validation accept the renamed V27 migration in the exact local Docker database; fresh migrations create capability-named append-only functions; and `executable_artifact_naming_check_tests.py` proves path, class, fixture, immutable-migration, and governance exceptions before `executable-artifact-naming-check.py` passes the repository.
+- Process correction: `AGENTS.md` now defines the durable artifact naming boundary, the commit checklist and scripts guide require the naming check, and `commit-readiness-check.sh` runs the tested checker automatically with exact allowlists only for chapter-governance tools and immutable applied migration evidence.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0052
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 30
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure Senior Staff HMAC-rotation review
+- Invariant: Velocity observations inside an active decision window remain visible and conservatively counted across a configured sensitive-value HMAC rotation.
+- Finding: Velocity Redis keys and logical-attempt members were derived only with the current pepper, so rotation abandoned every still-live previous-version window and could weaken REVIEW to ALLOW.
+- Why prior review missed it: Rotation proof checked key readiness and HMAC-only representation but never populated a real Redis window with the previous key and evaluated it with the rolling keyring.
+- Resolution evidence: `VelocityIdentityFactory` now produces current and retained-version key/member pairs, and `VelocityRiskCoordinator` dual-writes while taking the maximum compatible window count so the current attempt is not double-counted. `RedisVelocityScriptIntegrationTests.rollingKeyringKeepsPreviousWindowVisibleWithoutDoubleCountingCurrentAttempt` places three attempts in a real Redis previous-version window, evaluates through a rolling keyring, and proves REVIEW with count three plus one current member in both versioned windows.
+- Process correction: Every ephemeral HMAC identity review must cross key rotation with the full retention window and prove the decision postcondition, not only startup key availability.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0053
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 30
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure Senior Staff rollback/retry review
+- Invariant: Compensation for a rolled-back velocity observation cannot delete evidence reserved by a newer retry of the same logical payment attempt.
+- Finding: After-completion compensation unconditionally removed a member stable across retries, allowing an older rollback callback to delete a newer retry after the PostgreSQL lock was released.
+- Why prior review missed it: Tests invoked rollback callbacks directly but never forced a retry to reserve the same logical member between database rollback and compensation.
+- Resolution evidence: `velocity_v1.lua` creates a random reservation owner only when it inserts a new member; exact-byte `velocity_compensation_v1.lua` atomically compares that token before `ZREM`. Real Redis tests prove an old callback returns `STALE` without deleting a newer insertion and a retry rollback cannot delete an already-existing logical attempt. Exact SHA and every closed compensation result/malformed partition are contract-tested.
+- Process correction: Every rollback compensation proof must cross resource reuse by the immediate retry and demonstrate that an old cleanup token cannot remove new ownership.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0054
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 31
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure Senior Staff fraud-list rotation review
+- Invariant: Active IP, device, and session fraud-list identities continue matching newly materialized RiskContext identities throughout retained-key rotation.
+- Finding: Fraud-list evaluation applied an old outer HMAC to a newly rotated inner RiskContext HMAC, which can never reproduce the stored old-inner and old-outer digest.
+- Why prior review missed it: Tests covered list-key readiness and normalized values independently but omitted the cross-product of inner RiskContext version and outer fraud-list entry version.
+- Resolution evidence: V49 adds immutable retained-version IP/device/session aliases to `risk_contexts`; `RiskContextService` derives every inner identity before raw inputs are discarded, and `FraudListIdentityService` selects the inner alias matching the entry's outer HMAC version. `RiskContextIdentityRotationTests` proves alias persistence and `FraudListIdentityRotationTests` proves old-version IP, device, and session entries all match under a rolling keyring.
+- Process correction: Nested pseudonymization designs must document and test every versioned layer together; outer-key availability cannot certify inner-identity compatibility.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0055
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 26
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure Senior Staff authorization-before-replay review
+- Invariant: A risk-operator mutation replay is authorized for the same authenticated actor and credential lifecycle before any stored success is returned.
+- Finding: Risk controllers converted operator context to merchant-only idempotency identity, so another operator could replay a privileged response before service-level role and actor checks executed.
+- Why prior review missed it: Authorization tests covered fresh mutations and idempotency tests covered same-actor replay, but the two families were not crossed with a lower-role second operator.
+- Resolution evidence: V49 scopes each idempotency row and uniqueness boundary by merchant, principal type, principal ID, credential prefix, and key; all risk-operator controllers pass authenticated `RiskOperatorContext` directly to `IdempotencyService`. `completedMutationReplayIsBoundToTheOriginalOperatorAndCredentialLifecycle` proves exact same-actor replay while a second lower-role actor using the identical key/body receives missing-equivalent denial and cannot consume the first actor's stored success. Fresh H2/PostgreSQL and retained V48-to-V49 migration tests prove schema, constraints, and backfill.
+- Process correction: Every authenticated idempotency boundary must prove authorization before replay for same actor, different actor, disabled credential, and lower-role partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0056
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 33
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure Senior Staff post-authorization lineage review
+- Invariant: A signal response reports only the review action and review identifier caused by that exact immutable source signal.
+- Finding: Duplicate creation and GET selected any post-authorization review for the payment, allowing a prior no-action signal to later report another signal's review and changed action.
+- Why prior review missed it: Tests proved concurrent duplicates of one review signal but never replayed or read an earlier no-action signal after a later signal opened a review on the same payment.
+- Resolution evidence: POST duplicate and GET response assembly now consult review state only for `REVIEW` recommendations and derive `REVIEW_OPENED` versus `REVIEW_ALREADY_OPEN` from the exact `source_post_authorization_signal_id`. `laterReviewCannotRewriteEarlierNoActionSignalResponseLineage` proves a prior `NO_ACTION` signal remains `actionTaken=NONE` with no review ID after a later signal opens a review for the same payment.
+- Process correction: Point-in-time response proof must cross multiple same-resource source events and verify every returned lineage identifier against the exact source row.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25
+
+## ER-0057
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 35
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-25
+- Escaped gate: Post-closure exact-evidence reconciliation
+- Invariant: Every source-of-truth document names the exact test count produced by the current repository discovery run.
+- Finding: The closure dossier, matrix, READMEs, detailed plan, and master plan claimed 107 Python tests after the executable naming gate increased discovery to 113.
+- Why prior review missed it: The readiness gate executed the suite but did not compare its discovered count with exact numeric claims across completion documents.
+- Resolution evidence: Current completion sources are reconciled to the final clean Maven and repository discovery outputs: 629 Java tests and 114 Python tests, with zero failures, errors, or skips. Historical dated evidence remains unchanged where it accurately records the suite at that earlier review point.
+- Process correction: Exact test-count claims require an automated repository-wide reconciliation or must be generated from the same completed test invocation.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-25

@@ -23,6 +23,8 @@ Use this before saying a change is ready to commit.
   at `PASS`.
 - `scripts/escaped-review-check.py` passes, and every blocking-severity escaped
   finding for the chapter is resolved with product and process evidence.
+- `scripts/executable-artifact-naming-check.py` passes. Executable artifacts use
+  durable capability names rather than temporary chapter identifiers.
 - The chapter closure dossier passes `scripts/chapter-closure-check.py` and
   reconciles README and master-plan status.
 - Every custom infrastructure boundary has an accepted ADR and protocol
