@@ -24,6 +24,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
             fake_bin.mkdir()
             maven_marker = root / "maven-ran"
             python_marker = root / "python-ran"
+            vision_marker = root / "vision-coverage-ran"
             self.write_executable(
                 fake_bin / "mvn",
                 f"#!/usr/bin/env bash\ntouch '{maven_marker}'\n")
@@ -32,6 +33,9 @@ class CommitReadinessCheckTests(unittest.TestCase):
                 f"#!/usr/bin/env bash\ntouch '{python_marker}'\n")
             self.write_executable(fake_bin / "git", "#!/usr/bin/env bash\nexit 0\n")
             self.write_executable(fake_bin / "rg", "#!/usr/bin/env bash\nexit 1\n")
+            self.write_executable(
+                root / "scripts" / "vision-coverage-check.py",
+                f"#!/usr/bin/env bash\ntouch '{vision_marker}'\n")
             for checker in (
                     "technical-debt-check.py",
                     "escaped-review-check.py",
@@ -62,12 +66,15 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertTrue(maven_marker.is_file())
             self.assertTrue(python_marker.is_file())
+            self.assertTrue(vision_marker.is_file())
 
     def create_required_files(self, root: pathlib.Path):
         for relative_path in (
                 "README.md",
                 "apps/payments-api/README.md",
                 "docs/IMPLEMENTATION_MASTER_PLAN.md",
+                "docs/VISION.md",
+                "docs/THAAP_VISION_COVERAGE_MATRIX.md",
                 "docs/COMMIT_READINESS_CHECKLIST.md",
                 "docs/ESCAPED_REVIEW_REGISTER.md",
                 "docs/INVARIANT_PROOF_REVIEW_PROCESS.md",

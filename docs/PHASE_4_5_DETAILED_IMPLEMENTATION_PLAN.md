@@ -248,14 +248,14 @@ introduce or promise them.
 | Excluded capability | Exact reason | Owner slice | Evidence that unblocks it |
 |---|---|---|---|
 | General domain outbox, Kafka, and cross-service replay | Phase 4.5 can prove bounded local product reads/jobs from PostgreSQL; it must not claim an event platform | Phase 5 / Durable Events And Analytics | atomic outbox, publisher retry, consumer idempotency, poison handling, lag, replay, and rebuild proof |
-| General analytics warehouse or ClickHouse | The Phase 4.5 product loop needs bounded tenant operations, not warehouse scale | Phase 8 / Analytics | validated event/projection source, retention, partitioning, rebuild, cost, and reconciliation proof |
-| Full dashboard suite | Phase 4.5 pulls forward only the cockpit needed to operate existing workflows | Phase 6 / Dashboard MVP | full transaction search/detail, overview visualizations, rules editor, chargeback analytics, accessibility, and browser E2E proof |
-| ML score or probability | Historical simulation is deterministic rule/policy evaluation, not model training or calibration | Phase 7 / ML Baseline | leakage-safe dataset, model/dataset cards, calibration, segment evaluation, shadow mode, fallback, and rollback |
-| Real network dispute submission | No acquirer/network identity or callback authenticity boundary exists | Real PSP/Network Integration | provider contract, authenticated callbacks, reconciliation, credentials, and compliance review |
-| Hosted production console identity | Local secrets-in-memory are not production SSO/session security | Phase 9 / Identity And Hardening | OIDC/SSO, MFA, session/CSRF controls, RBAC, recovery, audit, deployment, and threat model |
+| General analytics warehouse or ClickHouse | The Phase 4.5 product loop needs bounded tenant operations, not warehouse scale | Phase 8 / Analytics Scale Decision | measured PostgreSQL SLO breach plus validated event/projection source, retention, partitioning, rebuild, cost, and dual-store reconciliation proof |
+| Unified decision and analyst workspace | Phase 4.5 pulls forward only the cockpit needed to operate existing workflows | Phase 6 / Unified Decision Explanation And Analyst Investigation Workspace | freshness-aware transaction detail, related pivots, business insights, accessibility, partial/stale states, and browser E2E proof |
+| ML score or probability | Historical simulation is deterministic rule/policy evaluation, not model training or calibration | Phase 7 / Governed ML Baseline And Lifecycle | leakage-safe dataset, model/dataset cards, calibration, segment evaluation, shadow mode, champion/challenger, drift, fallback, and rollback |
+| Real network dispute submission | No acquirer/network identity or callback authenticity boundary exists | Phase 10 / External PSP Adapter And Provenance Contract, only if the selected PSP/pilot includes representment | provider contract, authenticated callbacks, reconciliation, credentials, privacy/compliance review, and explicit PSP-versus-THAAP truth |
+| Hosted production console identity | Local secrets-in-memory are not production SSO/session security | Phase 9 / Hosted Identity And Platform RBAC | OIDC/SSO, MFA, session/CSRF controls, RBAC, recovery, audit, deployment, and threat model |
 | Arbitrary code, SQL, regex, or plugins in rules | Unbounded execution violates determinism, cost, and tenant safety | Rejected product direction | a new accepted ADR and sandbox/proof model; chapter naming alone cannot unblock it |
-| Cross-merchant monitoring or shared negative lists | Shared identity and benchmarks expand consent and privacy boundaries | Phase 8 / Privacy-Safe Graph And Aggregates | minimum cohort, anonymization, non-disclosure, authorization, consent, and synthetic attack proof |
-| Partial capture/refund, fees, and currency conversion | Phase 4.5 does not change money semantics | Partial Money Accounting / Payments Core | allocation model, rounding, balanced ledger, lifecycle, and PostgreSQL concurrency proof |
+| Cross-merchant monitoring or shared negative lists | Shared identity and benchmarks expand consent and privacy boundaries | Phase 8 / Privacy-Safe Network Aggregate Intelligence | minimum cohort, contribution bounds, anonymization, non-disclosure, authorization, consent/opt-out, and synthetic attack proof |
+| Partial capture/refund, fees, and currency conversion | Phase 4.5 does not change money semantics | Phase 10 / External PSP Adapter And Provenance Contract, only if the selected pilot promotes them through a frozen promise | design-partner need, allocation model, rounding, balanced ledger, lifecycle, and PostgreSQL concurrency proof |
 
 If implementation discovers a genuine Phase 4.5 promise that cannot be met,
 it receives the next immutable `TD-NNNN` before deferral. A roadmap destination
@@ -562,7 +562,9 @@ must meet keyboard navigation, labelled controls, contrast,
 deterministic time-zone display, stable error mapping, and responsive minimum
 layout proof. Browser tests cover secret persistence, tenant substitution,
 role visibility, stale version conflicts, idempotent retry, empty/partial/error
-states, and the integrated demo. Phase 6 retains the broad dashboard suite.
+states, and the integrated demo. Phase 6 extends this cockpit into the unified
+decision explanation, analyst investigation, business-insight, and developer-
+contract product; it does not rebuild Phase 4.5 workflows.
 
 ## 14. Persistence Design
 
@@ -926,8 +928,8 @@ Phase 4.5 is complete only when:
   transport boundaries
 - the thin UI proves secrets-in-memory, authorization, accessibility, failure
   states, and all core workflows
-- Phase 5 outbox/Kafka, Phase 6 broad dashboard, and Phase 7 ML remain honestly
-  unclaimed
+- Phase 5 durable events/analytics, Phase 6 unified decision/developer product,
+  and Phase 7 governed ML remain honestly unclaimed
 - fresh/retained migrations, forced concurrency, property, protocol, browser,
   privacy, rollback, public demo, and full regression proof pass
 - every chapter matrix/dossier, learning/source artifact, debt/finding register,
@@ -940,8 +942,10 @@ as one product set:
 
 1. Phase 4.5 optimizes first for a usable risk-operations and developer demo,
    not general analytics infrastructure.
-2. Pull forward a thin analyst/developer cockpit now; Phase 6 retains the broad
-   dashboard rather than leaving Phase 4.5 API-only.
+2. Pull forward a thin analyst/developer cockpit now; the rebaselined Phase 6
+   extends it into unified decision explanation, analyst investigation/business
+   insights, and developer contracts rather than leaving Phase 4.5 API-only or
+   rebuilding the cockpit.
 3. Merchant metrics come from durable PostgreSQL facts with explicit
    denominator/coverage/`asOf`; synthetic traffic is excluded by default.
 4. Free-form notes are included only with encryption, 90-day retention,

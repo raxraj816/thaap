@@ -49,6 +49,8 @@ required_files=(
   "README.md"
   "apps/payments-api/README.md"
   "docs/IMPLEMENTATION_MASTER_PLAN.md"
+  "docs/VISION.md"
+  "docs/THAAP_VISION_COVERAGE_MATRIX.md"
   "docs/COMMIT_READINESS_CHECKLIST.md"
   "docs/ESCAPED_REVIEW_REGISTER.md"
   "docs/INVARIANT_PROOF_REVIEW_PROCESS.md"
@@ -77,6 +79,10 @@ fi
 echo
 echo "Checking canonical technical and implementation debt..."
 scripts/technical-debt-check.py
+
+echo
+echo "Checking permanent product-vision coverage and roadmap ownership..."
+scripts/vision-coverage-check.py
 
 echo
 echo "Checking escaped-review quality records..."
@@ -160,6 +166,7 @@ echo "- Closure dossier: promises, failures, enforcement, proof, migration, demo
 echo "- Stripe/Mastercard reviewer pass: first likely objection is fixed, tested, documented, or explicitly deferred."
 echo "- Cheap-fix pull-forward: valid low-cost review comments are fixed before handoff."
 echo "- Deferral discipline: every true deferral has a TD-NNNN ID, reason, owner phase/slice, DRI, trigger, done criteria, and closure evidence."
+echo "- Vision coverage: every VP-NNN promise has current evidence, an exact remaining gap, owner phase/slice, DRI, trigger, product demo, and done evidence."
 echo
 echo "Review disposition format:"
 echo "- Fixed now: implemented and covered by tests/docs where relevant."
@@ -183,6 +190,7 @@ echo "- Check master plan if scope, sequencing, or invariants changed."
 echo "- Check runtime smoke test evidence if local startup behavior changed."
 echo "- Check that unrelated files are not mixed into the commit."
 echo "- Include adversarial-review status, cheap fixes, true deferrals, and proof in the final handoff."
+echo "- Include affected VP-NNN vision promises and confirm that phase work advances product truth rather than duplicating proven surfaces."
 echo "- Include invariant-matrix, traceability-pass, hostile failure-sequence-pass, and boundary-family-pass status."
 echo "- Include closure-dossier, matrix-provenance, escaped-review, and custom-infrastructure status."
 echo "- Name every new, changed, or resolved TD-NNNN entry in the final handoff."

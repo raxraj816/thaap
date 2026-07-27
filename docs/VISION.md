@@ -6,7 +6,11 @@ This document explains the product and learning vision for the platform. For imp
 
 ## 1. Vision Statement
 
-Build THAAP, Threat Hunting & Adaptive Analytics for Payments, as a production-shaped payment processing and fraud detection platform that teaches the complete lifecycle of modern online payments:
+Build THAAP, Threat Hunting & Adaptive Analytics for Payments, as an
+explainable, replayable, merchant-controlled fraud and risk platform. THAAP
+first learns and proves the complete lifecycle of modern online payments in a
+production-shaped simulator, then integrates with existing PSPs to protect real
+merchant payment traffic without initially becoming the money-moving PSP:
 
 ```text
 Merchant
@@ -38,9 +42,17 @@ The goal is not to clone Stripe, Radar, Mastercard, or any specific provider. Th
 
 ## 2. Product Identity
 
-THAAP is a learning-grade, production-shaped simulator.
+THAAP's V1 is a learning-grade, production-shaped simulator. THAAP's final
+destination is a real, hosted, merchant-facing fraud/risk platform that first
+integrates with existing PSPs.
 
-It should feel like a serious payment and fraud platform, but it will not move real money in V1. That is intentional. Simulating the processor lets us focus on the domain mechanics without early compliance, banking, or PSP-integration overhead.
+V1 will not move real money. That is intentional: simulating the processor lets
+us master payment and fraud mechanics without prematurely taking on acquiring,
+settlement, licensing, or high-scope card-data obligations. This boundary is a
+sequencing decision, not a ceiling. Later production horizons ingest real PSP
+events, produce risk decisions and analyst workflows for real merchants, and
+progress from shadow evidence to controlled enforcement only after safety and
+outcome gates pass.
 
 The platform should answer:
 
@@ -55,12 +67,15 @@ The platform should answer:
 
 ## 2.1 No-Compromise Product Bar
 
-THAAP should not become an architecture museum or a generic fraud demo. It
-should become a real, useful payment-risk operating system simulator.
+THAAP should not become an architecture museum, a generic fraud demo, or a
+simulator that never earns contact with real merchant outcomes. It should
+become a real, useful payment-risk operating system; the simulator is its safe
+proving ground.
 
 The winning wedge is not early parity with Stripe or Mastercard network data.
-Their production data moat is real. THAAP wins by being the most transparent,
-production-shaped fraud decisioning lab for:
+Their production data moat is real. THAAP wins first by being the most
+transparent production-shaped fraud decisioning lab, then by turning that
+discipline into a merchant-controlled production risk platform for:
 
 - payment lifecycle correctness
 - simulation
@@ -144,6 +159,29 @@ a merchant, payment, fraud, analyst, or learning workflow is not on the fastest
 path unless it protects correctness, security, tenant isolation, or operational
 resilience.
 
+## 2.3 Executable Vision Coverage
+
+[`THAAP_VISION_COVERAGE_MATRIX.md`](THAAP_VISION_COVERAGE_MATRIX.md) maps every
+challenger promise to current evidence, the exact remaining gap, owner
+phase/slice, DRI, trigger, merchant/analyst demo, completion evidence, and
+review date. `scripts/vision-coverage-check.py` makes that ownership part of
+commit readiness.
+
+This creates four permanent rules:
+
+1. A phase cannot close merely because infrastructure, a framework, or a test
+   suite works. It must advance a named product promise or prove a critical
+   boundary that directly unlocks one.
+2. “Later,” “future,” `TBD`, and unassigned gaps are invalid. Every retained
+   promise has a concrete owner and unblock evidence.
+3. A later phase must extend already-proven product truth rather than rebuild
+   it under a new name.
+4. The matrix is reviewed at every promise freeze, scope change, and phase
+   closure and at least every 35 days while incomplete promises remain.
+5. V1 simulator proof cannot be presented as real merchant outcome proof, and
+   production ambition cannot be used to weaken the simulator's explicit
+   synthetic/external-source boundary.
+
 ## 3. Target Users
 
 ### 3.1 Builder / Learner
@@ -177,7 +215,9 @@ Needs:
 
 Success means:
 
-- A merchant integration can treat this simulator like a real payment API shape.
+- In V1, a merchant integration can treat the simulator like a real payment API
+  shape; in the production horizon, the same developer can integrate a real
+  PSP data path without adopting a second, contradictory risk contract.
 
 ### 3.3 Fraud Analyst
 
@@ -212,6 +252,25 @@ Success means:
 
 - Model scores become auditable production signals, not notebook-only experiments.
 
+### 3.5 Merchant Risk Leader
+
+The merchant risk leader owns fraud loss, approval quality, operational cost,
+and deployment safety.
+
+Needs:
+
+- Connect an existing PSP without replacing the merchant's payment stack.
+- Observe decisions in shadow mode before THAAP influences live traffic.
+- Configure risk appetite, approvals, rollback, and enforcement boundaries.
+- Measure fraud loss, false positives, approval rate, review workload, and
+  decision latency against an agreed baseline.
+- Understand which outcomes are observed, delayed, disputed, or still unknown.
+
+Success means:
+
+- The merchant can demonstrate measurable risk or operational improvement and
+  can disable THAAP influence without losing payment, fraud, or audit truth.
+
 ## 4. Product Principles
 
 ### 4.1 Payment Processing Is First-Class
@@ -220,7 +279,11 @@ Fraud detection only makes sense inside the payment lifecycle. V1 must build pay
 
 ### 4.2 Simulate First, Integrate Later
 
-Real PSP integration comes later. The first milestone is a deterministic card-payment simulator with realistic states, processor outcomes, and failure modes.
+The first milestone is a deterministic card-payment simulator with realistic
+states, processor outcomes, and failure modes. Real PSP integration follows
+through an adapter and provenance boundary that keeps externally observed facts
+distinct from THAAP decisions and synthetic fixtures. Simulation is the safety
+and regression environment for the production product, not its final identity.
 
 ### 4.3 Every Important Action Is Auditable
 
@@ -274,7 +337,10 @@ By the end of the core implementation, the builder should understand:
 
 ### Horizon 1: Payment And Fraud MVP
 
-Build:
+Current state: achieved through Phase 4.5 for the production-shaped simulator
+boundary.
+
+Delivered:
 
 - Card-payment simulator.
 - PaymentIntent and PaymentAttempt.
@@ -285,7 +351,8 @@ Build:
 - Deterministic fraud rules.
 - Manual review.
 - Synthetic data generator v1 for repeatable payment and basic fraud scenarios.
-- Basic dashboard.
+- Thin analyst/developer cockpit with monitoring, investigation, governed
+  controls, dispute, webhook, and trusted scenario workflows.
 
 Outcome:
 
@@ -293,17 +360,21 @@ Outcome:
 
 ### Horizon 2: Intelligence And Feedback
 
-Build:
+Owner phases: Phases 5–8.
 
-- Kafka events.
-- Analytics projections.
-- Synthetic data generator expansion with richer fraud patterns and delayed labels.
-- ML baseline.
-- Model serving.
-- Rule simulation.
-- ClickHouse analytics.
-- Neo4j graph intelligence.
-- Model monitoring.
+Build from current truth:
+
+- Durable domain events, inbox-idempotent consumption, freshness-aware
+  analytics, and rebuildable point-in-time datasets.
+- Unified payment-risk explanation, analyst investigation, business insights,
+  OpenAPI/error catalogue/SDK, and merchant sandbox.
+- Synthetic data expansion, governed ML baseline, calibrated shadow/active
+  serving, champion/challenger, drift, and rollback.
+- Privacy-safe network aggregates and explainable temporal graph intelligence.
+- Merchant underwriting/exposure/reserve/hold simulation, advanced identity,
+  friendly-fraud/representment, and post-authorization outcome optimization.
+- ClickHouse only if measured PostgreSQL query/volume evidence justifies the
+  second analytics-store boundary.
 
 Outcome:
 
@@ -311,20 +382,46 @@ Outcome:
 
 ### Horizon 3: Production Shape And Agents
 
+Owner phase: Phase 9.
+
 Build:
 
-- GenAI fraud intelligence agents.
-- RBAC.
-- Observability dashboards.
-- Load testing.
-- CI/CD.
-- Blue-green deployment.
-- Rollback playbooks.
-- Security hardening.
+- Hosted identity, platform RBAC, and lifecycle controls.
+- OpenTelemetry/SLOs, load/chaos, backup/restore, retention/deletion, and
+  incident recovery.
+- API/event/model/rule/database compatibility, CI/CD, blue-green/canary, and
+  rollback.
+- Audited fraud intelligence agents with source citations and mandatory human
+  authority.
+- External integration readiness and evidence-triggered worker, egress, and
+  multi-region scale.
 
 Outcome:
 
-- The system demonstrates how a serious payment/fraud platform would be operated safely.
+- The system is ready to enter a controlled merchant integration without
+  pretending that infrastructure readiness is customer-value proof.
+
+### Horizon 4: Merchant Integration And Measured Validation
+
+Owner phase: Phase 10.
+
+Build:
+
+- A versioned external PSP adapter with authenticated ingress, event provenance,
+  reconciliation, replay, idempotency, and ambiguity handling.
+- Hosted merchant onboarding, tenant lifecycle, risk configuration, support,
+  audit export, deletion, and incident communication.
+- Explicit `SHADOW`, `ADVISORY`, and narrowly approved `ENFORCED` deployment
+  modes with kill switch, rollback, and merchant-owned risk appetite.
+- A design-partner pilot governed by pre-agreed safety, fraud-loss,
+  false-positive, approval-rate, review-workload, and latency measures.
+- A delayed-outcome and label-quality feedback loop that can improve merchant
+  and privacy-safe network intelligence without overstating causality.
+
+Outcome:
+
+- At least one real merchant can integrate through an existing PSP, validate
+  THAAP safely, and inspect trustworthy evidence of product impact.
 
 ## 7. Non-Goals For V1
 
@@ -341,11 +438,14 @@ V1 will not:
 - use GNNs as a core dependency
 - depend on cloud infrastructure to run locally
 
-These are future extensions after the core lifecycle is correct.
+These are excluded from V1, not from THAAP's destination. Real PSP integration
+and a controlled merchant pilot are explicit Phase 10 commitments. Becoming a
+full acquiring, settlement, or money-moving PSP remains a separate future
+strategy decision and is not required to validate THAAP's fraud/risk product.
 
 ## 8. Product Success Criteria
 
-The platform is successful when:
+The V1 platform is successful when:
 
 - A merchant can create, confirm, capture, refund, and dispute a simulated card payment.
 - Every mutating payment request is idempotent.
@@ -359,13 +459,27 @@ The platform is successful when:
 - Rule changes can be simulated before activation.
 - GenAI agents can produce recommendations without direct production authority.
 
+THAAP reaches its declared product destination when:
+
+- A merchant can connect an existing PSP through an authenticated, versioned,
+  reconciled adapter without exposing raw PAN or CVV to THAAP.
+- Shadow decisions can be compared with observed PSP and merchant outcomes
+  before any live influence is enabled.
+- Advisory or enforced decisions require explicit merchant approval, bounded
+  policy, rollback, a kill switch, and complete audit evidence.
+- Product impact is reported against an agreed baseline with coverage,
+  confidence, delayed-label, segment, and causality limitations visible.
+- A real design-partner workflow closes the loop from payment event to decision,
+  analyst action, label, rule/model improvement, and measured outcome.
+
 ## 9. North Star
 
-The north star is domain mastery:
+The engineering north star is domain mastery in service of merchant outcomes:
 
 ```text
 Understand payments deeply enough to build the processing path.
 Understand fraud deeply enough to protect that path.
 Understand ML deeply enough to improve that protection.
 Understand operations deeply enough to run it safely.
+Earn real merchant trust through measurable fraud reduction and approval quality.
 ```

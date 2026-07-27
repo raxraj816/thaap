@@ -2,6 +2,12 @@
 
 Primary V1 backend deployable.
 
+V1 uses the deterministic processor simulator. THAAP's declared destination is
+a hosted merchant-facing fraud/risk platform integrating first through
+versioned existing-PSP adapters; this service must therefore preserve external
+source provenance, idempotency, reconciliation, and simulator/live separation
+without expanding into raw PAN/CVV custody or claiming THAAP-owned settlement.
+
 Implemented backend foundation:
 
 - Java 25
@@ -680,13 +686,18 @@ use `1` and `0` only in the local proof environment; the exact command and
 warning are documented in `scripts/README.md`. Absence of either override
 retains the production-safe default.
 
-Phase 4.5 is complete through Chapter 43. Fresh/retained V1–V64 migrations,
+Phase 4.5 is complete through Chapter 43R. Fresh/retained V1–V64 migrations,
 forced PostgreSQL orderings, simulation and key-lifecycle restarts, rule and
-protocol boundary families, seven public clients, live browser verification,
-739 backend tests, 137 repository tests, and the formal matrix/dossier gates
-pass. The API does not claim Phase 5 event infrastructure, Phase 6's broad
-dashboard, Phase 7 ML, Phase 9 hosted identity, real-network dispute handling,
-or partial-money semantics.
+protocol boundary families, seven public workflows, live browser verification,
+759 backend tests, 140 repository tests, 20 UI tests plus the production build,
+and all Chapter 36–43R matrix/dossier gates pass. The Phase 5 detailed plan is
+ready for founder review, but its event/outbox, Kafka, consumer, analytics, and
+rebuild implementation has not started. The permanent THAAP vision matrix now
+maps 19 challenger promises to exact current evidence and Phase 5–9 owner
+slices; the readiness gate rejects vague or stale coverage. The API also does
+not claim Phase 6's unified decision/developer product, Phase 7 governed ML,
+Phase 8 network/graph/underwriting intelligence, Phase 9 hosted trust/agents,
+real-network dispute handling, or partial-money semantics.
 
 Run the complete loopback-only Phase 3 proof with:
 
