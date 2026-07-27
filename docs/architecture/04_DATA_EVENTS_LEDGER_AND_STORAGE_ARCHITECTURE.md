@@ -5,6 +5,9 @@ Date: 2026-05-29
 This document defines the storage architecture, transactional boundaries, ledger model, outbox/event strategy, webhook delivery model, analytics stores, and replay/backfill strategy.
 
 For implementation decisions, follow `docs/IMPLEMENTATION_MASTER_PLAN.md`.
+The Phase 5 refinement is proposed in
+`docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md`. It is ready for founder review
+but is not frozen implementation authorization yet.
 
 ## 1. Data Architecture Goals
 
@@ -45,6 +48,7 @@ Runtime queries must use tenant-scoped lookup paths. Database row-level security
 Owns:
 
 - merchants
+- platform operators and credentials, beginning in Phase 5 if founder-confirmed
 - customers
 - payment methods
 - payment intents
@@ -67,7 +71,9 @@ Owns:
 - webhook deliveries
 - processor events
 - audit logs
-- outbox events
+- immutable domain events, mutable publication state, and publication attempts
+- consumer inbox, quarantine, projection generations, stream positions,
+  bootstrap facts, checkpoints, and rebuild state
 
 ### 2.2 Redis
 
@@ -371,41 +377,38 @@ domain state + outbox event commit together
 publisher retries later
 ```
 
-### 6.2 Outbox Event
+### 6.2 Immutable Event And Mutable Publication State
 
-Fields:
+The Phase 5 detailed plan proposes separating the immutable semantic fact from
+its mutable transport progress:
 
-- `id`
-- `aggregateType`
-- `aggregateId`
-- `eventType`
-- `eventVersion`
-- `payloadJson`
-- `status`
-- `createdAt`
-- `publishedAt`
-- `retryCount`
-- `lastError`
+- `domain_events` owns tenant, event identity, domain stream identity and
+  version, event type/version, occurrence/recording time, correlation and
+  causation, safe actor/request/trace/origin lineage, canonical payload, and
+  exact payload digest.
+- `event_publications` owns claim token, lease, retry schedule, acknowledgement,
+  and blocked-state progress.
+- `event_publication_attempts` owns append-only safe outcome evidence.
 
-Statuses:
-
-- `PENDING`
-- `PUBLISHED`
-- `FAILED_RETRYABLE`
-- `FAILED_FINAL`
+This prevents a publisher retry from changing what the event means. Repeated
+failure blocks publication and alerts operators; it does not discard the
+immutable event as `FAILED_FINAL`.
 
 ### 6.3 Event Publishing Flow
 
 ```text
 domain transaction commits
-  -> outbox event is PENDING
-  -> publisher polls pending events
-  -> publish to Kafka, when Kafka exists
-  -> mark PUBLISHED
-  -> retry failures
+  -> immutable event + publication are durable
+  -> publisher claims bounded next-per-stream work with a lease/token
+  -> exact stored bytes publish to Kafka outside the database transaction
+  -> matching token records acknowledgement, retry, unknown, or blocked truth
 ```
 
-Before Kafka exists, outbox can still feed internal projections and webhook delivery rows.
+Kafka delivery is at least once. Acknowledgement followed by a database crash
+may create a duplicate, so each consumer requires a durable inbox committed in
+the same PostgreSQL transaction as its projection effect. Webhook delivery
+records remain a separate merchant-callback product and are not regenerated
+from analytics consumption.
 
 ## 7. Domain Events
 
@@ -654,15 +657,30 @@ ClickHouse tables:
 
 Backfill must be possible from:
 
-- outbox events
+- immutable domain events
 - PostgreSQL source tables
 - archived raw events, later
 
-Backfill must be idempotent.
+Backfill must be idempotent. Historical rows that predate domain events are
+bootstrapped into immutable, safe, digest-bound projection seed facts through
+an explicitly labelled source snapshot at a fixed cutoff. Future rebuilds reuse
+those exact seed bytes before applying later events; THAAP does not fabricate
+retroactive domain-event IDs or occurrence times.
 
 ### 10.4 Offline Replay Architecture
 
-ReplayEngine evaluates candidate rules or models against historical data.
+Phase 5 separates projection rebuild from counterfactual evaluation:
+
+- projection rebuild applies immutable events to a shadow generation,
+  reconciles it, catches it up, and atomically activates it without touching
+  domain state
+- an offline dataset manifest binds tenant, event cutoff, label-availability
+  cutoff, traffic-origin policy, feature/evaluator version, query digest, and
+  output digest
+- the Phase 4.5 governed historical simulator remains authoritative for
+  policy/rule activation until event-derived cohort equivalence is proven
+
+The later rule/model ReplayEngine evaluates candidates against historical data.
 
 Inputs:
 
@@ -695,7 +713,8 @@ Outputs:
 - merchant/segment impact
 - unknown-outcome count
 
-ReplayEngine is required before activating major rule, threshold, or model changes.
+The Phase 4.5 simulator already gates policy/rule activation. Model replay and
+promotion remain Phase 7 work; Phase 5 creates stable, point-in-time inputs.
 
 ## 11. ML Dataset Architecture
 
@@ -813,6 +832,11 @@ Graph writes should be idempotent.
 
 ## 13. Audit Architecture
 
+`AuditLog` already exists in the completed product. Phase 5 reconciles its
+coverage rather than creating a second audit table. Audit and domain events are
+not interchangeable: audit answers who acted and why, while a domain event
+states which business fact committed.
+
 Audit events should record:
 
 - actor
@@ -836,6 +860,8 @@ Audit high-risk actions:
 - rule activation
 - model promotion
 - agent tool call
+- blocked-event retry or quarantine disposition
+- projection rebuild start, cancel, activate, or rollback
 
 ## 14. Data Retention And Privacy
 
@@ -862,9 +888,13 @@ Strong consistency required:
 - ledger entries
 - fraud decision persistence
 - capture/refund/chargeback state
+- domain mutation plus immutable event insertion
+- consumer inbox plus projection effect and checkpoint
+- reconciled projection-generation activation
 
 Eventual consistency acceptable:
 
+- Kafka publication after the source transaction commits
 - webhook delivery
 - analytics projections
 - graph ingestion
@@ -878,9 +908,12 @@ Complete when:
 - PostgreSQL schema supports all V1 entities
 - all mutating APIs use idempotency
 - ledger groups balance
-- outbox events are written with state changes
+- immutable domain events and publication state are written atomically with
+  each in-scope state change
 - webhook delivery records exist
-- analytics projections can be rebuilt
+- at-least-once publication plus inbox-idempotent consumption is restart-safe
+- analytics projections expose freshness/coverage and can be rebuilt through a
+  reconciled shadow generation without source-state mutation
 - ML dataset rows can be built from persisted snapshots
 - graph ingestion has idempotent event handling
 - audit logs exist for high-risk actions

@@ -439,6 +439,21 @@ operational debt must receive an immutable `TD-NNNN` ID in
 automatically and rejects open entries that have not been reviewed within 35
 days.
 
+## Product Vision Coverage
+
+Validate every permanent `VP-NNN` challenger promise, its current evidence,
+remaining gap, owner phase/slice, DRI, trigger, product demo, done evidence,
+review freshness, and master-plan roadmap traceability:
+
+```bash
+scripts/vision-coverage-check.py
+python3 -m unittest scripts/vision_coverage_check_tests.py
+```
+
+The commit-readiness gate runs this automatically. It rejects vague ownership,
+missing demos, stale reviews, dangling promise IDs, and loss of the rebaselined
+Phase 6–10 product contracts or merchant-facing product destination.
+
 ## Executable Artifact Naming
 
 Reject roadmap chapter identifiers in production code, test identities,
@@ -497,6 +512,7 @@ The non-trivial gate also runs:
 
 ```bash
 scripts/executable-artifact-naming-check.py
+scripts/vision-coverage-check.py
 scripts/invariant-proof-check.py docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md
 scripts/escaped-review-check.py
 scripts/slice-review-check.py

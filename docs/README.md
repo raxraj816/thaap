@@ -5,8 +5,11 @@ This directory is organized to avoid conflicting plans during implementation.
 ## Read First
 
 - [IMPLEMENTATION_MASTER_PLAN.md](./IMPLEMENTATION_MASTER_PLAN.md)
+- [THAAP_VISION_COVERAGE_MATRIX.md](./THAAP_VISION_COVERAGE_MATRIX.md)
 - [PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_3_DETAILED_IMPLEMENTATION_PLAN.md)
 - [PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md)
+- [PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md)
+- [PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
 
 This is the authoritative implementation source of truth. If any reference document disagrees with it, follow the master plan.
 The completed Phase 3 detailed plan defines Chapters 22–25. The confirmed Phase
@@ -17,6 +20,17 @@ Chapters 26–35 and Phase 4 are verified complete. The integrated Chapter 35
 matrix/dossier, 629 Java tests, 114 Python tests, 14 migration contracts,
 retained V48-to-V49 upgrade proof, and all Chapter 26–34 public demos pass
 together.
+
+Phase 4.5 is complete through Chapter 43R with all inherited closure evidence,
+759 backend tests, 140 repository tests, 20 UI tests, and the production UI
+build reconciled. The Phase 5 detailed plan is `READY FOR FOUNDER REVIEW` and
+proposes Chapters 44–52 for durable events and rebuildable analytics. Its
+sixteen decisions are not frozen and implementation has not started. The
+vision coverage matrix registers 23 product promises and rebaselines Phases
+6–10 so later work extends current product truth rather than duplicating Phase
+4.5 capabilities. The founder-confirmed destination is a hosted merchant-facing
+fraud/risk platform integrating initially with existing PSPs; the V1 simulator
+remains its honest proving ground and permanent regression environment.
 
 ## Companion Docs
 

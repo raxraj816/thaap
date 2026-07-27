@@ -2,9 +2,18 @@
 
 Threat Hunting & Adaptive Analytics for Payments.
 
-THAAP is a production-shaped payment processing and fraud intelligence simulator. It exists to build payment and fraud primitives end to end: merchant onboarding, customer and payment method creation, PaymentIntent and PaymentAttempt lifecycle, processor simulation, idempotency, webhooks, ledgering, fraud rules, manual review, synthetic data, ML scoring, graph intelligence, and later GenAI-assisted offline investigation.
+THAAP V1 is a production-shaped payment processing and fraud intelligence
+simulator. Its final destination is a hosted merchant-facing fraud/risk
+platform that initially integrates with existing PSPs rather than replacing
+their money-moving, acquiring, and settlement responsibilities. The simulator
+is the safe proving ground for payment and fraud primitives, replay,
+explainability, analyst operations, governed ML, and production regression—not
+the product ceiling.
 
 The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md).
+Permanent challenger-promise ownership is tracked in
+[docs/THAAP_VISION_COVERAGE_MATRIX.md](docs/THAAP_VISION_COVERAGE_MATRIX.md)
+and enforced by `scripts/vision-coverage-check.py`.
 Chapter completion is governed by
 [the invariant-proof process](docs/INVARIANT_PROOF_REVIEW_PROCESS.md),
 [the escaped-review register](docs/ESCAPED_REVIEW_REGISTER.md), and a
@@ -87,7 +96,24 @@ passes 759 backend tests without skips, 140 repository tests, 20 UI tests, and
 the production UI build. Every Chapter 36–43R matrix is
 `FROZEN`/`VERIFIED`/all-`PASS`, every dossier is `READY_TO_MERGE`/`MERGE`, all
 escaped findings are resolved, and no technical debt is open. Phase 5 is
-unblocked.
+unblocked. The
+[Phase 5 detailed implementation plan](docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
+is ready for founder review. It proposes Chapters 44–52 for the canonical
+event/outbox contract, payment and fraud event integration, Kafka publication,
+inbox-idempotent consumption, rebuildable PostgreSQL analytics, projection
+generation activation, and point-in-time offline replay datasets. Production
+implementation has not started; the sixteen proposed product/architecture
+decisions and Chapter 44 pre-implementation matrix must be confirmed and frozen
+first.
+The vision matrix registers 23 `VP-NNN` promises and rebaselines Phases 6–10
+around unified decision/analyst product, developer contracts, governed ML and
+drift, privacy-safe network/graph intelligence, merchant underwriting and
+reserve/hold simulation, friendly-fraud/representment, advanced identity,
+agents, hosted trust, evidence-triggered scale, external PSP integration, safe
+shadow/advisory/enforcement progression, and measured real-merchant outcomes.
+Commit readiness now rejects missing/vague owners, stale reviews, missing
+merchant/analyst demos, loss of the rebaselined phase contracts, or removal of
+the merchant-facing destination.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation

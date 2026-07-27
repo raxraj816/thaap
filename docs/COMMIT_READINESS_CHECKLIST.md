@@ -10,6 +10,11 @@ Use this before saying a change is ready to commit.
 - Service README checked when a service changed.
 - `docs/IMPLEMENTATION_MASTER_PLAN.md` checked when scope, sequencing,
   invariants, or roadmap changed.
+- `docs/VISION.md` and `docs/THAAP_VISION_COVERAGE_MATRIX.md` reviewed for
+  every affected `VP-NNN`; owner phase/slice, DRI, trigger, product demo, done
+  evidence, and review date remain concrete, the V1 simulator remains a
+  proving ground rather than THAAP's final destination, and
+  `scripts/vision-coverage-check.py` passes.
 - `docs/TECHNICAL_DEBT_REGISTER.md` updated for every accepted or deferred
   technical, implementation, security, data/ML, or operational debt.
 - The chapter invariant-proof matrix was drafted from the frozen plan and
@@ -68,6 +73,9 @@ Before committing, answer:
     operations, and merge recommendation without contradicting source docs?
 18. Did every escaped finding reopen and prove its entire boundary family
     instead of adding only the observed regression example?
+19. Which `VP-NNN` product promises does this change advance, and does its
+    merchant/analyst demo prove product leverage rather than infrastructure
+    activity alone?
 
 ## Senior Staff Adversarial Review Gate
 
@@ -108,6 +116,9 @@ while the implementation context is still fresh.
 - **Deferral discipline:** Every true deferral names the exact reason, owner
   chapter or implementation slice, and evidence that would unblock it; every
   accepted debt is registered under an immutable `TD-NNNN` ID.
+- **Vision coverage:** Every affected `VP-NNN` retains current evidence, an
+  exact next owner, and a product demo; already-proven work is extended rather
+  than rebuilt under a later phase name.
 
 Classify review items with this disposition:
 

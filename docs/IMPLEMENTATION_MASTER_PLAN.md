@@ -15,7 +15,15 @@ Build THAAP, Threat Hunting & Adaptive Analytics for Payments, as an end-to-end 
 - Real-time fraud decisioning.
 - Rules, ML scoring, graph intelligence, analyst operations, and GenAI-assisted fraud intelligence.
 
-THAAP is not a toy checkout demo. It is a production-shaped simulator designed to teach and demonstrate how payment systems and fraud systems work together.
+THAAP is not a toy checkout demo. V1 is a production-shaped simulator designed
+to teach and prove how payment systems and fraud systems work together. THAAP's
+final destination is a real hosted merchant-facing fraud/risk platform that
+initially integrates with existing PSPs rather than replacing their
+money-moving, acquiring, and settlement responsibilities.
+
+Founder decision (2026-07-27): this merchant-facing destination is confirmed.
+The V1 simulator remains the first stage and permanent proving environment; it
+is not THAAP's final product boundary.
 
 ### 1.1 Challenger Product Bar
 
@@ -110,7 +118,50 @@ polish:
   documentation.
 
 These gaps do not change the V1 simulator boundary. They change what
-"production-shaped" means as the platform matures.
+"production-shaped" means as the platform matures. The simulator boundary is a
+truthful first product stage and permanent regression environment, not the
+final commercial boundary: Phase 10 must prove external PSP integration and
+measured merchant value.
+
+### 1.3 Vision Coverage Gate
+
+[`THAAP_VISION_COVERAGE_MATRIX.md`](THAAP_VISION_COVERAGE_MATRIX.md) is the
+permanent bridge between this challenger bar and phase execution. It is
+validated by `scripts/vision-coverage-check.py` and reviewed at every phase
+promise freeze, scope change, and closure.
+
+The registered promises are:
+
+- `VP-001` payment-native fraud
+- `VP-002` bounded real-time decision quality
+- `VP-003` privacy-safe network intelligence
+- `VP-004` explainable controls and decisions
+- `VP-005` analyst operations depth
+- `VP-006` post-authorization protection
+- `VP-007` rule and policy governance
+- `VP-008` ML feedback and model lifecycle
+- `VP-009` graph and pattern intelligence
+- `VP-010` adaptive intelligence with human authority
+- `VP-011` security, privacy, tenant trust, and resilience
+- `VP-012` merchant risk, underwriting, and exposure controls
+- `VP-013` card-testing and enumeration defense
+- `VP-014` dispute, representment, and friendly-fraud operations
+- `VP-015` identity, session, device, and bot intelligence
+- `VP-016` developer product quality
+- `VP-017` durable event, analytics, and replay lineage
+- `VP-018` honest production-shaped simulator boundary
+- `VP-019` Staff-engineering and domain-mastery apprenticeship
+- `VP-020` external PSP integration and source provenance
+- `VP-021` hosted merchant risk control plane
+- `VP-022` safe shadow, advisory, and enforcement progression
+- `VP-023` measured merchant outcomes and feedback flywheel
+
+A phase cannot close because infrastructure works in isolation. Its owned vision
+promises require an observable merchant/analyst workflow or a proven critical
+boundary that directly unlocks one. Every remaining gap requires a named owner
+phase/slice, DRI, trigger, demo, and done evidence. “Later,” “future,” and `TBD`
+are invalid ownership. A gap inside a frozen promise must also be registered as
+`TD-NNNN` when genuinely deferred.
 
 ## 2. Final Scope Decisions
 
@@ -174,7 +225,9 @@ Out of scope for V1:
 - Production GenAI agents.
 - GNN models.
 
-Later phases can add these once the core lifecycle is stable.
+Later phases can add these once the core lifecycle is stable. Real PSP
+integration is explicitly owned by Phase 10; becoming a full acquiring,
+settlement, or money-moving PSP is not implied by that commitment.
 
 ### 2.1.1 Fraud Taxonomy
 
@@ -604,24 +657,39 @@ No capture, refund, fee, or chargeback write is valid unless the ledger transact
 - `responseJson`
 - `createdAt`
 
-`OutboxEvent`
+Phase 5 proposes the following refinement, pending founder confirmation:
+
+`DomainEvent`
 
 - `id`
 - `merchantId`
-- `aggregateType`
-- `aggregateId`
+- `streamType`
+- `streamId`
+- `streamVersion`
 - `eventType`
 - `eventVersion`
+- `occurredAt`
+- `recordedAt`
+- safe correlation, causation, actor, request, trace, and traffic-origin lineage
 - `payloadJson`
-- `status`
-- `retryCount`
-- `lastError`
-- `createdAt`
-- `publishedAt`
+- `payloadSha256`
 
-Outbox events are written in the same transaction as the domain state change.
-Before Kafka exists, they may feed local webhook delivery records and analytics
-projections. After Kafka exists, they become the durable publish/retry boundary.
+`EventPublication`
+
+- `eventId`
+- `status`
+- `claimToken`
+- `leaseExpiresAt`
+- `retryCount`
+- `nextAttemptAt`
+- `publishedAt`
+- safe closed error code
+
+The immutable domain event and mutable publication state are written in the
+same transaction as the domain state change. Kafka publication occurs only
+after commit and is explicitly at least once. Append-only publication attempts
+record safe outcomes; repeated failure blocks and alerts rather than discarding
+the event. Webhook events remain a separate exact merchant-callback boundary.
 
 `AuditLog`
 
@@ -2121,10 +2189,14 @@ Detailed Phase 2 chapter plan:
 
    Scope boundaries:
 
-   - Real network reversal APIs remain outside the V1 simulator scope and begin
-     only if a real PSP integration is selected.
-   - Partial voids have no valid domain boundary until a future partial-capture
-     slice introduces partial authorization/capture accounting.
+   - Real network reversal APIs remain outside the V1 simulator scope. Phase
+     10's **External PSP Adapter And Provenance Contract** may freeze them only
+     when the selected pilot requires a merchant-approved money action and its
+     PSP authority, idempotency, ambiguity, reconciliation, and rollback
+     boundaries are approved.
+   - Partial voids have no valid domain boundary until Phase 10's selected-PSP
+     contract demonstrates a product need and freezes partial authorization/
+     capture accounting with balanced-ledger concurrency proof.
 
 3. Chapter 18: Refund Object Truth And Refund Ledger Entries.
 
@@ -2190,11 +2262,13 @@ Detailed Phase 2 chapter plan:
      evidence must prove event-order handling, no customer over-credit or
      merchant double-debit, balanced ledger groups, and concurrent
      refund-versus-dispute behavior.
-   - External acquirer refund calls are owned by the post-V1 **Real PSP Refund
-     Execution** slice, with Payments Core as technical DRI and
-     Security/Compliance as supporting owners. Start only after a PSP is
-     selected and its hosted/tokenized payment, authentication, callback, and
-     reconciliation contracts are approved. Completion evidence must prove
+   - External acquirer refund calls, if required by the selected pilot, are
+     owned by Phase 10's **External PSP Adapter And Provenance Contract** under
+     a **Real PSP Refund Execution** sub-slice, with Payments Core as technical
+     DRI and Security/Compliance as supporting owners. Start only after a PSP
+     and design partner are selected and their hosted/tokenized payment,
+     authentication, callback, approval, kill-switch, and reconciliation
+     contracts are approved. Completion evidence must prove
      provider idempotency, asynchronous requested/pending/succeeded/failed
      states, retry and callback races, provider-reference lineage,
      reconciliation, and that local `RECORDED` truth is never presented as
@@ -2799,8 +2873,8 @@ Detailed Phase 2 chapter plan:
      Operations**. Chapter 21 has already supplied the creation idempotency,
      rotation-overlap, and fair bounded scheduling substrate.
    - High-scale distributed queueing and managed egress proxy infrastructure are
-     owned by **Phase 9: Agents, Hardening, Scale**, implementation slice
-     **Webhook Worker Scaling And Egress Hardening**. Start when measured queue
+     owned by **Phase 9: Agents, Production Trust, And Scale**, implementation
+     slice **Measured Scaling And Egress Hardening**. Start when measured queue
      age or delivery volume exceeds the bounded database-worker target, or
      before multi-region execution; prove partition-safe claiming, backpressure,
      regional failover, controlled egress, and unchanged at-least-once
@@ -2911,11 +2985,12 @@ Deferred Phase 2 destination slices, not accepted Chapter 18 debt:
   locking, and fee-reversal ledger policy. Its entry trigger and required proof
   are recorded in Chapter 18; it is not dependency-ready while V1 promises only
   one full capture and one full refund with no fee postings.
-- **Real PSP Refund Execution** — Payments Core owns processor orchestration and
-  reconciliation; Security/Compliance owns tokenization, credential, card-data,
-  and provider-control review. Its entry trigger and required proof are recorded
-  in Chapter 18; it remains outside V1 because THAAP currently simulates rather
-  than moves money.
+- **Phase 10 Real PSP Refund Execution, if pilot-required** — Payments Core owns
+  processor orchestration and reconciliation; Security/Compliance owns
+  tokenization, credential, card-data, and provider-control review. Its entry
+  trigger and required proof are recorded in Chapter 18; it remains outside V1
+  and is not required for a shadow/advisory risk integration because THAAP does
+  not initially replace PSP money movement.
 
 Done when:
 
@@ -3407,142 +3482,329 @@ Done when:
 
 ### Phase 5: Events And Analytics
 
-Build:
+Detailed source of truth:
+[`PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md).
 
-- OutboxEvent table and writer integrated into state-changing payment, fraud,
-  review, refund, chargeback, rule, and webhook actions.
-- AuditLog table and audit writer for high-risk state transitions and
-  operational actions.
-- Kafka publisher.
-- Consumer skeleton.
-- PostgreSQL analytics projections.
-- Replay command.
-- ReplayEngine for offline rules/model evaluation against historical PaymentAttempts and FeatureSnapshots.
+Current state: **READY FOR FOUNDER REVIEW; IMPLEMENTATION NOT STARTED.** The
+Phase 4.5 / Chapter 43R entry gate is satisfied. The detailed plan proposes the
+canonical event envelope and stream model, atomic event/outbox boundary,
+privacy contract, Kafka publisher, inbox-idempotent consumer, quarantine,
+versioned PostgreSQL analytics projections, shadow rebuild/activation,
+point-in-time offline dataset, local persistent platform-operator boundary,
+failure inventory, proof strategy, and Chapter 44–52 sequence. Its sixteen
+decisions remain proposed until founder
+confirmation. Chapter 44 may not change production code or migrations until
+that confirmation and a frozen `PRE_IMPLEMENTATION` invariant matrix.
 
-Done when:
+The plan corrects two stale roadmap assumptions:
 
-- Domain state and outbox events commit atomically.
-- Events publish after DB commit through retryable outbox publishing.
-- Consumers can restart safely.
-- Audit logs exist for high-risk actions and include actor, aggregate, request
-  ID, trace ID, action, timestamp, and safe before/after context where useful.
-- Replay rebuilds projections.
-- Candidate rule/model changes can be evaluated without re-fetching real-time data.
+- `AuditLog` already exists and is broadly integrated. Phase 5 reconciles its
+  completeness and adds audit for privileged event/projection operations; it
+  does not create a competing audit system.
+- Phase 4.5 already owns governed historical rule/policy simulation. Phase 5
+  adds event-driven projection rebuild and a stable offline dataset, and may
+  feed the existing simulation gate only after point-in-time equivalence proof.
 
-### Phase 6: Dashboard MVP
+Proposed chapter sequence:
 
-Build:
+1. Chapter 44: Canonical Event Contract And Atomic Outbox Foundation.
+2. Chapter 45: Payment And Money Event Integration.
+3. Chapter 46: Fraud And Risk-Operations Event Integration.
+4. Chapter 47: Kafka Publication And Recovery.
+5. Chapter 48: Idempotent Consumer And Projection Substrate.
+6. Chapter 49: Payment-Risk And Merchant-Risk Analytics.
+7. Chapter 50: Projection Rebuild, Reconciliation, And Activation.
+8. Chapter 51: Offline Replay Dataset And Simulation Compatibility.
+9. Chapter 52: Integrated Phase 5 Closure.
 
-- Overview dashboard.
-- Transaction search.
-- Transaction detail.
-- Review queue.
-- Rule list/editor.
-- Chargeback list.
-- Card-testing incident list.
-- Merchant risk profile detail.
-- Developer/API console basics.
+Phase 5 is done only when domain state and canonical events commit atomically;
+publication is after commit, retryable, and explicitly at least once; consumers
+restart and deduplicate through an inbox committed with projection effects;
+tenant-qualified projections expose generation, cutoff, freshness, coverage,
+and origin policy; a shadow rebuild reconciles and activates without partial
+visibility or source mutation; the offline dataset is point-in-time and does
+not fetch Redis/current context; audit and domain-event truth remain separate;
+and real PostgreSQL/Kafka, migration, forced-ordering, privacy, browser, public-
+demo, full-regression, matrix, dossier, debt, and escaped-review gates pass.
 
-Done when:
+### Phase 6: Decision Intelligence Workspace And Developer Product
 
-- Analyst can inspect a payment lifecycle.
-- Analyst can see fraud reasons, rules fired, and feature snapshot.
-- Analyst can resolve a review.
-- Analyst can inspect card-testing incidents and merchant risk indicators.
+Vision owners: `VP-004`, `VP-005`, and `VP-016`.
 
-### Phase 7: ML Baseline
+Current truth: Phase 4.5 already delivered a thin cockpit, review workspace,
+saved searches, protected notes, monitoring, simulation, governed controls,
+disputes, webhooks, and developer scenarios. Phase 6 must extend those surfaces;
+it may not spend a phase rebuilding them under “dashboard MVP” names.
 
-Build:
+Named owner slices:
 
-- Synthetic data generator v2 with richer fraud patterns and labels.
-- **Synthetic Generator V2 Run Orchestration** owner slice (`TD-0002`
-  resolved by the Chapter 21 local-run substrate):
-  - Primary technical DRI: **ML/Data Platform**.
-  - Payments Core dependency owner: **Payments Core**, for idempotent public
-    mutation APIs and trusted traffic-origin propagation.
-  - Promote the proven local run journal into scheduled/dataset-scale
-    orchestration only when Phase 7 requires shared workers.
-  - Preserve stable per-step idempotency, explicit cleanup disposition, and
-    duplicate-free payment/fraud/label truth from Chapter 21.
-- Exploratory data analysis report.
-- Data quality report for labels, imbalance, missingness, leakage risks, and segment coverage.
-- Training dataset builder.
-- Time-based train/validation/test split.
-- Calibration curve report.
-- Decision threshold tuning report.
-- Logistic regression baseline.
-- XGBoost or LightGBM baseline only if EDA and logistic regression error analysis justify it.
-- MLflow tracking.
-- FastAPI model serving.
-- Model timeout fallback.
-- Dataset card and model card for every promoted model.
-- Shadow-mode scoring before active serving.
+1. **Unified Decision Explanation And Lifecycle Timeline**
+   - Product DRI: Fraud/Risk Product.
+   - Technical DRI: Risk Platform.
+   - Build one freshness-aware payment/attempt detail that reconciles processor,
+     decision, feature, rule/model, review, label, dispute, webhook, and ledger
+     evidence without turning the projection into source truth.
+2. **Analyst Investigation Workspace And Business Insights**
+   - Product DRI: Risk Operations and Product Design.
+   - Technical DRI: Risk Platform.
+   - Add related-transaction pivots, unified case timeline, bounded bulk
+     actions, queue productivity, SLA/outcome analysis, saved views, and
+     merchant/risk performance insights over Phase 5 projections.
+3. **Developer Contract, OpenAPI, SDK, And Sandbox**
+   - Product DRI: Developer Experience.
+   - Technical DRI: Payments Core.
+   - Add generated OpenAPI, API-version visibility, complete error catalogue,
+     onboarding quickstart, idempotency/webhook examples, one supported
+     SDK/reference client, and contract tests that require no source reading.
+4. **Workspace Trust And Integrated Closure**
+   - Product DRI: Product Design.
+   - Technical DRI: Security/Platform.
+   - Prove role/accessibility, memory-only credentials, loading/empty/partial/
+     stale/permission/dependency states, safe links, browser routing, tenant
+     isolation, and all public workflows together.
 
-Done when:
+Phase 6 is done only when an analyst can investigate and act from one coherent
+freshness-aware workflow, a merchant developer can integrate from published
+contracts alone, the UI does not duplicate or contradict Phase 4.5 operations,
+and every `VP-004`, `VP-005`, and `VP-016` gap assigned to Phase 6 has exact
+API/browser/demo and real-database evidence.
 
-- Model score is stored with version and reasons.
-- Rules-only fallback works on model timeout.
-- Evaluation avoids future leakage.
-- Candidate model has model card, dataset card, segment report, replay report,
-  and rollback target.
-- An interrupted generator run can resume or terminate with an explicit cleanup
-  disposition, and retries do not duplicate payment, fraud, or label truth.
-- Every generated training/evaluation row carries the trusted traffic origin
-  introduced by the Phase 4.5 owner slice.
+### Phase 7: Governed ML Baseline And Lifecycle
 
-### Phase 8: Analytics, Simulation, Graph
+Vision owners: `VP-002`, `VP-007`, and `VP-008`.
 
-Build:
+Entry gate: Phase 5 must provide a point-in-time dataset manifest and Phase 6
+must expose model explanation/failure states before active model influence.
 
-- ClickHouse analytics.
-- Rule simulation and approval workflow.
-- Risk policy simulation and approval workflow.
-- Neo4j entity graph.
-- Graph-derived investigation features.
-- Privacy-safe cross-merchant aggregate features.
+Named owner slices:
 
-Done when:
+1. **Dataset And Generator Governance**
+   - Primary DRI: ML/Data Platform.
+   - Extend the resolved Chapter 21 run substrate into scheduled/dataset-scale
+     synthetic generation with richer fraud types, delayed labels, stable
+     idempotency, trusted origin, cleanup disposition, dataset cards, data-
+     quality reports, and time-based leakage proof.
+2. **Baseline Evaluation And Calibration**
+   - Primary DRI: ML Architecture.
+   - Start with logistic regression; add boosted trees only after documented
+     error analysis. Prove precision/recall, false-positive cost, fraud captured,
+     calibration, threshold, imbalance, unknown labels, and merchant/segment
+     impact against a stable replay manifest.
+3. **Registry, Cards, And Reproducibility**
+   - Primary DRI: ML Platform.
+   - Add MLflow experiment/registry metadata, immutable dataset/model cards,
+     code/data/config digests, lineage, reproducible evaluation, promotion
+     eligibility, and explicit rollback target.
+4. **Shadow Model Serving And Timeout-Safe Decision Integration**
+   - Primary DRI: Risk Platform and ML Architecture.
+   - Record model/version/reasons/latency in shadow mode, validate bounded
+     serving, prove rules-only fallback for timeout/unavailable/invalid results,
+     and prevent model failure from inventing ALLOW or processor truth.
+5. **Unified Rule And Model Release Governance**
+   - Primary DRI: Risk Platform and ML Architecture.
+   - Compare rule/policy/model candidates on the same cohort; require creator/
+     approver separation, segment evidence, shadow/canary gates, champion/
+     challenger activation, audit, and rollback.
+6. **Model Drift And Integrated Closure**
+   - Primary DRI: ML Architecture and Security/Platform.
+   - Add feature, prediction, calibration, label/coverage, segment, and latency
+     drift monitoring with closed alerts and a public train-to-shadow-to-
+     promote-to-drift-to-rollback demo.
 
-- Rule simulation reports fraud captured, false positives, and business impact.
-- Rule activation requires approval.
-- Synthetic fraud rings are visible in graph investigation.
-- Cross-merchant features are aggregate/anonymized and cannot expose another
-  merchant's raw objects or identifiers.
+Phase 7 is done only when the model is a governed, explainable, timeout-safe
+signal inside the payment-risk product—not a notebook artifact—and every
+`VP-002`, `VP-007`, and `VP-008` completion claim has point-in-time, segment,
+fallback, registry, drift, human-approval, rollback, and public-demo proof.
 
-### Phase 9: Agents, Hardening, Scale
+### Phase 8: Network, Graph, Merchant, And Post-Authorization Intelligence
 
-Build:
+Vision owners: `VP-003`, `VP-006`, `VP-009`, `VP-012`, `VP-013`, `VP-014`,
+and `VP-015`.
 
-- Offline fraud intelligence agents.
-- Tool audit logs.
-- Model evaluator agent.
-- Rule recommendation agent.
-- Fraud explanation agent.
-- RBAC.
-- OpenTelemetry, Prometheus, Grafana.
-- Load testing.
-- CI/CD.
-- Blue-green deployment and rollback playbooks.
-- API versioning and compatibility checks.
-- Security runbooks for credential leakage, card-testing spikes, dispute spikes,
-  model regression, and merchant risk spikes.
-- **Webhook Worker Scaling And Egress Hardening** owner slice:
-  - Technical DRI: **Payments Core / Platform**.
-  - Replace or partition the bounded database worker only when measured queue
-    age or delivery volume requires it, and introduce managed egress controls
-    before multi-region webhook execution.
-  - Completion evidence must prove partition-safe claims, backpressure,
-    regional failover, controlled outbound destinations, and preservation of
-    Chapter 19 event identity, signature, attempt, and at-least-once semantics.
+Current truth: governed rule/policy simulation and approval already exist from
+Phase 4.5. Phase 8 extends evaluation to network, graph, merchant-exposure,
+identity, dispute, and post-authorization intelligence; it does not rebuild the
+same control workflow. ClickHouse is conditional on measured PostgreSQL SLO
+evidence, not a phase-completion trophy.
 
-Done when:
+Named owner slices:
 
-- Agents cannot mutate live payment/rule/model state directly.
-- Tool calls are audited.
-- p95/p99 latency is measured.
-- Blue and green versions can coexist.
-- API, event, model, rule, and database changes have compatibility and rollback
-  checks.
+1. **Analytics Scale Decision**
+   - Primary DRI: Data Platform.
+   - Benchmark Phase 5 PostgreSQL projections. Introduce ClickHouse only when a
+     recorded query/volume SLO breach and approved dual-store reconciliation,
+     retention, tenant, backfill, and rollback design justify it.
+2. **Privacy-Safe Network Aggregate Intelligence**
+   - Primary DRI: ML Architecture and Security/Platform.
+   - Freeze consent/scope, cohort minimums, contribution bounds, tenant opt-out,
+     temporal availability, reconstruction resistance, and explainable safe
+     degradation before any cross-merchant feature.
+3. **Explainable Graph Investigation And Features**
+   - Primary DRI: ML Architecture and Risk Platform.
+   - Add temporal/idempotent Neo4j ingestion, tenant/global scope, deletion,
+     fraud-ring discovery, path/neighbor explanations, and governed feature
+     contributions; reject opaque graph scores.
+4. **Merchant Underwriting, Exposure, Reserve, And Hold Simulation**
+   - Primary DRI: Merchant Risk and Payments Core.
+   - Add versioned underwriting cases, safe evidence, exposure calculation,
+     manager approval, merchant limits, balanced reserve/hold ledger simulation,
+     periodic review, release/escalation, and explicit non-real-settlement truth.
+5. **Advanced Identity, Session, And Bot Intelligence**
+   - Primary DRI: Risk Platform and Security/Privacy.
+   - Add governed account/login, device continuity, shipping mismatch,
+     behavioral/bot, and identity-resolution features with minimization,
+     rotation, retention, consent, point-in-time lineage, and safe fallback.
+6. **Friendly-Fraud And Representment Simulator**
+   - Primary DRI: Risk Operations and Payments Core.
+   - Extend current dispute evidence into reason-specific packets, pre-dispute
+     signals, friendly-fraud classification, simulated representment, outcomes,
+     and performance reporting. File evidence requires an approved document-
+     security boundary; network acceptance remains explicitly simulated.
+7. **Post-Authorization Strategy And Outcome Optimization**
+   - Primary DRI: Risk Operations and ML Architecture.
+   - Measure early-warning and recommendation eligibility, expected benefit/
+     loss, approval, money constraints, outcome, segment impact, and rollback;
+     preserve the original decision, label chronology, and ledger authority.
+8. **Network Intelligence Integrated Closure**
+   - Primary DRI: Founding Staff Engineering.
+   - Demonstrate a multi-merchant synthetic attack, merchant exposure action,
+     graph investigation, advanced identity signal, post-authorization action,
+     and friendly-fraud outcome without raw cross-tenant disclosure.
+
+Phase 8 is done only when every owned vision promise has privacy, temporal,
+tenant, explanation, approval, outcome, rebuild, and end-to-end demo evidence.
+Installing ClickHouse or Neo4j alone cannot close the phase.
+
+### Phase 9: Agents, Production Trust, And Scale
+
+Vision owners: `VP-001`, `VP-010`, `VP-011`, `VP-013`, and `VP-016`.
+Phase 9 is the production-readiness gate for `VP-020`–`VP-023`; it does not
+claim that a real merchant integration or customer outcome has already been
+proven.
+
+Named owner slices:
+
+1. **Hosted Identity And Platform RBAC**
+   - Primary DRI: Security/Platform.
+   - Replace local credential UX with hosted identity/SSO, least-privilege
+     merchant/platform roles, session controls, lifecycle, break glass, and
+     audited authorization without weakening tenant boundaries.
+2. **Observability, SLO, Load, And Recovery**
+   - Primary DRI: Security/Platform and SRE.
+   - Add OpenTelemetry, Prometheus/Grafana, p50/p95/p99/error/lag SLOs, capacity,
+     load/chaos, backup/restore, retention/deletion, incident drills, and
+     payment/fraud/data reconciliation after recovery.
+3. **Release Compatibility And External Integration Hardening**
+   - Primary DRI: Developer Experience and Payments Core.
+   - Enforce API/event/model/rule/database compatibility, CI/CD, blue-green/
+     canary rollout, rollback, SDK compatibility, and a versioned external PSP/
+     network adapter boundary without claiming real money or PCI certification.
+4. **Audited Fraud Intelligence Agents**
+   - Primary DRI: AI/ML Platform and Risk Operations.
+   - Add offline evaluator, rule/model recommendation, explanation, and case-
+     investigation agents with source citations, least-privilege tools,
+     tenant/privacy boundaries, evaluations, cost/latency limits, full audit,
+     and mandatory human approval.
+5. **Credential-Leak And Abuse Incident Readiness**
+   - Primary DRI: Security/Platform and Risk Platform.
+   - Rehearse API/runner/operator/webhook secret compromise, distributed card
+     testing, retry storms, dispute spikes, model regression, and merchant-risk
+     spikes with containment, rotation, recovery, and evidence preservation.
+6. **Measured Scaling And Egress Hardening**
+   - Primary DRI: Payments Core and Data Platform.
+   - Scale webhook/event/analytics workers or introduce multi-region topology
+     only after measured queue/lag/volume triggers. Prove partitioning,
+     backpressure, failover fencing, controlled egress, restore, and preserved
+     event/signature/idempotency semantics.
+7. **Production-Trust Integrated Closure**
+   - Primary DRI: Founding Staff Engineering.
+   - Prove agents cannot mutate live payment/rule/model state, humans approve
+     every high-risk action, blue/green versions coexist, incidents recover,
+     and all public compatibility and rollback contracts pass.
+
+Phase 9 is done only when THAAP can be operated safely under load, dependency
+failure, credential compromise, version rollout, agent error, and recovery
+without losing tenant, payment, fraud, model, event, or audit truth. Scale is
+triggered by evidence; it is not substituted for product completeness.
+
+### Phase 10: Merchant Integration, Pilot, And Measured Validation
+
+Vision owners: `VP-011`, `VP-016`, `VP-020`, `VP-021`, `VP-022`, and
+`VP-023`.
+
+Phase 10 converts production-shaped correctness into controlled production
+evidence. THAAP integrates beside an existing PSP and owns fraud intelligence,
+merchant controls, analyst operations, and outcome measurement. It does not
+initially own acquiring, authorization-network connectivity, settlement, or
+merchant funds.
+
+Entry gate:
+
+- Phase 9 production-trust closure is merge-ready.
+- One design partner, PSP, traffic boundary, data-processing purpose, success
+  baseline, safety budget, support owner, and exit/rollback plan are approved.
+- Security/privacy review confirms tokenized or PSP-native identifiers, no raw
+  PAN/CVV expansion, retention/deletion, regional/data-residency obligations,
+  incident communication, and subprocessor inventory.
+- The pilot may begin only in `SHADOW`; later modes require their own frozen
+  promises, invariant matrices, and merchant approval.
+
+Named owner slices:
+
+1. **External PSP Adapter And Provenance Contract**
+   - Primary DRI: Payments Core and Developer Experience.
+   - Implement one versioned PSP integration using authenticated webhooks,
+     event/API retrieval as needed, stable external identities, canonical
+     mapping, idempotent ingestion, ordering/duplication handling, replay,
+     reconciliation, rate-limit/backoff policy, and explicit external versus
+     THAAP-derived provenance.
+   - Processor ambiguity, missing/late events, PSP corrections, and adapter
+     version changes must never fabricate payment or outcome truth.
+2. **Hosted Merchant Onboarding And Risk Control Plane**
+   - Primary DRI: Product, Security/Platform, and Developer Experience.
+   - Deliver tenant provisioning, PSP connection verification, least-privilege
+     access, risk appetite and policy configuration, environment/mode status,
+     audit export, usage/support visibility, retention/deletion, offboarding,
+     and incident contact workflows.
+3. **Shadow Baseline And Decision Reconciliation**
+   - Primary DRI: Fraud/Risk Product and ML Architecture.
+   - Run THAAP decisions without influencing PSP behavior; reconcile eligible
+     traffic, exclusions, source freshness, decision latency, analyst actions,
+     delayed labels, PSP/merchant outcomes, and counterfactual limitations
+     against a pre-agreed baseline.
+4. **Advisory And Controlled Enforcement Progression**
+   - Primary DRI: Fraud/Risk Product, Payments Core, and Risk Operations.
+   - Promote from `SHADOW` to `ADVISORY` and, only when approved, narrowly
+     scoped `ENFORCED` behavior through dual control, traffic/segment caps,
+     latency and error budgets, merchant-owned thresholds, kill switch,
+     automatic safe fallback, rollback rehearsal, and immutable decision-mode
+     evidence.
+5. **Pilot Outcome Measurement And Causal Honesty**
+   - Primary DRI: Product Analytics and ML Architecture.
+   - Report fraud loss or fraud rate, false-positive/false-decline proxies,
+     approval rate, review workload, analyst turnaround, coverage, label delay,
+     decision latency, segment impact, and support burden with baseline window,
+     denominators, confidence, exclusions, seasonality, and experimental or
+     observational limitations visible.
+6. **Merchant Feedback And Intelligence Flywheel**
+   - Primary DRI: Risk Operations, ML Architecture, and Product.
+   - Convert merchant/analyst actions, disputes, refunds, confirmed fraud,
+     unknown outcomes, and integration-quality evidence into governed labels,
+     dataset/model/rule evaluation, and privacy-safe aggregate candidates
+     without cross-tenant disclosure or self-reinforcing label leakage.
+7. **Real-Merchant Pilot Closure**
+   - Primary DRI: Founding Staff Engineering and Founder.
+   - Reproduce one real merchant path from PSP event through THAAP decision,
+     explanation, analyst action, label, evaluation, and outcome report; prove
+     tenant/security/privacy/SLO/support/rollback evidence; record merchant
+     acceptance or an honest no-go result without rewriting the baseline.
+
+Phase 10 is done only when at least one real merchant integration has passed
+the approved pilot boundary and produced auditable outcome evidence. A working
+adapter, hosted deployment, or favorable dashboard alone cannot close the
+phase. A no-go pilot may close its experimental slice honestly, but it cannot
+satisfy THAAP's product-destination promise until the identified product gap is
+resolved and a later controlled pilot proves value.
 
 ## 18. Staff-Level Implementation Review Workflow
 
