@@ -33,5 +33,7 @@ class JacksonConfigurationTests {
                 tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)).isTrue();
         assertThat(mapper.isEnabled(
                 tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)).isFalse();
+        assertThat(mapper.isEnabled(
+                tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)).isTrue();
     }
 }

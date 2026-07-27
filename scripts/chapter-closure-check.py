@@ -63,13 +63,13 @@ def resolve_repo_path(value: str) -> pathlib.Path:
     return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
 
 
-def chapter_block(master_plan: str, chapter_number: str) -> str | None:
+def chapter_block(master_plan: str, chapter_coordinate: str) -> str | None:
     start_pattern = re.compile(
-        rf"(?m)^\d+\.\s+Chapter\s+{re.escape(chapter_number)}:")
+        rf"(?m)^\d+\.\s+Chapter\s+{re.escape(chapter_coordinate)}:")
     start = start_pattern.search(master_plan)
     if not start:
         return None
-    next_chapter = re.compile(r"(?m)^\d+\.\s+Chapter\s+\d+:").search(
+    next_chapter = re.compile(r"(?m)^\d+\.\s+Chapter\s+\d+[A-Z]?:").search(
         master_plan, start.end())
     end = next_chapter.start() if next_chapter else len(master_plan)
     return master_plan[start.start():end]
@@ -129,9 +129,11 @@ def validate_closure(
         errors.append(f"{dossier_path}: Chapter disagrees with the invariant matrix")
 
     chapter_number = metadata.get("Chapter number", "")
+    coordinate_match = re.search(r"\bChapter\s+(\d+[A-Z]?)\b", metadata.get("Chapter", ""))
+    chapter_coordinate = coordinate_match.group(1) if coordinate_match else chapter_number
     if not chapter_number.isdigit():
         errors.append(f"{dossier_path}: Chapter number must be numeric")
-    elif f"Chapter {chapter_number}" not in metadata.get("Chapter", ""):
+    elif not coordinate_match or not chapter_coordinate.startswith(chapter_number):
         errors.append(f"{dossier_path}: Chapter number disagrees with Chapter metadata")
 
     if PLACEHOLDER.search(dossier_text):
@@ -156,7 +158,8 @@ def validate_closure(
 
     if chapter_number:
         for entry_id, entry in escaped_entries(escaped_register_text):
-            if entry.get("Chapter") != chapter_number or entry.get("Status") == "RESOLVED":
+            if (entry.get("Chapter") not in {chapter_number, chapter_coordinate}
+                    or entry.get("Status") == "RESOLVED"):
                 continue
             severity = entry.get("Severity")
             frozen = entry.get("Frozen promise affected")
@@ -166,19 +169,19 @@ def validate_closure(
                     f"{entry.get('Status')} ({severity}, frozen promise {frozen})")
 
         complete_pattern = re.compile(
-            rf"\bChapter\s+{re.escape(chapter_number)}\s+is\s+complete\b",
+            rf"\bChapter\s+{re.escape(chapter_coordinate)}\s+is\s+complete\b",
             re.IGNORECASE)
         if not complete_pattern.search(readme_text):
             errors.append(
-                f"{dossier_path}: README.md does not mark Chapter {chapter_number} complete")
-        block = chapter_block(master_plan_text, chapter_number)
+                f"{dossier_path}: README.md does not mark Chapter {chapter_coordinate} complete")
+        block = chapter_block(master_plan_text, chapter_coordinate)
         if block is None:
             errors.append(
-                f"{dossier_path}: implementation master plan has no Chapter {chapter_number} block")
+                f"{dossier_path}: implementation master plan has no Chapter {chapter_coordinate} block")
         elif not re.search(r"(?m)^\s+Status:\s*complete\b", block, re.IGNORECASE):
             errors.append(
                 f"{dossier_path}: implementation master plan does not mark "
-                f"Chapter {chapter_number} complete")
+                f"Chapter {chapter_coordinate} complete")
     return errors
 
 

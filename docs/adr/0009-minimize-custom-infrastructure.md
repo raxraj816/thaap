@@ -48,6 +48,26 @@ heads, bounded wall-clock time, and local-loopback HTTP or allowlisted HTTPS.
 | Persistence | Reuse one immutable event payload and timestamp across retries |
 | Operations | Bounded logs/metrics; no URL, payload, signature, secret, PII, PAN, or CVV |
 
+### Chapter 42 verification-response extension
+
+Chapter 42 may extend the same final-response-head parser for endpoint
+verification. The extension remains deliberately narrower than a general
+header client: `WebhookHttpResponse` may return the status code plus one
+optional `THAAP-Webhook-Verification` token and nothing else.
+
+| Boundary | Chapter 42 verification contract |
+| --- | --- |
+| Proof meaning | Possession of the unpredictable token from THAAP's signed, endpoint-generation-bound challenge; HTTPS authenticates the receiver outside loopback simulator mode |
+| Field identity | HTTP field name is case-insensitive and must occur exactly once in the final response head; any duplicate in any casing is invalid |
+| Field value | Remove only leading/trailing HTTP SP/HTAB optional whitespace, then require exactly 43 ASCII base64url characters `[A-Za-z0-9_-]`; empty, padded, quoted, comma-joined, Unicode, control, or folded values are invalid |
+| Response sequence | Informational-response fields are discarded; only the final head can supply proof; verification additionally requires a final `2xx` status |
+| Representation boundary | The token must be in the named response field; bodies are never consumed, decoded, decompressed, parsed, or treated as proof |
+| Limits and timeout | Existing 8 KiB line, cumulative 32 KiB head, informational-count, socket timeout, and total deadline limits apply unchanged |
+| Redirect/address/TLS | Redirects remain final non-success responses; validated all-address policy, pinned connect address, original authority, SNI, and certificate identity remain unchanged |
+| Persistence | Raw token exists only in request/response transit and process memory; PostgreSQL stores a SHA-256 hash and terminal closed result, never response bytes |
+| Operations | Logs, metrics, audit, errors, and API/UI responses exclude raw token, hash, headers, URL, signature, and payload |
+| Replacement trigger | The existing managed-egress/mTLS/multi-region trigger still applies; any second response field, response body, content coding, authentication scheme, or general HTTP method requires replacing or separately re-justifying this transport |
+
 ## Consequences
 
 - New custom HTTP, crypto, queue, scheduler, or concurrency machinery is blocked
@@ -55,6 +75,9 @@ heads, bounded wall-clock time, and local-loopback HTTP or allowlisted HTTPS.
 - The Chapter 19 transport has an intentionally narrow feature set. HTTP/2,
   proxying, redirects, decompression, response bodies, and general client
   behavior remain outside it.
+- Chapter 42's single verification field does not broaden the transport into a
+  header collection API. Ambiguous duplicates and malformed token
+  representations fail the entire exchange.
 - Revisit the transport before shared non-local merchant onboarding, when
   managed egress, proxy policy, mTLS, multi-region routing, or operational
   volume makes a mature client/egress service the safer boundary.

@@ -2,10 +2,21 @@ package com.thaap.payments.webhook;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
+import com.thaap.payments.risk.RiskOperatorContext;
+import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperatorService;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
@@ -23,9 +34,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
@@ -37,8 +50,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -78,7 +94,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     @Autowired
     private WebhookSecretCipher secretCipher;
 
-    @Autowired
+    @MockitoSpyBean
     private WebhookEndpointSecretService endpointSecretService;
 
     @Autowired
@@ -109,6 +125,21 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     private WebhookDeliveryFinalizationService finalizationService;
 
     @Autowired
+    private WebhookOperationsService operationsService;
+
+    @Autowired
+    private RiskOperatorService riskOperatorService;
+
+    @MockitoSpyBean
+    private WebhookEndpointVerificationService verificationService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockitoBean
+    private WebhookHttpTransport transport;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Autowired
@@ -131,6 +162,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     @BeforeEach
     void cleanDatabase() {
         databaseCleaner.clean();
+        reset(transport);
     }
 
     @Test
@@ -888,6 +920,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                             UPDATE webhook_deliveries
                             SET status = 'DELIVERING',
                                 attempt_count = 1,
+                                generation_attempt_count = 1,
                                 last_attempt_at = ?,
                                 claim_token = ?,
                                 lease_expires_at = ?
@@ -934,6 +967,281 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         assertThat(meterRegistry.counter("thaap.webhook.failures",
                 "event.type", "refund.created", "error.code", "ENDPOINT_DISABLED").count() - disabledBefore)
                 .isZero();
+    }
+
+    @Test
+    void forcedRedeliveryBeforeDisableSerializesEndpointThenDeliveryAndLeavesNoSendableWork()
+            throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("redelivery-disable-order", "thaap_redelivery_disable_order"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "redelivery-disable-order", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult endpoint = endpointService.create(
+                context, "redelivery-disable-create", "http://127.0.0.1:9191/redelivery-disable",
+                Set.of("refund.created"), "redelivery-disable-create");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", UUID.randomUUID()));
+        WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
+        delivery.exhaustWithoutClaim(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+        deliveryRepository.saveAndFlush(delivery);
+        CountDownLatch redeliveryOwnsLocks = new CountDownLatch(1);
+        CountDownLatch releaseRedelivery = new CountDownLatch(1);
+        CountDownLatch disableStarted = new CountDownLatch(1);
+        AtomicInteger disableBackendPid = new AtomicInteger();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> redelivery = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    operationsService.redeliver(context, delivery.getId(),
+                            WebhookRedeliveryReason.RECEIVER_REPAIRED, "redelivery-first");
+                    redeliveryOwnsLocks.countDown();
+                    await(releaseRedelivery);
+                });
+                return null;
+            });
+            assertThat(redeliveryOwnsLocks.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            awaitEndpointLockConflict(endpoint.endpoint().getId());
+
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    disableBackendPid.set(currentBackendPid());
+                    disableStarted.countDown();
+                    endpointService.disable(context, endpoint.endpoint().getId(), "disable-second");
+                });
+                return null;
+            });
+            assertThat(disableStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            awaitBackendLockWait(disableBackendPid.get());
+
+            releaseRedelivery.countDown();
+            redelivery.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            disable.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            releaseRedelivery.countDown();
+        }
+
+        WebhookDelivery reconciled = deliveryRepository.findById(delivery.getId()).orElseThrow();
+        assertThat(reconciled.getDeliveryGeneration()).isEqualTo(2);
+        assertThat(reconciled.getGenerationAttemptCount()).isZero();
+        assertThat(reconciled.getStatus()).isEqualTo(WebhookDeliveryStatus.EXHAUSTED);
+        assertThat(reconciled.getLastErrorCode()).isEqualTo(WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM webhook_redelivery_requests
+                 WHERE webhook_delivery_id = ? AND requested_generation = 2
+                """, Integer.class, delivery.getId())).isOne();
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE webhook_redelivery_requests SET request_reason = 'MANUAL_RETRY'
+                 WHERE webhook_delivery_id = ?
+                """, delivery.getId()))
+                .hasMessageContaining("Webhook operation history is append-only");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE webhook_deliveries SET delivery_generation = 4 WHERE id = ?
+                """, delivery.getId()))
+                .hasMessageContaining("Invalid webhook manual redelivery generation transition");
+        assertThat(claimService.claimDue(Instant.now().plusSeconds(60), 10)).isEmpty();
+    }
+
+    @Test
+    void forcedOperatorDisableBeforeRedeliveryRejectsAuthenticatedInFlightAndFutureRequests()
+            throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("operator-disable-redelivery", "thaap_operator_disable_redelivery"));
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult endpoint = endpointService.create(
+                merchantContext, "operator-disable-redelivery-endpoint",
+                "http://127.0.0.1:9191/operator-disable-redelivery",
+                Set.of("refund.created"), "operator-disable-redelivery-endpoint");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                deliveryService.createDeliveriesInCurrentTransaction(
+                        merchant.getId(), "refund.created", UUID.randomUUID()));
+        WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
+        delivery.exhaustWithoutClaim(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+        deliveryRepository.saveAndFlush(delivery);
+        RiskOperatorService.CreationResult manager = riskOperatorService.create(
+                merchantContext, "operator-disable-redelivery-manager",
+                RiskOperatorRole.RISK_MANAGER, "operator-disable-redelivery-manager");
+        RiskOperatorContext managerContext = new RiskOperatorContext(
+                merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
+                manager.operator().getRole(), manager.credentialPrefix());
+        CountDownLatch disableOwnsActorLock = new CountDownLatch(1);
+        CountDownLatch releaseDisable = new CountDownLatch(1);
+        CountDownLatch redeliveryStarted = new CountDownLatch(1);
+        AtomicInteger redeliveryBackendPid = new AtomicInteger();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    riskOperatorService.disable(merchantContext, manager.operator().getId(),
+                            "operator-disable-redelivery-disable");
+                    disableOwnsActorLock.countDown();
+                    await(releaseDisable);
+                });
+                return null;
+            });
+            assertThat(disableOwnsActorLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRiskOperatorLockConflict(manager.operator().getId());
+
+            Future<?> redelivery = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        redeliveryBackendPid.set(currentBackendPid());
+                        redeliveryStarted.countDown();
+                        operationsService.redeliver(managerContext, delivery.getId(),
+                                WebhookRedeliveryReason.RECEIVER_REPAIRED,
+                                "operator-disable-redelivery-in-flight");
+                    }));
+            assertThat(redeliveryStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitBackendLockWait(redeliveryBackendPid.get());
+
+            releaseDisable.countDown();
+            disable.get(5, TimeUnit.SECONDS);
+            assertNotFound(redelivery);
+        } finally {
+            releaseDisable.countDown();
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM risk_operators WHERE id = ?", String.class,
+                manager.operator().getId())).isEqualTo("DISABLED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT disabled_at IS NOT NULL FROM risk_operator_credentials
+                 WHERE merchant_id = ? AND risk_operator_id = ?
+                """, Boolean.class, merchant.getId(), manager.operator().getId())).isTrue();
+        WebhookDelivery unchanged = deliveryRepository.findById(delivery.getId()).orElseThrow();
+        assertThat(unchanged.getStatus()).isEqualTo(WebhookDeliveryStatus.EXHAUSTED);
+        assertThat(unchanged.getDeliveryGeneration()).isOne();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM webhook_redelivery_requests",
+                Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_logs
+                 WHERE action = 'webhook.redelivery.requested'
+                """, Integer.class)).isZero();
+        assertThatThrownBy(() -> operationsService.redeliver(managerContext, delivery.getId(),
+                WebhookRedeliveryReason.RECEIVER_REPAIRED,
+                "operator-disable-redelivery-future"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        assertThat(endpointRepository.findById(endpoint.endpoint().getId()).orElseThrow().isActive())
+                .isTrue();
+    }
+
+    @Test
+    void verificationHttpRunsWithoutDatabaseLocksAndRotationFencesItsFinalization()
+            throws Exception {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("verification-rotation-fence", "thaap_verification_rotation_fence"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "verification-rotation-fence", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult endpoint = endpointService.create(
+                context, "verification-rotation-create",
+                "http://127.0.0.1:9191/verification-rotation",
+                Set.of("refund.created"), "verification-rotation-create");
+        CountDownLatch httpStarted = new CountDownLatch(1);
+        CountDownLatch releaseHttp = new CountDownLatch(1);
+        when(transport.send(any())).thenAnswer(invocation -> {
+            WebhookHttpRequest request = invocation.getArgument(0);
+            String token = objectMapper.readTree(request.payload()).get("challenge").asText();
+            httpStarted.countDown();
+            await(releaseHttp);
+            return new WebhookHttpResponse(204, token);
+        });
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<WebhookEndpointVerificationService.ChallengeView> verification = executor.submit(() ->
+                    verificationService.verify(context, endpoint.endpoint().getId(),
+                            "verification-rotation-key", "verification-rotation-request"));
+            assertThat(httpStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+            endpointService.rotateSecret(
+                    context, endpoint.endpoint().getId(), "rotation-during-verification");
+            releaseHttp.countDown();
+
+            WebhookEndpointVerificationService.ChallengeView result =
+                    verification.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(result.lifecycleStatus()).isEqualTo(WebhookEndpointVerificationStatus.FAILED);
+            assertThat(result.failureCode()).isEqualTo("ENDPOINT_CHANGED");
+        } finally {
+            releaseHttp.countDown();
+        }
+
+        assertThat(endpointRepository.findById(endpoint.endpoint().getId()).orElseThrow()
+                .getVerificationStatus()).isEqualTo(WebhookEndpointVerificationStatus.NOT_REQUESTED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM webhook_endpoint_verification_events
+                 WHERE event_type = 'FAILED' AND outcome_code = 'ENDPOINT_CHANGED'
+                """, Integer.class)).isOne();
+        UUID verificationId = jdbcTemplate.queryForObject("""
+                SELECT id FROM webhook_endpoint_verifications
+                 WHERE webhook_endpoint_id = ?
+                """, UUID.class, endpoint.endpoint().getId());
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE webhook_endpoint_verifications SET failure_code = 'TOKEN_MISMATCH'
+                 WHERE id = ?
+                """, verificationId))
+                .hasMessageContaining("Terminal webhook endpoint verification is immutable");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                DELETE FROM webhook_endpoint_verification_events
+                 WHERE webhook_endpoint_verification_id = ?
+                """, verificationId))
+                .hasMessageContaining("Webhook operation history is append-only");
+    }
+
+    @Test
+    void terminalVerificationWinnerAfterSigningRevokesDispatchBeforeAnyNetworkSideEffect() {
+        Merchant merchant = merchantRepository.saveAndFlush(
+                new Merchant("verification-terminal-fence", "thaap_verification_terminal_fence"));
+        MerchantContext context = new MerchantContext(
+                merchant.getId(), "verification-terminal-fence", merchant.getApiKeyPrefix());
+        WebhookEndpointService.EndpointSecretResult endpoint = endpointService.create(
+                context, "verification-terminal-create",
+                "http://127.0.0.1:9191/verification-terminal",
+                Set.of("refund.created"), "verification-terminal-create");
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+
+        doAnswer(invocation -> {
+            WebhookEndpointVerificationService.PreparedChallenge prepared =
+                    invocation.getArgument(1);
+            Instant terminalAt = Instant.now();
+            transaction.executeWithoutResult(status -> {
+                jdbcTemplate.update("""
+                        UPDATE webhook_endpoints
+                           SET verification_status = 'EXPIRED', pending_verification_id = NULL
+                         WHERE merchant_id = ? AND id = ?
+                        """, merchant.getId(), prepared.endpointId());
+                jdbcTemplate.update("""
+                        UPDATE webhook_endpoint_verifications
+                           SET lifecycle_status = 'EXPIRED', failure_code = 'EXPIRED', completed_at = ?
+                         WHERE merchant_id = ? AND id = ?
+                        """, java.sql.Timestamp.from(terminalAt), merchant.getId(), prepared.id());
+                jdbcTemplate.update("""
+                        INSERT INTO webhook_endpoint_verification_events
+                            (id, merchant_id, webhook_endpoint_verification_id,
+                             event_sequence, event_type, outcome_code, occurred_at)
+                        VALUES (?, ?, ?, 2, 'EXPIRED', 'EXPIRED', ?)
+                        """, UUID.randomUUID(), merchant.getId(), prepared.id(),
+                        java.sql.Timestamp.from(terminalAt));
+            });
+            return invocation.callRealMethod();
+        }).when(verificationService).acquireDispatchPermit(
+                eq(merchant.getId()),
+                any(WebhookEndpointVerificationService.PreparedChallenge.class));
+
+        WebhookEndpointVerificationService.ChallengeView result = verificationService.verify(
+                context, endpoint.endpoint().getId(),
+                "verification-terminal-key", "verification-terminal-request");
+
+        assertThat(result.lifecycleStatus()).isEqualTo(WebhookEndpointVerificationStatus.EXPIRED);
+        assertThat(result.failureCode()).isEqualTo("EXPIRED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT dispatch_started_at IS NULL
+                  FROM webhook_endpoint_verifications
+                 WHERE id = ?
+                """, Boolean.class, result.id())).isTrue();
+        verify(endpointSecretService).signForDelivery(eq(merchant.getId()),
+                eq(endpoint.endpoint().getId()), any(UUID.class), any(String.class),
+                any(Instant.class), any(WebhookSigner.class));
+        verifyNoInteractions(transport);
     }
 
     private void awaitEndpointLockConflict(UUID endpointId) throws Exception {
@@ -1040,6 +1348,28 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         throw new AssertionError("Expected endpoint creation record lock was not observed");
     }
 
+    private void awaitRiskOperatorLockConflict(UUID operatorId) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            try (Connection connection = dataSource.getConnection();
+                    PreparedStatement statement = connection.prepareStatement("""
+                            SELECT id FROM risk_operators WHERE id = ? FOR UPDATE NOWAIT
+                            """)) {
+                connection.setAutoCommit(false);
+                statement.setObject(1, operatorId);
+                statement.executeQuery();
+                connection.rollback();
+            } catch (SQLException exception) {
+                if ("55P03".equals(exception.getSQLState())) {
+                    return;
+                }
+                throw exception;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Expected risk operator row lock was not observed");
+    }
+
     private void awaitCreationRecordLockWait() throws Exception {
         long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
@@ -1105,6 +1435,20 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
             Thread.sleep(10);
         }
         throw new AssertionError("Competing PostgreSQL transaction did not wait on the expected lock");
+    }
+
+    private void assertNotFound(Future<?> future) throws Exception {
+        try {
+            future.get(5, TimeUnit.SECONDS);
+            throw new AssertionError("Expected disabled-actor operation to fail");
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            while (cause.getCause() != null && !(cause instanceof ResponseStatusException)) {
+                cause = cause.getCause();
+            }
+            assertThat(cause).isInstanceOf(ResponseStatusException.class);
+            assertThat(((ResponseStatusException) cause).getStatusCode().value()).isEqualTo(404);
+        }
     }
 
     private void await(CountDownLatch latch) {

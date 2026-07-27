@@ -10,6 +10,9 @@ import com.thaap.payments.authorization.AuthorizationStatus;
 import com.thaap.payments.authorization.AuthorizationVoid;
 import com.thaap.payments.authorization.AuthorizationVoidRepository;
 import com.thaap.payments.customer.CustomerRepository;
+import com.thaap.payments.controls.ActiveAuthoredRuleEvaluator;
+import com.thaap.payments.controls.AuthoredRuleAssessment;
+import com.thaap.payments.controls.AuthoredRuleDecisionAggregator;
 import com.thaap.payments.fraud.ConfirmDecision;
 import com.thaap.payments.fraud.ConfirmDecisionEngine;
 import com.thaap.payments.fraud.FeatureMaterializationMetrics;
@@ -129,6 +132,8 @@ public class PaymentIntentController {
     private final MerchantRiskPolicyDecisionAggregator merchantRiskPolicyDecisionAggregator;
     private final RequestRateLimitService requestRateLimitService;
     private final CardTestingIncidentService cardTestingIncidentService;
+    private final ActiveAuthoredRuleEvaluator activeAuthoredRuleEvaluator;
+    private final AuthoredRuleDecisionAggregator authoredRuleDecisionAggregator;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
@@ -150,7 +155,9 @@ public class PaymentIntentController {
             MerchantRiskPolicyEvaluator merchantRiskPolicyEvaluator,
             MerchantRiskPolicyDecisionAggregator merchantRiskPolicyDecisionAggregator,
             RequestRateLimitService requestRateLimitService,
-            CardTestingIncidentService cardTestingIncidentService) {
+            CardTestingIncidentService cardTestingIncidentService,
+            ActiveAuthoredRuleEvaluator activeAuthoredRuleEvaluator,
+            AuthoredRuleDecisionAggregator authoredRuleDecisionAggregator) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -182,6 +189,8 @@ public class PaymentIntentController {
         this.merchantRiskPolicyDecisionAggregator = merchantRiskPolicyDecisionAggregator;
         this.requestRateLimitService = requestRateLimitService;
         this.cardTestingIncidentService = cardTestingIncidentService;
+        this.activeAuthoredRuleEvaluator = activeAuthoredRuleEvaluator;
+        this.authoredRuleDecisionAggregator = authoredRuleDecisionAggregator;
     }
 
     @PostMapping
@@ -257,13 +266,17 @@ public class PaymentIntentController {
                 merchantRiskConfiguration.riskTier(), decisionStartedAt);
         MerchantPolicyAssessment merchantPolicyAssessment = merchantRiskPolicyEvaluator.evaluate(
                 merchantRiskConfiguration, materializedFeatures, paymentIntent.getCurrency());
+        AuthoredRuleAssessment authoredRuleAssessment = activeAuthoredRuleEvaluator.evaluate(
+                merchantContext.merchantId(), paymentMethod, materializedFeatures, decisionStartedAt);
         long engineStartedNanos = System.nanoTime();
         ConfirmDecision decision;
         try {
             ConfirmDecision baseDecision = confirmDecisionEngine.decide(materializedFeatures.decisionFeatureContext());
             ConfirmDecision velocityDecision = velocityDecisionAggregator.aggregate(baseDecision, velocityAssessment);
             ConfirmDecision listDecision = fraudListDecisionAggregator.aggregate(velocityDecision, fraudListAssessment);
-            decision = merchantRiskPolicyDecisionAggregator.aggregate(listDecision, merchantPolicyAssessment);
+            ConfirmDecision policyDecision = merchantRiskPolicyDecisionAggregator.aggregate(
+                    listDecision, merchantPolicyAssessment);
+            decision = authoredRuleDecisionAggregator.aggregate(policyDecision, authoredRuleAssessment);
         } catch (RuntimeException exception) {
             fraudDecisionMetrics.recordFailure("EVALUATION", "ENGINE_FAILURE");
             throw exception;
@@ -274,7 +287,7 @@ public class PaymentIntentController {
         Instant decisionCompletedAt = Instant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
         FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, materializedFeatures,
-                fraudListAssessment, merchantPolicyAssessment, decision, latencyMs,
+                fraudListAssessment, merchantPolicyAssessment, authoredRuleAssessment, decision, latencyMs,
                 decisionStartedAt, decisionCompletedAt);
         if (riskContext != null) {
             riskContext.attachFraudDecision(fraudDecision.getId());
@@ -337,7 +350,8 @@ public class PaymentIntentController {
 
     private FraudDecision persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
             MaterializedFeatureSet materializedFeatures, FraudListAssessment fraudListAssessment,
-            MerchantPolicyAssessment merchantPolicyAssessment, ConfirmDecision decision, long latencyMs,
+            MerchantPolicyAssessment merchantPolicyAssessment, AuthoredRuleAssessment authoredRuleAssessment,
+            ConfirmDecision decision, long latencyMs,
             Instant decisionStartedAt, Instant decisionCompletedAt) {
         // IdempotencyService keeps lineage, attempt mutation, authorization, and completion in one transaction.
         // A later failure rolls these writes back together instead of leaving partial confirm evidence.
@@ -371,6 +385,8 @@ public class PaymentIntentController {
             merchantRiskPolicyEvaluator.persist(merchantPolicyAssessment, paymentAttempt,
                     fraudDecision.getId(), materializedFeatures, decisionCompletedAt,
                     paymentAttempt.getTrafficOrigin());
+            activeAuthoredRuleEvaluator.persist(authoredRuleAssessment, paymentAttempt,
+                    fraudDecision.getId(), decisionCompletedAt);
             return fraudDecision;
         } catch (RuntimeException exception) {
             featureMaterializationMetrics.recordFailure("PERSISTENCE", "LINEAGE_WRITE_FAILED");

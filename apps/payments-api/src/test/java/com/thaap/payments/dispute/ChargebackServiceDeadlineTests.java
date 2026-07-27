@@ -86,7 +86,8 @@ class ChargebackServiceDeadlineTests {
                 mock(FraudDecisionRepository.class), chargebackRepository,
                 mock(DisputeOffsetAllocationRepository.class), evidenceRepository,
                 mock(FraudLabelRepository.class), mock(LedgerService.class), mock(AuditLogService.class),
-                mock(WebhookDeliveryService.class), mock(ChargebackMetrics.class), clock);
+                mock(WebhookDeliveryService.class), mock(ChargebackMetrics.class),
+                mock(DisputeWorkflowInitializer.class), clock);
         return new Fixture(service, new MerchantContext(merchantId, "deadline", "sk_test"),
                 chargeback, evidenceRepository);
     }

@@ -111,6 +111,11 @@ class ReviewResolutionAndLabelContractTests {
 
         assertThat(resolved.get("outcome").asText()).isEqualTo("CANCEL_AND_REPORT_FRAUD");
         assertThat(resolved.get("label").get("fraudType").asText()).isEqualTo("ACCOUNT_TAKEOVER");
+        assertThat(resolved.get("label").get("taxonomyVersion").asText())
+                .isEqualTo("fraud_taxonomy_v1");
+        assertThat(jdbcTemplate.queryForObject("SELECT taxonomy_version FROM fraud_labels WHERE id = ?",
+                String.class, UUID.fromString(resolved.get("label").get("id").asText())))
+                .isEqualTo("fraud_taxonomy_v1");
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM payment_intents WHERE id = ?",
                 String.class, review.paymentIntentId())).isEqualTo("CANCELED");
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM payment_attempts WHERE id = ?",

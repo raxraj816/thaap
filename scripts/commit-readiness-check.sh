@@ -114,6 +114,13 @@ else
   echo "SKIP closure dossier for trivial work; provide both chapter artifacts to validate closure."
 fi
 
+if [[ "$invariant_matrix" == *"CHAPTER_43_INVARIANT_PROOF_MATRIX.md" \
+   || "$invariant_matrix" == *"CHAPTER_43R_INVARIANT_PROOF_MATRIX.md" ]]; then
+  echo
+  echo "Checking every inherited Phase 4.5 chapter closure..."
+  scripts/phase-closure-check.py
+fi
+
 if [[ "$invariant_matrix" == *"CHAPTER_21_INVARIANT_PROOF_MATRIX.md" ]]; then
   echo
   echo "Checking five independent Chapter 21 state-machine reviews..."

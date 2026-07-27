@@ -136,7 +136,7 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
         requestSent[0] = true;
 
         BufferedInputStream input = new BufferedInputStream(socket.getInputStream());
-        return new WebhookHttpResponse(readFinalStatusCode(input));
+        return readFinalResponse(input);
     }
 
     private String requestTarget(URI uri) {
@@ -151,16 +151,17 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
         return path;
     }
 
-    private int readFinalStatusCode(BufferedInputStream input) throws IOException {
+    private WebhookHttpResponse readFinalResponse(BufferedInputStream input) throws IOException {
         ResponseHeadBudget budget = new ResponseHeadBudget(MAX_RESPONSE_HEAD_BYTES);
         for (int informationalResponses = 0;
                 informationalResponses <= MAX_INFORMATIONAL_RESPONSES;
                 informationalResponses++) {
             String statusLine = readLine(input, budget);
             int statusCode = parseStatusCode(statusLine);
-            discardResponseHeaders(input, budget);
+            String verificationToken = readResponseHeaders(
+                    input, budget, statusCode >= 200 && statusCode <= 299);
             if (statusCode >= 200) {
-                return statusCode;
+                return new WebhookHttpResponse(statusCode, verificationToken);
             }
             if (informationalResponses == MAX_INFORMATIONAL_RESPONSES) {
                 throw new IOException("Webhook target returned too many informational responses");
@@ -194,16 +195,50 @@ public class SocketWebhookHttpTransport implements WebhookHttpTransport {
                 SocketWebhookHttpTransport::isValidResponseTextCharacter);
     }
 
-    private void discardResponseHeaders(BufferedInputStream input, ResponseHeadBudget budget) throws IOException {
+    private String readResponseHeaders(BufferedInputStream input, ResponseHeadBudget budget,
+            boolean captureVerification) throws IOException {
+        String verificationToken = null;
         while (true) {
             String headerLine = readLine(input, budget);
             if (headerLine.isEmpty()) {
-                return;
+                return verificationToken;
             }
             if (!isValidResponseHeaderLine(headerLine)) {
                 throw new IOException("Webhook target returned an invalid HTTP header field");
             }
+            int separator = headerLine.indexOf(':');
+            String fieldName = headerLine.substring(0, separator);
+            if (captureVerification
+                    && fieldName.equalsIgnoreCase("THAAP-Webhook-Verification")) {
+                if (verificationToken != null) {
+                    throw new IOException("Webhook target returned duplicate verification fields");
+                }
+                verificationToken = requireVerificationToken(
+                        headerLine.substring(separator + 1));
+            }
         }
+    }
+
+    private String requireVerificationToken(String fieldValue) throws IOException {
+        int start = 0;
+        int end = fieldValue.length();
+        while (start < end && (fieldValue.charAt(start) == ' '
+                || fieldValue.charAt(start) == '\t')) {
+            start++;
+        }
+        while (end > start && (fieldValue.charAt(end - 1) == ' '
+                || fieldValue.charAt(end - 1) == '\t')) {
+            end--;
+        }
+        String token = fieldValue.substring(start, end);
+        if (token.length() != 43 || !token.chars().allMatch(character ->
+                (character >= 'A' && character <= 'Z')
+                || (character >= 'a' && character <= 'z')
+                || (character >= '0' && character <= '9')
+                || character == '_' || character == '-')) {
+            throw new IOException("Webhook target returned an invalid verification field");
+        }
+        return token;
     }
 
     static boolean isValidResponseHeaderLine(String headerLine) {

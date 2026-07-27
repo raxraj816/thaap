@@ -56,23 +56,25 @@ public class WebhookDeliveryFinalizationService {
                 state.attempt().markOutcomeUnknown(completedAt, errorCode);
                 if (endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED) {
                     state.delivery().exhaust(claim.claimToken(), WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
-                } else if (retryPolicy.isExhausted(claim.attemptNumber())) {
+                } else if (retryPolicy.isExhausted(claim.generationAttemptNumber())) {
                     state.delivery().exhaust(claim.claimToken(), errorCode);
                 } else {
                     state.delivery().scheduleRetry(claim.claimToken(),
-                            completedAt.plus(retryPolicy.delayBeforeNextAttempt(claim.attemptNumber())), errorCode);
+                            completedAt.plus(retryPolicy.delayBeforeNextAttempt(
+                                    claim.generationAttemptNumber())), errorCode);
                 }
             } else if (endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED) {
                 state.attempt().failTerminally(completedAt, requestSent, responseStatus,
                         WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
                 state.delivery().exhaust(claim.claimToken(), WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
-            } else if (retryPolicy.isExhausted(claim.attemptNumber())) {
+            } else if (retryPolicy.isExhausted(claim.generationAttemptNumber())) {
                 state.attempt().failTerminally(completedAt, requestSent, responseStatus, errorCode);
                 state.delivery().exhaust(claim.claimToken(), errorCode);
             } else {
                 state.attempt().failRetryably(completedAt, requestSent, responseStatus, errorCode);
                 state.delivery().scheduleRetry(claim.claimToken(),
-                        completedAt.plus(retryPolicy.delayBeforeNextAttempt(claim.attemptNumber())), errorCode);
+                        completedAt.plus(retryPolicy.delayBeforeNextAttempt(
+                                claim.generationAttemptNumber())), errorCode);
             }
             return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
@@ -81,12 +83,18 @@ public class WebhookDeliveryFinalizationService {
     public WebhookDeliveryFinalizationResult failTerminally(
             WebhookDeliveryClaim claim, Instant completedAt,
             WebhookDeliveryErrorCode errorCode) {
+        return failTerminally(claim, completedAt, false, null, errorCode);
+    }
+
+    public WebhookDeliveryFinalizationResult failTerminally(
+            WebhookDeliveryClaim claim, Instant completedAt, boolean requestSent,
+            Integer responseStatus, WebhookDeliveryErrorCode errorCode) {
         return finalizationTransaction.execute(status -> {
             ClaimState state = loadCurrentClaim(claim);
             if (state == null) {
                 return WebhookDeliveryFinalizationResult.stale();
             }
-            state.attempt().failTerminally(completedAt, false, null, errorCode);
+            state.attempt().failTerminally(completedAt, requestSent, responseStatus, errorCode);
             state.delivery().exhaust(claim.claimToken(), errorCode);
             return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });

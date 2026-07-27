@@ -30,6 +30,24 @@ public class WebhookDeliveryAttempt {
     @Column(name = "attempt_number", nullable = false)
     private int attemptNumber;
 
+    @Column(name = "delivery_generation", nullable = false)
+    private int deliveryGeneration;
+
+    @Column(name = "generation_attempt_number", nullable = false)
+    private int generationAttemptNumber;
+
+    @Column(name = "dispatch_source", nullable = false, length = 32)
+    private String dispatchSource;
+
+    @Column(name = "event_payload_sha256", nullable = false, length = 64)
+    private String eventPayloadSha256;
+
+    @Column(name = "signing_secret_generation")
+    private UUID signingSecretGeneration;
+
+    @Column(name = "redelivery_request_id")
+    private UUID redeliveryRequestId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private WebhookAttemptOutcome outcome;
@@ -60,10 +78,24 @@ public class WebhookDeliveryAttempt {
     }
 
     public WebhookDeliveryAttempt(UUID merchantId, UUID webhookDeliveryId, int attemptNumber, Instant startedAt) {
+        this(merchantId, webhookDeliveryId, attemptNumber, 1, attemptNumber,
+                "AUTOMATIC_RETRY", null, null, null, startedAt);
+    }
+
+    public WebhookDeliveryAttempt(UUID merchantId, UUID webhookDeliveryId, int attemptNumber,
+            int deliveryGeneration, int generationAttemptNumber, String dispatchSource,
+            String eventPayloadSha256, UUID signingSecretGeneration,
+            UUID redeliveryRequestId, Instant startedAt) {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.webhookDeliveryId = webhookDeliveryId;
         this.attemptNumber = attemptNumber;
+        this.deliveryGeneration = deliveryGeneration;
+        this.generationAttemptNumber = generationAttemptNumber;
+        this.dispatchSource = dispatchSource;
+        this.eventPayloadSha256 = eventPayloadSha256;
+        this.signingSecretGeneration = signingSecretGeneration;
+        this.redeliveryRequestId = redeliveryRequestId;
         this.outcome = WebhookAttemptOutcome.IN_PROGRESS;
         this.httpRequestSent = false;
         this.startedAt = startedAt;
@@ -125,6 +157,30 @@ public class WebhookDeliveryAttempt {
 
     public int getAttemptNumber() {
         return attemptNumber;
+    }
+
+    public int getDeliveryGeneration() {
+        return deliveryGeneration;
+    }
+
+    public int getGenerationAttemptNumber() {
+        return generationAttemptNumber;
+    }
+
+    public String getDispatchSource() {
+        return dispatchSource;
+    }
+
+    public String getEventPayloadSha256() {
+        return eventPayloadSha256;
+    }
+
+    public UUID getSigningSecretGeneration() {
+        return signingSecretGeneration;
+    }
+
+    public UUID getRedeliveryRequestId() {
+        return redeliveryRequestId;
     }
 
     public WebhookAttemptOutcome getOutcome() {

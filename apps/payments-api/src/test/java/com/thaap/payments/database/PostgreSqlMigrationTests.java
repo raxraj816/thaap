@@ -2,21 +2,42 @@ package com.thaap.payments.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
 
+import com.thaap.payments.monitoring.MerchantRiskMonitoringQueryService;
+import com.thaap.payments.monitoring.MerchantRiskMonitoringHealthIndicator;
+import com.thaap.payments.monitoring.MerchantRiskMonitoringCohortService;
+import com.thaap.payments.monitoring.MerchantRiskMetricCode;
+import com.thaap.payments.monitoring.MerchantRiskMonitoringReadProbe;
+import com.thaap.payments.monitoring.MerchantRiskMonitoringQueryService.MonitoringRequest;
+import com.thaap.payments.monitoring.MerchantRiskMonitoringQueryService.SummaryView;
+import com.thaap.payments.monitoring.MonitoringCoverageStatus;
+import com.thaap.payments.monitoring.MonitoringTrafficOriginPolicy;
+import com.thaap.payments.risk.RiskOperatorContext;
+import com.thaap.payments.risk.RiskOperatorRole;
+import java.time.Instant;
+import java.sql.Timestamp;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -31,6 +52,18 @@ class PostgreSqlMigrationTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MerchantRiskMonitoringQueryService monitoringQueryService;
+
+    @Autowired
+    private MerchantRiskMonitoringHealthIndicator monitoringHealthIndicator;
+
+    @Autowired
+    private MerchantRiskMonitoringCohortService monitoringCohortService;
+
+    @MockitoBean
+    private MerchantRiskMonitoringReadProbe monitoringReadProbe;
 
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
@@ -57,6 +90,97 @@ class PostgreSqlMigrationTests {
                   AND description = 'add refunds and refund ledger lineage'
                   AND success = TRUE
                 """, Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('50', '51')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('52', '53')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('54', '55')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('56', '57', '58')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('59', '60')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('61', '62')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version IN ('63', '64')
+                  AND success = TRUE
+                """, Integer.class)).isEqualTo(2);
+        assertThat(columnExists("webhook_deliveries", "delivery_generation")).isTrue();
+        assertThat(columnExists("webhook_delivery_attempts", "generation_attempt_number")).isTrue();
+        assertThat(columnExists("webhook_endpoints", "verification_status")).isTrue();
+        assertThat(indexExists("webhook_deliveries", "idx_webhook_deliveries_dead_letters")).isTrue();
+        assertThat(indexExists("webhook_endpoint_verifications", "idx_webhook_verifications_expiry")).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_webhook_deliveries_generation_protected',
+                                  'trg_webhook_delivery_attempts_history_protected',
+                                  'trg_webhook_redelivery_requests_append_only',
+                                  'trg_webhook_verification_events_append_only',
+                                  'trg_webhook_endpoint_verifications_protected')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(5);
+        assertThat(columnExists("developer_scenario_runs", "specification_digest")).isTrue();
+        assertThat(columnExists("developer_scenario_steps", "resource_id")).isTrue();
+        assertThat(indexExists("developer_scenario_runs", "idx_developer_scenario_runs_expired_lease")).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_developer_scenario_runs_protected',
+                                  'trg_developer_scenario_steps_protected',
+                                  'trg_developer_scenario_events_append_only')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(3);
+        assertThat(columnExists("dispute_workflows", "submitted_evidence_version_id")).isTrue();
+        assertThat(columnExists("dispute_evidence_versions", "evidence_digest")).isTrue();
+        assertThat(columnExists("dispute_outcomes", "source_attestation")).isTrue();
+        assertThat(indexExists("dispute_workflows", "idx_dispute_workflows_expiry")).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM dispute_reason_deadline_definitions
+                 WHERE catalogue_version = 'dispute_deadlines_v1'
+                """, Integer.class)).isEqualTo(8);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_dispute_reason_deadline_definitions_append_only',
+                                  'trg_dispute_evidence_versions_append_only',
+                                  'trg_dispute_outcomes_append_only',
+                                  'trg_dispute_workflow_events_append_only',
+                                  'trg_dispute_workflows_protected_history')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(5);
+        assertThat(columnExists("authored_rule_versions", "canonical_rule_json")).isTrue();
+        assertThat(columnExists("risk_safety_exception_versions", "subject_identity_hmac")).isTrue();
+        assertThat(columnExists("authored_rule_evaluations", "applied_exception_version_id")).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT character_maximum_length FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'authored_rule_events'
+                   AND column_name = 'event_type'
+                """, Integer.class)).isEqualTo(20);
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM flyway_schema_history
@@ -163,6 +287,482 @@ class PostgreSqlMigrationTests {
         assertThat(columnExists("webhook_events", "payload_sha256")).isTrue();
         assertThat(columnExists("webhook_delivery_attempts", "attempt_number")).isTrue();
         assertThat(columnExists("webhook_endpoints", "operational_status")).isTrue();
+        assertThat(columnExists("merchant_risk_metric_snapshots", "result_sha256")).isTrue();
+        assertThat(columnExists("merchant_risk_profile_recommendations", "metric_snapshot_id")).isTrue();
+        assertThat(columnExists("review_saved_searches", "canonical_filter_json")).isTrue();
+        assertThat(columnExists("review_notes", "ciphertext")).isTrue();
+        assertThat(columnExists("review_notes", "retention_expires_at")).isTrue();
+        assertThat(columnExists("review_note_redaction_events", "review_note_id")).isTrue();
+        assertThat(columnExists("risk_simulation_runs", "candidate_digest")).isTrue();
+        assertThat(columnExists("risk_simulation_results", "label_outcome")).isTrue();
+        assertThat(columnExists("risk_simulation_reports", "report_digest")).isTrue();
+        assertThat(columnExists("batch_job_execution", "job_instance_id")).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM fraud_taxonomy_definitions
+                WHERE taxonomy_version = 'fraud_taxonomy_v1'
+                """, Integer.class)).isEqualTo(18);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname = 'trg_new_fraud_label_taxonomy' AND NOT tgisinternal
+                """, Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_review_notes_protected_history',
+                                  'trg_review_note_redaction_events_append_only',
+                                  'trg_review_note_redaction_event_semantics')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_risk_simulation_runs_protected_history',
+                                  'trg_risk_simulation_results_append_only',
+                                  'trg_risk_simulation_reports_append_only',
+                                  'trg_risk_simulation_terminal_semantics')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_trigger
+                 WHERE tgname IN ('trg_authored_rule_versions_protected_history',
+                                  'trg_risk_safety_exception_versions_protected_history',
+                                  'trg_authored_rule_events_append_only',
+                                  'trg_risk_safety_exception_events_append_only',
+                                  'trg_authored_rule_evaluations_append_only')
+                   AND NOT tgisinternal
+                """, Integer.class)).isEqualTo(5);
+        assertThat(monitoringHealthIndicator.health().getStatus()).isEqualTo(Status.UP);
+    }
+
+    @Test
+    void webhookOperationsMigrationPreservesRetainedDeliveryHistory() {
+        String schema = "webhook_operations_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        DriverManagerDataSource upgradeDataSource = new DriverManagerDataSource();
+        upgradeDataSource.setDriverClassName("org.postgresql.Driver");
+        upgradeDataSource.setUrl(POSTGRES.getJdbcUrl());
+        upgradeDataSource.setUsername(POSTGRES.getUsername());
+        upgradeDataSource.setPassword(POSTGRES.getPassword());
+        JdbcTemplate upgradeJdbcTemplate = new JdbcTemplate(upgradeDataSource);
+        upgradeJdbcTemplate.execute("CREATE SCHEMA " + schema);
+
+        try {
+            UUID merchantId = UUID.randomUUID();
+            UUID endpointId = UUID.randomUUID();
+            UUID eventId = UUID.randomUUID();
+            UUID deliveryId = UUID.randomUUID();
+            UUID attemptId = UUID.randomUUID();
+            UUID signingGeneration = UUID.randomUUID();
+            UUID resourceId = UUID.randomUUID();
+            String payload = "{\"id\":\"" + resourceId + "\",\"type\":\"payment_intent.created\"}";
+            String payloadDigest = "a".repeat(64);
+
+            migrateSchema(upgradeDataSource, schema, "40");
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.merchants
+                        (id, name, status, api_key_prefix, api_key_hash, created_at)
+                    VALUES (?, 'retained-webhook-merchant', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), merchantId, "retained-webhook-" + merchantId);
+            migrateSchema(upgradeDataSource, schema, "62");
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_endpoints (
+                        id, merchant_id, url, operational_status,
+                        signing_secret_prefix, signing_secret_hash,
+                        signing_secret_generation, created_at)
+                    VALUES (?, ?, 'https://retained.example/webhooks', 'DISABLED',
+                            'whsec_', ?, ?, CURRENT_TIMESTAMP)
+                    """.formatted(schema), endpointId, merchantId,
+                    "b".repeat(64), signingGeneration);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_events (
+                        id, merchant_id, event_type, resource_id, resource_type,
+                        api_version, payload, payload_sha256, traffic_origin,
+                        occurred_at, created_at)
+                    VALUES (?, ?, 'payment_intent.created', ?, 'PAYMENT_INTENT',
+                            'v1', ?, ?, 'MERCHANT_API', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """.formatted(schema), eventId, merchantId, resourceId, payload, payloadDigest);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_deliveries (
+                        id, merchant_id, webhook_endpoint_id, webhook_event_id,
+                        event_type, resource_id, status, attempt_count,
+                        next_attempt_at, last_attempt_at, delivered_at,
+                        last_error_code, claim_token, lease_expires_at, created_at)
+                    VALUES (?, ?, ?, ?, 'payment_intent.created', ?, 'EXHAUSTED', 1,
+                            NULL, CURRENT_TIMESTAMP, NULL, 'HTTP_NON_SUCCESS', NULL, NULL,
+                            CURRENT_TIMESTAMP)
+                    """.formatted(schema), deliveryId, merchantId, endpointId, eventId, resourceId);
+            upgradeJdbcTemplate.update("""
+                    INSERT INTO %s.webhook_delivery_attempts (
+                        id, merchant_id, webhook_delivery_id, attempt_number, outcome,
+                        http_request_sent, dispatch_started_at, response_status, error_code,
+                        started_at, completed_at, latency_ms)
+                    VALUES (?, ?, ?, 1, 'TERMINAL_FAILURE', TRUE, CURRENT_TIMESTAMP,
+                            400, 'HTTP_NON_SUCCESS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 8)
+                    """.formatted(schema), attemptId, merchantId, deliveryId);
+
+            Map<String, Object> deliveryBefore = upgradeJdbcTemplate.queryForMap("""
+                    SELECT id, merchant_id, webhook_endpoint_id, webhook_event_id,
+                           status, attempt_count, last_error_code
+                    FROM %s.webhook_deliveries WHERE id = ?
+                    """.formatted(schema), deliveryId);
+            Map<String, Object> attemptBefore = upgradeJdbcTemplate.queryForMap("""
+                    SELECT id, merchant_id, webhook_delivery_id, attempt_number,
+                           outcome, http_request_sent, response_status, error_code, latency_ms
+                    FROM %s.webhook_delivery_attempts WHERE id = ?
+                    """.formatted(schema), attemptId);
+
+            migrateSchema(upgradeDataSource, schema, "64");
+
+            assertThat(upgradeJdbcTemplate.queryForMap("""
+                    SELECT id, merchant_id, webhook_endpoint_id, webhook_event_id,
+                           status, attempt_count, last_error_code
+                    FROM %s.webhook_deliveries WHERE id = ?
+                    """.formatted(schema), deliveryId)).isEqualTo(deliveryBefore);
+            assertThat(upgradeJdbcTemplate.queryForMap("""
+                    SELECT id, merchant_id, webhook_delivery_id, attempt_number,
+                           outcome, http_request_sent, response_status, error_code, latency_ms
+                    FROM %s.webhook_delivery_attempts WHERE id = ?
+                    """.formatted(schema), attemptId)).isEqualTo(attemptBefore);
+            assertThat(upgradeJdbcTemplate.queryForMap("""
+                    SELECT delivery_generation, generation_attempt_count
+                    FROM %s.webhook_deliveries WHERE id = ?
+                    """.formatted(schema), deliveryId)).containsEntry("delivery_generation", 1)
+                    .containsEntry("generation_attempt_count", 1);
+            assertThat(upgradeJdbcTemplate.queryForMap("""
+                    SELECT delivery_generation, generation_attempt_number, dispatch_source,
+                           event_payload_sha256, signing_secret_generation, redelivery_request_id
+                    FROM %s.webhook_delivery_attempts WHERE id = ?
+                    """.formatted(schema), attemptId))
+                    .containsEntry("delivery_generation", 1)
+                    .containsEntry("generation_attempt_number", 1)
+                    .containsEntry("dispatch_source", "AUTOMATIC_RETRY")
+                    .containsEntry("event_payload_sha256", payloadDigest)
+                    .containsEntry("signing_secret_generation", null)
+                    .containsEntry("redelivery_request_id", null);
+            assertThat(upgradeJdbcTemplate.queryForMap("""
+                    SELECT verification_status, pending_verification_id, verified_url,
+                           verified_signing_secret_generation, verified_at
+                    FROM %s.webhook_endpoints WHERE id = ?
+                    """.formatted(schema), endpointId))
+                    .containsEntry("verification_status", "NOT_REQUESTED")
+                    .containsEntry("pending_verification_id", null)
+                    .containsEntry("verified_url", null)
+                    .containsEntry("verified_signing_secret_generation", null)
+                    .containsEntry("verified_at", null);
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".webhook_redelivery_requests",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".webhook_endpoint_verifications",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('63', '64') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+        } finally {
+            upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void governedRuleDefinitionsAndLifecycleEventsAreProtectedByPostgreSql() {
+        UUID merchantId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        UUID ruleId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'governed-control-proof', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "governed-control-" + merchantId);
+        jdbcTemplate.update("""
+                INSERT INTO risk_operators (
+                    id, merchant_id, operator_code, role, status, lifecycle_epoch,
+                    created_by_api_key_prefix, created_at)
+                VALUES (?, ?, 'governed-control-manager', 'RISK_MANAGER', 'ACTIVE', 1,
+                        'thaap_', CURRENT_TIMESTAMP)
+                """, operatorId, merchantId);
+        jdbcTemplate.update("""
+                INSERT INTO authored_rule_versions (
+                    id, merchant_id, rule_code, display_name, version_number, schema_version,
+                    canonical_rule_json, rule_digest, candidate_action, reason_code,
+                    feature_catalogue_version, lifecycle_status, projection_version,
+                    created_by_operator_id, created_at)
+                VALUES (?, ?, 'POSTGRES_PROOF', 'PostgreSQL proof', 1, 'authored_rule_v1',
+                        '{"feature":"payment.amount_minor","operator":"GTE","value":100}',
+                        ?, 'BLOCK', 'AUTHORED_RULE_MATCH', 'v1', 'DRAFT', 0, ?, CURRENT_TIMESTAMP)
+                """, ruleId, merchantId, "1".repeat(64), operatorId);
+        jdbcTemplate.update("""
+                INSERT INTO authored_rule_events (
+                    id, merchant_id, rule_version_id, event_type, actor_operator_id, occurred_at)
+                VALUES (?, ?, ?, 'CREATED', ?, CURRENT_TIMESTAMP)
+                """, eventId, merchantId, ruleId, operatorId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE authored_rule_versions SET display_name = 'mutated' WHERE id = ?
+                """, ruleId)).hasMessageContaining("Authored rule immutable identity cannot change");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE authored_rule_versions SET projection_version = 2 WHERE id = ?
+                """, ruleId)).hasMessageContaining("lifecycle transition is invalid");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE authored_rule_events SET event_type = 'SUBMITTED' WHERE id = ?
+                """, eventId)).hasMessageContaining("Governed control evidence is append-only");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                DELETE FROM authored_rule_events WHERE id = ?
+                """, eventId)).hasMessageContaining("Governed control evidence is append-only");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT display_name FROM authored_rule_versions WHERE id = ?
+                """, String.class, ruleId)).isEqualTo("PostgreSQL proof");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT event_type FROM authored_rule_events WHERE id = ?
+                """, String.class, eventId)).isEqualTo("CREATED");
+    }
+
+    @Test
+    void merchantRiskMonitoringHistoryIsImmutableAndSyntheticSnapshotsCannotRecommendProfiles() {
+        UUID merchantId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        UUID liveSnapshotId = UUID.randomUUID();
+        UUID syntheticSnapshotId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'monitoring-migration-proof', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "monitoring-" + merchantId);
+        jdbcTemplate.update("""
+                INSERT INTO risk_operators (
+                    id, merchant_id, operator_code, role, status, lifecycle_epoch,
+                    created_by_api_key_prefix, created_at)
+                VALUES (?, ?, 'monitoring-proof-manager', 'RISK_MANAGER', 'ACTIVE', 1,
+                        'thaap_', CURRENT_TIMESTAMP)
+                """, operatorId, merchantId);
+        insertMonitoringSnapshot(liveSnapshotId, merchantId, operatorId, "MERCHANT_API_ONLY");
+        insertMonitoringSnapshot(syntheticSnapshotId, merchantId, operatorId, "INCLUDE_SYNTHETIC");
+
+        jdbcTemplate.update("""
+                INSERT INTO merchant_risk_profile_recommendations (
+                    id, merchant_id, metric_snapshot_id, recommended_tier,
+                    reason_metric_code, reason_code, created_at)
+                VALUES (?, ?, ?, 'ELEVATED', 'ENUMERATION_RATIO',
+                        'FRAUD_EXPOSURE_CHANGE', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, liveSnapshotId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO merchant_risk_profile_recommendations (
+                    id, merchant_id, metric_snapshot_id, recommended_tier,
+                    reason_metric_code, reason_code, created_at)
+                VALUES (?, ?, ?, 'HIGH', 'ENUMERATION_RATIO',
+                        'FRAUD_EXPOSURE_CHANGE', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, syntheticSnapshotId))
+                .hasMessageContaining("Profile recommendation requires a live-only metric snapshot");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE merchant_risk_metric_snapshots
+                   SET result_json = '{\"changed\":true}'
+                 WHERE id = ?
+                """, liveSnapshotId))
+                .hasMessageContaining("Merchant risk monitoring history is append-only");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                DELETE FROM fraud_taxonomy_definitions
+                 WHERE taxonomy_version = 'fraud_taxonomy_v1'
+                   AND source_type = 'FRAUD_TYPE'
+                   AND source_code = 'CARD_TESTING'
+                """))
+                .hasMessageContaining("Merchant risk monitoring history is append-only");
+    }
+
+    @Test
+    void merchantRiskMonitoringQueriesBindOriginPolicyExplicitlyOnPostgreSql() {
+        UUID merchantId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, 'monitoring-query-proof', 'ACTIVE', 'thaap_', ?, CURRENT_TIMESTAMP)
+                """, merchantId, "monitoring-query-" + merchantId);
+        RiskOperatorContext context = new RiskOperatorContext(merchantId, operatorId,
+                "monitoring-query-viewer", RiskOperatorRole.VIEWER, "risk_");
+        Instant asOf = Instant.now().minusSeconds(1);
+
+        SummaryView liveOnly = monitoringQueryService.summary(context,
+                new MonitoringRequest(asOf.minusSeconds(3600), asOf, asOf,
+                        MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY));
+        SummaryView withSynthetic = monitoringQueryService.summary(context,
+                new MonitoringRequest(asOf.minusSeconds(3600), asOf, asOf,
+                        MonitoringTrafficOriginPolicy.INCLUDE_SYNTHETIC));
+
+        assertThat(liveOnly.metrics()).hasSize(9);
+        assertThat(withSynthetic.metrics()).hasSize(9);
+        assertThat(liveOnly.trafficOriginPolicy())
+                .isEqualTo(MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY);
+        assertThat(withSynthetic.trafficOriginPolicy())
+                .isEqualTo(MonitoringTrafficOriginPolicy.INCLUDE_SYNTHETIC);
+        for (MerchantRiskMetricCode metricCode : MerchantRiskMetricCode.values()) {
+            MerchantRiskMonitoringCohortService.CohortPage page = monitoringCohortService.cohort(
+                    context, metricCode,
+                    new MonitoringRequest(asOf.minusSeconds(3600), asOf, asOf,
+                            MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY),
+                    10, null);
+            int expectedRows = metricCode == MerchantRiskMetricCode.VOLUME_SPIKE_RATIO ? 7 : 0;
+            assertThat(page.rows()).hasSize(expectedRows);
+        }
+    }
+
+    @Test
+    void merchantRiskMonitoringUsesOneRepeatableReadSnapshotWithoutBlockingPaymentProgress()
+            throws Exception {
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        UUID paymentMethodId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        Instant asOf = Instant.now().minusSeconds(1);
+        insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
+                paymentIntentId, asOf.minusSeconds(3600));
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                1, "APPROVED", asOf.minusSeconds(30));
+        RiskOperatorContext context = new RiskOperatorContext(merchantId, UUID.randomUUID(),
+                "monitoring-consistency-viewer", RiskOperatorRole.VIEWER, "risk_");
+        MonitoringRequest request = new MonitoringRequest(asOf.minusSeconds(60), asOf, asOf,
+                MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY);
+        CountDownLatch denominatorRead = new CountDownLatch(1);
+        CountDownLatch continueRead = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            MerchantRiskMetricCode metricCode = invocation.getArgument(1);
+            if (metricCode == MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE) {
+                denominatorRead.countDown();
+                assertThat(continueRead.await(10, TimeUnit.SECONDS)).isTrue();
+            }
+            return null;
+        }).when(monitoringReadProbe).afterAuthorizationDenominator(
+                merchantId, MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            CompletableFuture<SummaryView> read = CompletableFuture.supplyAsync(
+                    () -> monitoringQueryService.summary(context, request), executor);
+            assertThat(denominatorRead.await(10, TimeUnit.SECONDS)).isTrue();
+
+            insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                    2, "DECLINED", asOf.minusSeconds(20));
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM authorizations WHERE merchant_id = ?
+                    """, Integer.class, merchantId)).isEqualTo(2);
+            continueRead.countDown();
+
+            SummaryView summary = read.get(10, TimeUnit.SECONDS);
+            MerchantRiskMonitoringQueryService.MetricResult approval = summary.metrics().stream()
+                    .filter(metric -> metric.metricCode()
+                            == MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE)
+                    .findFirst().orElseThrow();
+            MerchantRiskMonitoringQueryService.MetricResult decline = summary.metrics().stream()
+                    .filter(metric -> metric.metricCode()
+                            == MerchantRiskMetricCode.PROCESSOR_DECLINE_RATE)
+                    .findFirst().orElseThrow();
+            assertThat(approval.numerator()).isEqualTo(1);
+            assertThat(approval.denominator()).isEqualByComparingTo("1");
+            assertThat(decline.numerator()).isZero();
+            assertThat(decline.denominator()).isEqualByComparingTo("1");
+        } finally {
+            continueRead.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void merchantRiskAuthorizationFormulaUsesExactHalfOpenBoundaryAndOriginPolicy() {
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        UUID paymentMethodId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        Instant asOf = Instant.now().minusSeconds(1);
+        Instant windowStart = asOf.minusSeconds(60);
+        insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
+                paymentIntentId, windowStart.minusSeconds(60));
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                1, "APPROVED", windowStart.minusNanos(1_000));
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                2, "APPROVED", windowStart);
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                3, "DECLINED", asOf.minusNanos(1_000));
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                4, "APPROVED", asOf);
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                5, "APPROVED", windowStart.plusSeconds(1), "SYNTHETIC_SCENARIO");
+        RiskOperatorContext context = new RiskOperatorContext(merchantId, UUID.randomUUID(),
+                "monitoring-boundary-viewer", RiskOperatorRole.VIEWER, "risk_");
+
+        MerchantRiskMonitoringQueryService.MetricResult live = monitoringQueryService.metric(
+                context, MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE,
+                new MonitoringRequest(windowStart, asOf, asOf,
+                        MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY));
+        MerchantRiskMonitoringQueryService.MetricResult combined = monitoringQueryService.metric(
+                context, MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE,
+                new MonitoringRequest(windowStart, asOf, asOf,
+                        MonitoringTrafficOriginPolicy.INCLUDE_SYNTHETIC));
+
+        assertThat(live.numerator()).isEqualTo(1);
+        assertThat(live.denominator()).isEqualByComparingTo("2");
+        assertThat(live.value()).isEqualByComparingTo("0.500000");
+        assertThat(combined.numerator()).isEqualTo(2);
+        assertThat(combined.denominator()).isEqualByComparingTo("3");
+        assertThat(combined.value()).isEqualByComparingTo("0.666667");
+
+        MonitoringRequest liveRequest = new MonitoringRequest(windowStart, asOf, asOf,
+                MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY);
+        MerchantRiskMonitoringCohortService.CohortPage firstPage = monitoringCohortService.cohort(
+                context, MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE,
+                liveRequest, 1, null);
+        assertThat(firstPage.rows()).hasSize(1);
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        MerchantRiskMonitoringCohortService.CohortPage secondPage = monitoringCohortService.cohort(
+                context, MerchantRiskMetricCode.AUTHORIZATION_APPROVAL_RATE,
+                liveRequest, 1, firstPage.nextCursor());
+        assertThat(secondPage.rows()).hasSize(1);
+        assertThat(secondPage.nextCursor()).isNull();
+        List<MerchantRiskMonitoringCohortService.CohortRow> exactCohort = Stream.concat(
+                firstPage.rows().stream(), secondPage.rows().stream()).toList();
+        assertThat(exactCohort).extracting(
+                        MerchantRiskMonitoringCohortService.CohortRow::occurredAt)
+                .containsExactly(windowStart, asOf.minusNanos(1_000));
+        assertThat(exactCohort.stream().filter(
+                MerchantRiskMonitoringCohortService.CohortRow::numeratorMember).count())
+                .isEqualTo(live.numerator());
+        assertThat(exactCohort.stream().filter(
+                MerchantRiskMonitoringCohortService.CohortRow::denominatorMember).count())
+                .isEqualTo(live.denominator().longValueExact());
+    }
+
+    @Test
+    void monitoringDoesNotTurnPendingOrUndecidedAttemptsIntoFraudOrEnumerationDenominators() {
+        UUID merchantId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        UUID paymentMethodId = UUID.randomUUID();
+        UUID paymentIntentId = UUID.randomUUID();
+        Instant asOf = Instant.now().minusSeconds(1);
+        Instant windowStart = asOf.minusSeconds(60);
+        insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
+                paymentIntentId, windowStart.minusSeconds(60));
+        insertMonitoringAttempt(merchantId, paymentMethodId, paymentIntentId,
+                1, "READY_FOR_PROCESSOR", "MERCHANT_API", windowStart.plusSeconds(1));
+        RiskOperatorContext context = new RiskOperatorContext(merchantId, UUID.randomUUID(),
+                "monitoring-coverage-viewer", RiskOperatorRole.VIEWER, "risk_");
+        MonitoringRequest request = new MonitoringRequest(windowStart, asOf, asOf,
+                MonitoringTrafficOriginPolicy.MERCHANT_API_ONLY);
+
+        MerchantRiskMonitoringQueryService.MetricResult confirmedFraud =
+                monitoringQueryService.metric(context,
+                        MerchantRiskMetricCode.CONFIRMED_FRAUD_RATE, request);
+        MerchantRiskMonitoringQueryService.MetricResult enumeration =
+                monitoringQueryService.metric(context,
+                        MerchantRiskMetricCode.ENUMERATION_RATIO, request);
+
+        assertThat(confirmedFraud.numerator()).isZero();
+        assertThat(confirmedFraud.denominator()).isEqualByComparingTo("0");
+        assertThat(confirmedFraud.value()).isNull();
+        assertThat(confirmedFraud.coverageStatus())
+                .isEqualTo(MonitoringCoverageStatus.NO_ELIGIBLE_DATA);
+        assertThat(enumeration.numerator()).isZero();
+        assertThat(enumeration.denominator()).isEqualByComparingTo("0");
+        assertThat(enumeration.value()).isNull();
+        assertThat(enumeration.coverageStatus())
+                .isEqualTo(MonitoringCoverageStatus.NO_ELIGIBLE_DATA);
+        assertThat(monitoringCohortService.cohort(context,
+                MerchantRiskMetricCode.CONFIRMED_FRAUD_RATE, request, 10, null).rows()).isEmpty();
+        assertThat(monitoringCohortService.cohort(context,
+                MerchantRiskMetricCode.ENUMERATION_RATIO, request, 10, null).rows()).isEmpty();
     }
 
     @Test
@@ -1650,9 +2250,168 @@ class PostgreSqlMigrationTests {
                     SELECT COUNT(*) FROM %s.flyway_schema_history
                     WHERE version = '49' AND success = TRUE
                     """.formatted(schema), Integer.class)).isOne();
+
+            migrateSchema(upgradeDataSource, schema, "51");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".fraud_taxonomy_definitions",
+                    Integer.class)).isEqualTo(18);
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".merchant_risk_metric_snapshots",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".merchant_risk_profile_recommendations",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('50', '51') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+
+            migrateSchema(upgradeDataSource, schema, "53");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".review_saved_searches",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".review_notes",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".review_note_redaction_events",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('52', '53') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
+
+            migrateSchema(upgradeDataSource, schema, "55");
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".risk_simulation_runs",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".risk_simulation_results",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + schema + ".batch_job_instance",
+                    Integer.class)).isZero();
+            assertThat(upgradeJdbcTemplate.queryForList("""
+                    SELECT review.id, review.payment_intent_id, review.payment_attempt_id,
+                           review.fraud_decision_id, review.decision_action, review.status,
+                           review.reason_codes, review.traffic_origin, review.cancellation_reason,
+                           review.created_at, review.updated_at, review.canceled_at,
+                           decision.action, decision.risk_score, decision.ruleset_version
+                    FROM %s.manual_review_cases review
+                    JOIN %s.fraud_decisions decision ON decision.id = review.fraud_decision_id
+                    ORDER BY review.status
+                    """.formatted(schema, schema))).isEqualTo(historicalRows);
+            assertThat(upgradeJdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM %s.flyway_schema_history
+                    WHERE version IN ('54', '55') AND success = TRUE
+                    """.formatted(schema), Integer.class)).isEqualTo(2);
         } finally {
             upgradeJdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
+    }
+
+    private void insertMonitoringSnapshot(UUID snapshotId, UUID merchantId, UUID operatorId,
+            String trafficOriginPolicy) {
+        jdbcTemplate.update("""
+                INSERT INTO merchant_risk_metric_snapshots (
+                    id, merchant_id, created_by_operator_id, definition_version,
+                    window_start, window_end, as_of, traffic_origin_policy,
+                    result_json, result_sha256, created_at)
+                VALUES (?, ?, ?, 'merchant_risk_metrics_v1',
+                        CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP, ?, '{}', ?, CURRENT_TIMESTAMP)
+                """, snapshotId, merchantId, operatorId, trafficOriginPolicy, "a".repeat(64));
+    }
+
+    private void insertMonitoringPaymentFixture(UUID merchantId, UUID customerId,
+            UUID paymentMethodId, UUID paymentIntentId, Instant createdAt) {
+        String unique = merchantId.toString();
+        Timestamp timestamp = Timestamp.from(createdAt);
+        jdbcTemplate.update("""
+                INSERT INTO merchants (id, name, status, api_key_prefix, api_key_hash, created_at)
+                VALUES (?, ?, 'ACTIVE', 'thaap_', ?, ?)
+                """, merchantId, "monitoring-consistency-" + unique,
+                "monitoring-consistency-" + unique, timestamp);
+        jdbcTemplate.update("""
+                INSERT INTO customers (id, merchant_id, email_hash, created_at)
+                VALUES (?, ?, ?, ?)
+                """, customerId, merchantId, "monitoring-email-" + unique, timestamp);
+        jdbcTemplate.update("""
+                INSERT INTO payment_methods (
+                    id, merchant_id, customer_id, type, token, card_fingerprint,
+                    card_bin, card_last4, card_funding, card_country, created_at)
+                VALUES (?, ?, ?, 'CARD', ?, ?, '424242', '4242', 'CREDIT', 'US', ?)
+                """, paymentMethodId, merchantId, customerId, "monitoring-token-" + unique,
+                "monitoring-fingerprint-" + unique, timestamp);
+        jdbcTemplate.update("""
+                INSERT INTO payment_intents (
+                    id, merchant_id, customer_id, amount, currency, capture_method, status,
+                    metadata, traffic_origin, created_at, updated_at)
+                VALUES (?, ?, ?, 1200, 'USD', 'MANUAL', 'PROCESSING', '{}',
+                        'MERCHANT_API', ?, ?)
+                """, paymentIntentId, merchantId, customerId, timestamp, timestamp);
+    }
+
+    private void insertMonitoringAuthorization(UUID merchantId, UUID paymentMethodId,
+            UUID paymentIntentId, int attemptNumber, String status, Instant createdAt) {
+        insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
+                attemptNumber, status, createdAt, "MERCHANT_API");
+    }
+
+    private void insertMonitoringAuthorization(UUID merchantId, UUID paymentMethodId,
+            UUID paymentIntentId, int attemptNumber, String status, Instant createdAt,
+            String trafficOrigin) {
+        UUID attemptId = insertMonitoringAttempt(merchantId, paymentMethodId, paymentIntentId,
+                attemptNumber, "READY_FOR_PROCESSOR", trafficOrigin, createdAt);
+        Timestamp timestamp = Timestamp.from(createdAt);
+        long authorizedAmount = "APPROVED".equals(status) ? 1200 : 0;
+        jdbcTemplate.update("""
+                INSERT INTO authorizations (
+                    id, merchant_id, payment_attempt_id, processor, processor_reference_id,
+                    processor_response_code, network_status, requested_amount, authorized_amount,
+                    currency, status, cvc_check, avs_line1_check, avs_postal_code_check,
+                    three_ds_result, simulator_outcome_code, created_at)
+                VALUES (?, ?, ?, 'SIMULATOR', ?, ?, ?, 1200, ?, 'USD', ?,
+                        'PASS', 'PASS', 'PASS', 'NOT_REQUESTED', ?, ?)
+                """, UUID.randomUUID(), merchantId, attemptId,
+                "monitoring-processor-" + attemptId, status, status, authorizedAmount, status,
+                status, timestamp);
+    }
+
+    private UUID insertMonitoringAttempt(UUID merchantId, UUID paymentMethodId,
+            UUID paymentIntentId, int attemptNumber, String status, String trafficOrigin,
+            Instant createdAt) {
+        UUID attemptId = UUID.randomUUID();
+        Timestamp timestamp = Timestamp.from(createdAt);
+        jdbcTemplate.update("""
+                INSERT INTO payment_attempts (
+                    id, merchant_id, payment_intent_id, payment_method_id, idempotency_key,
+                    status, attempt_number, traffic_origin, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, attemptId, merchantId, paymentIntentId, paymentMethodId,
+                "monitoring-attempt-" + attemptId, status, attemptNumber, trafficOrigin,
+                timestamp, timestamp);
+        return attemptId;
     }
 
     private void migrateSchema(DriverManagerDataSource source, String schema, String target) {

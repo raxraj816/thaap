@@ -180,10 +180,12 @@ public class RiskReviewController {
     }
     public record FraudLabelResponse(UUID id, UUID paymentIntentId, UUID paymentAttemptId,
             UUID fraudDecisionId, FraudLabelValue labelValue, FraudType fraudType,
+            String taxonomyVersion,
             Instant evidenceOccurredAt, Instant availableAt) {
         static FraudLabelResponse from(FraudLabel label) {
             return new FraudLabelResponse(label.getId(), label.getPaymentIntentId(), label.getPaymentAttemptId(),
-                    label.getFraudDecisionId(), label.getLabelValue(), label.getFraudType(), label.getEvidenceOccurredAt(),
+                    label.getFraudDecisionId(), label.getLabelValue(), label.getFraudType(),
+                    label.getTaxonomyVersion(), label.getEvidenceOccurredAt(),
                     label.getAvailableAt());
         }
     }

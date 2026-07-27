@@ -63,6 +63,11 @@ public class WebhookExecutionConfiguration {
                 }
             }
         }
+        Duration maximumAttemptDuration = connectTimeout.plus(requestTimeout);
+        if (leaseDuration.compareTo(maximumAttemptDuration) <= 0) {
+            throw new IllegalStateException(
+                    "Webhook lease duration must exceed connect timeout plus request timeout");
+        }
         if (!executionEnabled) {
             return;
         }
@@ -73,11 +78,6 @@ public class WebhookExecutionConfiguration {
         if (!targetPolicy.isLocalExecution() && !targetPolicy.hasAllowedHosts()) {
             throw new IllegalStateException(
                     "Non-local webhook execution requires thaap.webhook.allowed-hosts");
-        }
-        Duration maximumAttemptDuration = connectTimeout.plus(requestTimeout);
-        if (leaseDuration.compareTo(maximumAttemptDuration) <= 0) {
-            throw new IllegalStateException(
-                    "Webhook lease duration must exceed connect timeout plus request timeout");
         }
     }
 }

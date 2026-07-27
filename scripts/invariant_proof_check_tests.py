@@ -61,6 +61,13 @@ class InvariantProofCheckTests(unittest.TestCase):
 
         self.assertEqual([], errors)
 
+    def test_letter_suffixed_recovery_coordinate_passes(self):
+        matrix = valid_matrix().replace("Chapter 99", "Chapter 43R")
+
+        errors = checker.validate_matrix(pathlib.Path("matrix.md"), matrix)
+
+        self.assertEqual([], errors)
+
     def test_missing_lens_fails(self):
         matrix = valid_matrix().replace(
             "- Lens: PAYMENT_FRAUD", "- Lens: API_PRODUCT", 1)

@@ -64,6 +64,30 @@ Redis compensation ownership, operator replay authorization, and signal
 lineage findings. Chapter 35 is complete after 629 backend tests, 114 repository
 Python tests, 14 migration contracts, all nine public Phase 4 demos, and the
 integrated matrix/dossier gates. Phase 4 is complete.
+The dedicated Phase 4.5 detailed plan is approved and complete through Chapter
+43R. Chapters 36–43 cover merchant-risk monitoring, analyst workspace,
+historical simulation, governed rules/exceptions, dispute operations, developer
+scenarios, webhook operations, and integrated closure; product promises were
+founder-confirmed on 2026-07-25. V50–V64 provide exact point-in-time monitoring,
+protected analyst notes, restart-safe mixed-control simulation, dual-controlled
+rules and narrow safety exceptions, actor-fenced dispute operations, trusted
+leased scenarios, and generation-fenced webhook verification/redelivery.
+Chapter 36 is complete. Chapter 37 is complete. Chapter 38 is complete. Chapter
+39 is complete. Chapter 40 is complete. Chapter 41 is complete. Chapter 42 is
+complete. Chapter 43 is complete. Chapter 43R is complete.
+
+The later `ER-0064`–`ER-0073` review withdrew the earlier completion claim and
+found missing boundary partitions in incident-link availability, historical
+control reconstruction, webhook terminal dispatch, live-actor locking,
+note-read audit, scenario-report ownership, authorization reconciliation, and
+cockpit integration/resilience. All ten findings are resolved. The four expanded
+PostgreSQL recovery suites pass—monitoring 7/7, simulation 8/8, dispute 19/19,
+and the post-sign terminal-winner webhook interleaving—and the final regression
+passes 759 backend tests without skips, 140 repository tests, 20 UI tests, and
+the production UI build. Every Chapter 36–43R matrix is
+`FROZEN`/`VERIFIED`/all-`PASS`, every dossier is `READY_TO_MERGE`/`MERGE`, all
+escaped findings are resolved, and no technical debt is open. Phase 5 is
+unblocked.
 Trusted synthetic origin, restart-safe generator runs,
 idempotent endpoint creation, bounded secret-rotation overlap, fair webhook
 claiming, the V13 shipped-schema repair, and V14 fail-stop endpoint-reservation

@@ -51,7 +51,8 @@ public interface IdempotencyRepository extends JpaRepository<IdempotencyRecord, 
             FROM IdempotencyRecord record
             WHERE record.status = com.thaap.payments.idempotency.IdempotencyStatus.COMPLETED
               AND record.expiresAt > :now
-              AND record.responseBody LIKE '%authentication-replay-v1%'
+              AND (record.responseBody LIKE '%authentication-replay-v1%'
+                   OR record.responseBody LIKE '%sensitive-replay-v1%')
             """)
-    List<String> findActiveProtectedAuthenticationReplays(@Param("now") Instant now);
+    List<String> findActiveProtectedSensitiveReplays(@Param("now") Instant now);
 }

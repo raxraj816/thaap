@@ -28,6 +28,11 @@ spring:
   sql:
     init:
       mode: never
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
 
 server:
   port: ${THAAP_PAYMENTS_API_PORT:8080}
@@ -53,7 +58,7 @@ management:
       show-details: never
       group:
         readiness:
-          include: readinessState,db,velocityRedis,merchantRiskPolicy
+          include: readinessState,db,velocityRedis,merchantRiskPolicy,merchantRiskMonitoring,analystWorkspace,riskSimulation,governedControl,disputeOperations,developerScenarios,webhookOperations
   health:
     db:
       enabled: true
@@ -123,4 +128,30 @@ thaap:
     request-timeout: ${THAAP_WEBHOOK_REQUEST_TIMEOUT:5s}
     target-resolution-timeout: ${THAAP_WEBHOOK_TARGET_RESOLUTION_TIMEOUT:2s}
     resolver-threads: ${THAAP_WEBHOOK_RESOLVER_THREADS:4}
+    verification-challenge-ttl: ${THAAP_WEBHOOK_VERIFICATION_CHALLENGE_TTL:2m}
+    verification-expiry-enabled: ${THAAP_WEBHOOK_VERIFICATION_EXPIRY_ENABLED:true}
+    verification-expiry-batch-size: ${THAAP_WEBHOOK_VERIFICATION_EXPIRY_BATCH_SIZE:50}
+    verification-expiry-poll-delay: ${THAAP_WEBHOOK_VERIFICATION_EXPIRY_POLL_DELAY:30s}
     poll-delay: ${THAAP_WEBHOOK_POLL_DELAY:1s}
+  workspace:
+    notes:
+      encryption-key: ${THAAP_REVIEW_NOTE_ENCRYPTION_KEY:}
+      key-version: ${THAAP_REVIEW_NOTE_KEY_VERSION:v1}
+      decryption-keys: ${THAAP_REVIEW_NOTE_DECRYPTION_KEYS:}
+      retention-poll-delay: ${THAAP_REVIEW_NOTE_RETENTION_POLL_DELAY:1h}
+  simulation:
+    worker-enabled: ${THAAP_SIMULATION_WORKER_ENABLED:true}
+    creation-enabled: ${THAAP_SIMULATION_CREATION_ENABLED:true}
+    chunk-size: ${THAAP_SIMULATION_CHUNK_SIZE:100}
+    maximum-cohort-days: ${THAAP_SIMULATION_MAXIMUM_COHORT_DAYS:365}
+    report-freshness: ${THAAP_SIMULATION_REPORT_FRESHNESS:24h}
+    gate:
+      minimum-eligible-population: ${THAAP_SIMULATION_GATE_MINIMUM_ELIGIBLE_POPULATION:100}
+      minimum-label-coverage-percent: ${THAAP_SIMULATION_GATE_MINIMUM_LABEL_COVERAGE_PERCENT:50}
+  disputes:
+    expiry-enabled: ${THAAP_DISPUTE_EXPIRY_ENABLED:true}
+    expiry-batch-size: ${THAAP_DISPUTE_EXPIRY_BATCH_SIZE:50}
+    expiry-poll-delay: ${THAAP_DISPUTE_EXPIRY_POLL_DELAY:1m}
+  developer-scenarios:
+    creation-enabled: ${THAAP_DEVELOPER_SCENARIO_CREATION_ENABLED:true}
+    lease-duration: ${THAAP_DEVELOPER_SCENARIO_LEASE_DURATION:45s}

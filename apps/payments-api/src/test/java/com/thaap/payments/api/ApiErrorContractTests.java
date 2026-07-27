@@ -22,6 +22,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -283,6 +284,21 @@ class ApiErrorContractTests {
         assertThat(output.getAll()).doesNotContain("simulated internal implementation detail");
     }
 
+    @Test
+    void queryTimeoutUsesRetryableBoundedErrorWithoutDatabaseDetails() throws Exception {
+        String response = mockMvc.perform(get("/test-errors/query-timeout")
+                        .header(REQUEST_ID, "req_query_timeout"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "1"))
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode error = objectMapper.readTree(response);
+        assertStandardError(error, 503, "query_timeout", "req_query_timeout",
+                "/test-errors/query-timeout");
+        assertThat(error.get("message").asText())
+                .isEqualTo("Database query exceeded its bounded execution time");
+    }
+
     private MerchantAccess createMerchant(String name) throws Exception {
         var response = mockMvc.perform(post("/admin/merchants")
                         .header(ADMIN_BOOTSTRAP_TOKEN, TEST_ADMIN_BOOTSTRAP_TOKEN)
@@ -358,6 +374,11 @@ class ApiErrorContractTests {
         @GetMapping("/test-errors/explode")
         void explode() {
             throw new IllegalStateException("simulated internal implementation detail");
+        }
+
+        @GetMapping("/test-errors/query-timeout")
+        void queryTimeout() {
+            throw new QueryTimeoutException("do not expose database statement text");
         }
 
         @GetMapping("/test-errors/parameter-validation")

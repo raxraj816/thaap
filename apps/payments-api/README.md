@@ -120,15 +120,55 @@ Implemented tenant-scoped endpoints:
 - `POST /webhook_endpoints`
 - `POST /webhook_endpoints/{id}/rotate_secret`
 - `POST /webhook_endpoints/{id}/disable`
+- `POST /webhook_endpoints/{id}/verification_challenges`
+- `GET /webhook_endpoints/{id}/verification_challenges/{challengeId}`
 - `GET /webhook_deliveries`
 - `GET /webhook_deliveries/{id}`
 - `GET /webhook_deliveries/{id}/attempts`
+- `POST /webhook_deliveries/{id}/redeliver`
+- `GET /risk/webhook-dead-letters`
+- `POST /risk/webhook-deliveries/{id}/redeliver`
 - `GET /fraud/decisions`
 - `GET /fraud/decisions/{id}`
 - `GET /rules`
 - `GET /fraud/reviews`
 - `GET /fraud/reviews/{id}`
 - `GET /reviews` (legacy empty review scaffold; Phase 3 work items use `/fraud/reviews`)
+
+## Trusted Developer Scenario Operations
+
+V61/V62 add a tenant-scoped cooperative scenario runner on top of the existing
+public payment APIs. `X-Api-Key` authenticates the merchant and the separately
+configured `X-Thaap-Scenario-Runner-Token` authorizes server assignment of
+`SYNTHETIC_SCENARIO`; request bodies, metadata, and possession of a test-card
+value cannot assign that origin.
+
+The public endpoints are:
+
+- `GET /developer/test-cards` — bounded simulator-only catalogue; no credential required
+- `POST /developer/scenario-runs` — deterministic run creation; `Idempotency-Key` required
+- `GET /developer/scenario-runs/{id}` — durable plan and progress
+- `POST /developer/scenario-runs/{id}/claims` — bounded cooperative-client lease
+- `POST /developer/scenario-runs/{id}/steps/{index}/complete` — verify a public API resource and advance exactly once
+- `POST /developer/scenario-runs/{id}/fail` — terminal closed failure code
+- `GET /developer/scenario-runs/{id}/report` — immutable sanitized terminal report
+
+`APPROVED_PAYMENT`, `ISSUER_DECLINE`, and `CARD_TESTING_BURST` are closed
+scenario types. The same merchant/type/catalogue/seed specification resolves to
+the same run and step identities. PostgreSQL protects immutable specification,
+step, event, and terminal-report history; a lease epoch fences stale browser or
+CLI workers. The final report contains outcome and live-versus-synthetic counts
+but excludes raw seed, test-card value, customer contact, credentials,
+idempotency material, and resource IDs.
+
+Configure bounded operation with:
+
+```text
+THAAP_DEVELOPER_SCENARIO_CREATION_ENABLED=true
+THAAP_DEVELOPER_SCENARIO_LEASE_DURATION=45s
+```
+
+Run the zero-source-reading public quickstart documented in `scripts/README.md`.
 
 Tenant isolation tests cover cross-merchant reads, customer ownership checks,
 payment mutation checks, idempotency scoping, webhook delivery visibility, and
@@ -315,6 +355,66 @@ with execution enabled:
 ```bash
 scripts/demo-webhook-delivery-flow.sh
 ```
+
+### Verification, dead letters, and manual redelivery
+
+V63/V64 add a merchant-verifiable endpoint ownership handshake and an
+operator-visible recovery loop without creating a second event queue. A
+verification challenge carries a random 32-byte base64url token inside a
+canonical signed payload. PostgreSQL stores only its SHA-256 digest and binds
+the challenge to the merchant, endpoint, normalized URL, signing-secret
+generation, challenge ID, and expiry. The callback must return exactly one
+43-character unpadded base64url value in the final successful response field
+`THAAP-Webhook-Verification`. Informational and non-2xx fields, body echoes,
+duplicates, folding, controls, padding, and malformed values fail closed.
+
+External HTTP remains outside the database transaction. Preparation writes
+durable challenge state, signing locks the exact endpoint generation, and a
+post-sign endpoint-then-challenge permit revalidates pending/unexpired/current
+state before recording the bounded dispatch lease. Transport then performs the
+signed exchange, and a final locked transaction fences completion against
+endpoint disable, URL change, secret rotation, expiry, or a newer pending
+challenge. A bounded
+scheduler expires overdue challenges idempotently. Configure its TTL, batch,
+and polling with `THAAP_WEBHOOK_VERIFICATION_CHALLENGE_TTL` (30 seconds to 5
+minutes), `THAAP_WEBHOOK_VERIFICATION_EXPIRY_BATCH_SIZE` (1 to 100), and
+`THAAP_WEBHOOK_VERIFICATION_EXPIRY_POLL_DELAY`.
+
+Dead-letter reads are tenant-scoped, keyset-bounded views of terminal
+`EXHAUSTED` deliveries. They accept closed event/error/time filters and return
+only sanitized identity, generation, attempt, and timestamp evidence—never
+event payloads, endpoint URLs, signatures, tokens, hashes, secrets, or raw
+response data. Merchant owners may request exact-event redelivery through the
+merchant route. Operator dead-letter inspection and redelivery are restricted
+to a live `RISK_MANAGER`; `VIEWER` and `ANALYST` are rejected on execution and
+idempotent replay.
+The existing idempotency boundary binds replay to the authenticated principal.
+
+Manual redelivery appends an actor-bound `webhook_redelivery_requests` row,
+advances the delivery generation by exactly one, and resets only the
+generation-local retry budget. It reuses the immutable event UUID and persisted
+UTF-8 payload. Attempts retain global and generation-local numbers, automatic
+versus manual source, exact event digest, signing-secret generation, and send
+certainty. HTTP 408, 425, 429, and 5xx results retry; other non-2xx statuses are
+terminal receiver rejection. PostgreSQL triggers prevent event/request/event-
+history mutation, skipped generations, counter rollback, and terminal attempt
+or verification rewrites.
+
+Readiness checks the V63 objects and bounded pending/expired challenge state.
+Low-cardinality metrics distinguish verification, expiry, automatic retry, and
+manual redelivery without tenant, actor, URL, event, payload, credential, or
+secret tags. Run the end-to-end proof after enabling local webhook execution:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-webhook-operations.py
+```
+
+The script provisions a fresh merchant and manager, starts a loopback receiver,
+verifies the endpoint, forces one permanent 400 failure, inspects the operator
+dead-letter view, repairs the receiver, redelivers generation 2, verifies both
+HMAC signatures, and proves the event ID and payload bytes are identical. It is
+loopback-only, ignores proxies, rejects redirects, and emits sanitized evidence.
 
 Chapter 5 contract tests also cover merchant admin setup, including bootstrap-token
 gating, one-time API key reveal, persisted prefix/hash behavior, validation
@@ -562,6 +662,32 @@ The final Phase 4 gate passes 629 backend tests, 114 repository Python tests,
 fresh V1-to-V49 and retained V48-to-V49 proof, and all nine public
 implementation-chapter demos.
 
+## Phase 4.5 Simulation Activation Gate
+
+Historical simulation is evidence, not automatic permission to change a live
+risk control. Activation defaults to at least 100 eligible rows and 50% label
+coverage:
+
+```text
+THAAP_SIMULATION_GATE_MINIMUM_ELIGIBLE_POPULATION=100
+THAAP_SIMULATION_GATE_MINIMUM_LABEL_COVERAGE_PERCENT=50
+```
+
+Both values are rechecked inside the locked control activation or rollback
+transaction together with successful status, exact tenant/candidate digest,
+creator, and report freshness. The one-row governed-controls public demo may
+use `1` and `0` only in the local proof environment; the exact command and
+warning are documented in `scripts/README.md`. Absence of either override
+retains the production-safe default.
+
+Phase 4.5 is complete through Chapter 43. Fresh/retained V1–V64 migrations,
+forced PostgreSQL orderings, simulation and key-lifecycle restarts, rule and
+protocol boundary families, seven public clients, live browser verification,
+739 backend tests, 137 repository tests, and the formal matrix/dossier gates
+pass. The API does not claim Phase 5 event infrastructure, Phase 6's broad
+dashboard, Phase 7 ML, Phase 9 hosted identity, real-network dispute handling,
+or partial-money semantics.
+
 Run the complete loopback-only Phase 3 proof with:
 
 ```bash
@@ -753,6 +879,17 @@ idempotency plus merchant creation. V16 versions merchant creation derivation
 and backfills each V15 key HMAC into `merchant_creation_identities`, preserving
 one database identity across pepper rotation without rewriting the V15
 migration.
+
+V63 adds generation-aware delivery and attempt lineage, immutable redelivery
+requests, hashed endpoint-verification challenges/events, endpoint verification
+projection state, composite tenant constraints, and bounded operational
+indexes. Retained deliveries remain in generation 1; their total attempt count
+becomes the generation-local count, historical attempts retain their original
+number and acquire the original event digest, and no request or challenge is
+invented. V64 installs PostgreSQL guards for immutable identities, monotonic
+generation transitions, append-only request/event history, and terminal
+attempt/challenge state. The retained V62→V64 migration test proves the original
+delivery and attempt fields remain equivalent.
 
 V4 creates the `audit_logs` table and its first query indexes. For local
 development and test databases, the single Flyway migration is intentionally

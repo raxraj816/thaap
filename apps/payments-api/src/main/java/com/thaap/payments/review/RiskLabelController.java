@@ -54,14 +54,16 @@ public class RiskLabelController {
     }
 
     public record FraudLabelReadResponse(UUID id, UUID paymentIntentId, UUID paymentAttemptId,
-            UUID fraudDecisionId, TrafficOrigin trafficOrigin, FraudLabelValue labelValue, FraudType fraudType,
+            UUID fraudDecisionId, TrafficOrigin trafficOrigin, FraudLabelValue labelValue,
+            FraudType fraudType, String taxonomyVersion,
             Instant evidenceOccurredAt, Instant availableAt, String source, UUID sourceReviewResolutionId,
             UUID sourceChargebackId,
             ReviewResolutionReasonCode reasonCode, Instant createdAt) {
         static FraudLabelReadResponse from(FraudLabel label) {
             return new FraudLabelReadResponse(label.getId(), label.getPaymentIntentId(),
                     label.getPaymentAttemptId(), label.getFraudDecisionId(), label.getTrafficOrigin(),
-                    label.getLabelValue(), label.getFraudType(), label.getEvidenceOccurredAt(), label.getAvailableAt(),
+                    label.getLabelValue(), label.getFraudType(), label.getTaxonomyVersion(),
+                    label.getEvidenceOccurredAt(), label.getAvailableAt(),
                     label.getSource(), label.getSourceReviewResolutionId(), label.getSourceChargebackId(),
                     label.getReasonCode(), label.getCreatedAt());
         }

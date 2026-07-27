@@ -14,6 +14,8 @@ import com.thaap.payments.dispute.Chargeback;
 @Entity
 @Table(name = "fraud_labels")
 public class FraudLabel {
+    private static final String ACTIVE_TAXONOMY_VERSION = "fraud_taxonomy_v1";
+
     @Id private UUID id;
     @Column(name = "merchant_id", nullable = false) private UUID merchantId;
     @Column(name = "payment_intent_id", nullable = false) private UUID paymentIntentId;
@@ -26,6 +28,7 @@ public class FraudLabel {
     private FraudLabelValue labelValue;
     @Enumerated(EnumType.STRING) @Column(name = "fraud_type", length = 64)
     private FraudType fraudType;
+    @Column(name = "taxonomy_version", length = 32) private String taxonomyVersion;
     @Column(name = "evidence_occurred_at", nullable = false) private Instant evidenceOccurredAt;
     @Column(name = "available_at", nullable = false) private Instant availableAt;
     @Column(name = "source_review_resolution_id") private UUID sourceReviewResolutionId;
@@ -53,6 +56,7 @@ public class FraudLabel {
         this.labelValue = resolution.getClassification() == ReviewClassification.CONFIRMED_LEGITIMATE
                 ? FraudLabelValue.LEGITIMATE : FraudLabelValue.FRAUD;
         this.fraudType = resolution.getFraudType();
+        this.taxonomyVersion = ACTIVE_TAXONOMY_VERSION;
         this.evidenceOccurredAt = evidenceOccurredAt;
         this.availableAt = availableAt;
         this.sourceReviewResolutionId = resolution.getId();
@@ -72,6 +76,7 @@ public class FraudLabel {
         this.source = "CHARGEBACK";
         this.labelValue = FraudLabelValue.FRAUD;
         this.fraudType = chargeback.getReasonCode().fraudType();
+        this.taxonomyVersion = ACTIVE_TAXONOMY_VERSION;
         this.evidenceOccurredAt = chargeback.getEvidenceOccurredAt();
         this.availableAt = chargeback.getAvailableAt();
         this.sourceChargebackId = chargeback.getId();
@@ -85,6 +90,7 @@ public class FraudLabel {
     public UUID getPaymentAttemptId() { return paymentAttemptId; }
     public UUID getFraudDecisionId() { return fraudDecisionId; }
     public FraudType getFraudType() { return fraudType; }
+    public String getTaxonomyVersion() { return taxonomyVersion; }
     public FraudLabelValue getLabelValue() { return labelValue; }
     public Instant getEvidenceOccurredAt() { return evidenceOccurredAt; }
     public Instant getAvailableAt() { return availableAt; }

@@ -47,6 +47,7 @@ public class ChargebackService {
     private final AuditLogService auditLogService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final ChargebackMetrics metrics;
+    private final DisputeWorkflowInitializer disputeWorkflowInitializer;
     private final Clock clock;
 
     public ChargebackService(MerchantRepository merchantRepository,
@@ -55,7 +56,8 @@ public class ChargebackService {
             ChargebackRepository chargebackRepository, DisputeOffsetAllocationRepository allocationRepository,
             DisputeEvidencePacketRepository evidenceRepository, FraudLabelRepository fraudLabelRepository,
             LedgerService ledgerService, AuditLogService auditLogService,
-            WebhookDeliveryService webhookDeliveryService, ChargebackMetrics metrics, Clock clock) {
+            WebhookDeliveryService webhookDeliveryService, ChargebackMetrics metrics,
+            DisputeWorkflowInitializer disputeWorkflowInitializer, Clock clock) {
         this.merchantRepository = merchantRepository;
         this.paymentIntentRepository = paymentIntentRepository;
         this.authorizationRepository = authorizationRepository;
@@ -69,6 +71,7 @@ public class ChargebackService {
         this.auditLogService = auditLogService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.metrics = metrics;
+        this.disputeWorkflowInitializer = disputeWorkflowInitializer;
         this.clock = clock;
     }
 
@@ -139,6 +142,7 @@ public class ChargebackService {
                 authorization.getId(), decision.getId(), request.amount(), allocatedAmount,
                 paymentIntent.getCurrency(), request.reasonCode(), paymentIntent.getTrafficOrigin(),
                 request.evidenceOccurredAt(), request.receivedAt(), availableAt, request.evidenceDueAt()));
+        disputeWorkflowInitializer.initialize(chargeback, availableAt);
         DisputeOffsetAllocation allocation = allocationRepository.saveAndFlush(new DisputeOffsetAllocation(
                 chargeback, refund == null ? null : refund.getId(), paymentIntent.getAmount(), priorRefundAmount,
                 0L, availableAt));

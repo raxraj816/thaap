@@ -51,7 +51,7 @@ class AuthenticationKeyReadinessTests {
     @Test
     void protectedCreationReplayFailsStartupWhenItsEncryptionVersionIsMissing() {
         IdempotencyRepository repository = mock(IdempotencyRepository.class);
-        when(repository.findActiveProtectedAuthenticationReplays(CLOCK.instant())).thenReturn(List.of(
+        when(repository.findActiveProtectedSensitiveReplays(CLOCK.instant())).thenReturn(List.of(
                 "{\"format\":\"authentication-replay-v1\",\"ciphertext\":\"AA==\","
                         + "\"nonce\":\"AAAAAAAAAAAAAAAA\",\"keyVersion\":\"retired-v1\"}"));
         AuthenticationReplayCipher cipher = cipher("v2", key(2), "");
@@ -71,12 +71,14 @@ class AuthenticationKeyReadinessTests {
         AuthenticationReplayKeyConfiguration readiness = new AuthenticationReplayKeyConfiguration(
                 repository, cipher, new ObjectMapper(), CLOCK);
 
-        when(repository.findActiveProtectedAuthenticationReplays(CLOCK.instant())).thenReturn(List.of(
+        when(repository.findActiveProtectedSensitiveReplays(CLOCK.instant())).thenReturn(List.of(
                 "{\"format\":\"authentication-replay-v1\",\"ciphertext\":\"AA==\","
+                        + "\"nonce\":\"AAAAAAAAAAAAAAAA\",\"keyVersion\":\"v1\"}",
+                "{\"format\":\"sensitive-replay-v1\",\"ciphertext\":\"AA==\","
                         + "\"nonce\":\"AAAAAAAAAAAAAAAA\",\"keyVersion\":\"v1\"}"));
         assertThatCode(readiness::validateRequiredKeys).doesNotThrowAnyException();
 
-        when(repository.findActiveProtectedAuthenticationReplays(CLOCK.instant()))
+        when(repository.findActiveProtectedSensitiveReplays(CLOCK.instant()))
                 .thenReturn(List.of("{\"format\":\"wrong\",\"keyVersion\":\"v1\"}"));
         assertThatThrownBy(readiness::validateRequiredKeys)
                 .isInstanceOf(IllegalStateException.class)

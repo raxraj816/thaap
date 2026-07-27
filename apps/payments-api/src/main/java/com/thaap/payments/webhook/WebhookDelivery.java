@@ -45,6 +45,12 @@ public class WebhookDelivery {
     @Column(nullable = false)
     private int attemptCount;
 
+    @Column(name = "delivery_generation", nullable = false)
+    private int deliveryGeneration;
+
+    @Column(name = "generation_attempt_count", nullable = false)
+    private int generationAttemptCount;
+
     @Column
     private Instant nextAttemptAt;
 
@@ -80,6 +86,8 @@ public class WebhookDelivery {
         this.resourceId = resourceId;
         this.status = WebhookDeliveryStatus.PENDING;
         this.attemptCount = 0;
+        this.deliveryGeneration = 1;
+        this.generationAttemptCount = 0;
         this.createdAt = createdAt;
     }
 
@@ -91,6 +99,7 @@ public class WebhookDelivery {
         }
         this.status = WebhookDeliveryStatus.DELIVERING;
         this.attemptCount += 1;
+        this.generationAttemptCount += 1;
         this.lastAttemptAt = now;
         this.nextAttemptAt = null;
         this.lastErrorCode = null;
@@ -140,6 +149,22 @@ public class WebhookDelivery {
         clearClaim();
     }
 
+    public int scheduleManualRedelivery() {
+        if (status != WebhookDeliveryStatus.SUCCEEDED
+                && status != WebhookDeliveryStatus.EXHAUSTED) {
+            throw new IllegalStateException("Only terminal webhook deliveries can be redelivered");
+        }
+        this.deliveryGeneration += 1;
+        this.generationAttemptCount = 0;
+        this.status = WebhookDeliveryStatus.PENDING;
+        this.nextAttemptAt = null;
+        this.lastAttemptAt = null;
+        this.deliveredAt = null;
+        this.lastErrorCode = null;
+        clearClaim();
+        return deliveryGeneration;
+    }
+
     private void requireClaim(UUID expectedClaimToken) {
         if (!matchesClaim(expectedClaimToken)) {
             throw new IllegalStateException("Webhook delivery claim is stale");
@@ -187,6 +212,14 @@ public class WebhookDelivery {
 
     public int getAttemptCount() {
         return attemptCount;
+    }
+
+    public int getDeliveryGeneration() {
+        return deliveryGeneration;
+    }
+
+    public int getGenerationAttemptCount() {
+        return generationAttemptCount;
     }
 
     public Instant getNextAttemptAt() {

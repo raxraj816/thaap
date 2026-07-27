@@ -24,6 +24,7 @@ public class JacksonConfiguration {
     @Bean
     public JsonMapperBuilderCustomizer strictHttpJsonRequests() {
         return builder -> builder
+                .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT);
     }

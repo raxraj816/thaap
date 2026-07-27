@@ -25,19 +25,22 @@ public class AuthenticationReplayKeyConfiguration {
 
     @PostConstruct
     void validateRequiredKeys() {
-        for (String responseBody : idempotencyRepository.findActiveProtectedAuthenticationReplays(clock.instant())) {
+        for (String responseBody : idempotencyRepository.findActiveProtectedSensitiveReplays(clock.instant())) {
             try {
                 JsonNode envelope = objectMapper.readTree(responseBody);
                 JsonNode format = envelope.get("format");
                 JsonNode keyVersion = envelope.get("keyVersion");
-                if (format == null || !"authentication-replay-v1".equals(format.asText())
+                boolean supportedFormat = format != null
+                        && ("authentication-replay-v1".equals(format.asText())
+                        || "sensitive-replay-v1".equals(format.asText()));
+                if (!supportedFormat
                         || keyVersion == null || !replayCipher.canDecrypt(keyVersion.asText())) {
-                    throw new IllegalStateException("Authentication replay key version is unavailable");
+                    throw new IllegalStateException("Sensitive replay key version is unavailable");
                 }
             } catch (IllegalStateException exception) {
                 throw exception;
             } catch (Exception exception) {
-                throw new IllegalStateException("Protected authentication replay is unreadable", exception);
+                throw new IllegalStateException("Protected sensitive replay is unreadable", exception);
             }
         }
     }

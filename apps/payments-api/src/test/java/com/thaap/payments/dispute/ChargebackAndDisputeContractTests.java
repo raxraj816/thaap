@@ -30,6 +30,7 @@ import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecisionReasonCode;
 import com.thaap.payments.fraud.FraudDecisionRepository;
 import com.thaap.payments.fraud.FraudRiskLevel;
+import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.ledger.LedgerService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerEntryRepository;
@@ -43,10 +44,14 @@ import com.thaap.payments.payment.RefundRepository;
 import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentattempt.PaymentAttemptRepository;
 import com.thaap.payments.review.FraudLabelRepository;
+import com.thaap.payments.risk.RiskOperatorContext;
+import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperatorService;
 import com.thaap.payments.paymentmethod.CardFunding;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.tenant.MerchantContext;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.sql.Connection;
@@ -56,10 +61,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +75,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -77,6 +85,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -88,6 +97,8 @@ import com.thaap.payments.webhook.WebhookEndpointRepository;
 @Testcontainers(disabledWithoutDocker = true)
 class ChargebackAndDisputeContractTests {
     private static final String API_KEY_HEADER = "X-Api-Key";
+    private static final String RISK_KEY_HEADER = "X-Risk-Operator-Key";
+    private static final String SCENARIO_TOKEN_HEADER = "X-Thaap-Scenario-Runner-Token";
     private static final String IDEMPOTENCY_KEY = "Idempotency-Key";
 
     @Container
@@ -116,6 +127,9 @@ class ChargebackAndDisputeContractTests {
     @Autowired private LedgerService ledgerService;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private MeterRegistry meterRegistry;
+    @Autowired private DisputeOperationsService disputeOperationsService;
+    @Autowired private IdempotencyService idempotencyService;
+    @Autowired private RiskOperatorService riskOperatorService;
     @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
     @Autowired private DataSource dataSource;
     @MockitoSpyBean private LedgerEntryRepository ledgerEntryRepository;
@@ -157,6 +171,25 @@ class ChargebackAndDisputeContractTests {
         assertThat(sum("ledger_entries", "direction = 'CREDIT' AND source_type = 'CHARGEBACK'"))
                 .isEqualTo(6400L);
         assertThat(countWhere("fraud_labels", "source = 'CHARGEBACK'")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT taxonomy_version FROM fraud_labels
+                 WHERE source = 'CHARGEBACK' AND payment_intent_id = ?
+                """, String.class, fixture.paymentIntentId())).isEqualTo("fraud_taxonomy_v1");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO fraud_labels (
+                    id, merchant_id, payment_intent_id, payment_attempt_id, fraud_decision_id,
+                    traffic_origin, source, label_value, fraud_type, evidence_occurred_at,
+                    available_at, source_review_resolution_id, actor_operator_id,
+                    supersedes_label_id, reason_code, created_at, source_chargeback_id,
+                    source_post_authorization_signal_id, taxonomy_version)
+                SELECT ?, merchant_id, payment_intent_id, payment_attempt_id, fraud_decision_id,
+                    traffic_origin, source, label_value, fraud_type, evidence_occurred_at,
+                    available_at, source_review_resolution_id, actor_operator_id,
+                    supersedes_label_id, reason_code, created_at, source_chargeback_id,
+                    source_post_authorization_signal_id, NULL
+                  FROM fraud_labels WHERE payment_intent_id = ?
+                """, UUID.randomUUID(), fixture.paymentIntentId()))
+                .hasMessageContaining("New fraud labels require the active taxonomy version");
 
         UUID chargebackId = UUID.fromString(first.get("id").asText());
         JsonNode packet = objectMapper.readTree(mockMvc.perform(post("/chargebacks/{id}/evidence_packets",
@@ -550,6 +583,455 @@ class ChargebackAndDisputeContractTests {
         assertThat(countWhere("audit_logs", "action = 'chargeback.created'")).isOne();
     }
 
+    @Test
+    void disputeWorkflowUsesGovernedDeadlineImmutableVersionsDualControlAndTrustedOutcome() throws Exception {
+        CapturedFixture fixture = captured("dispute-operations", 6100L);
+        OperatorAccess viewer = createOperator(fixture, "dispute-viewer", "VIEWER");
+        OperatorAccess analyst = createOperator(fixture, "dispute-analyst", "ANALYST");
+        OperatorAccess manager = createOperator(fixture, "dispute-manager", "RISK_MANAGER");
+        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant callerClaimedDueAt = receivedAt.plusSeconds(86400);
+        JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-operations-create",
+                chargebackRequest("dispute.operations.created", fixture.paymentIntentId(), 6100L,
+                        "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(3600), receivedAt,
+                        callerClaimedDueAt), 201);
+        UUID chargebackId = UUID.fromString(chargeback.get("id").asText());
+
+        JsonNode initial = json(mockMvc.perform(get("/risk/disputes/{id}", chargebackId)
+                .header(RISK_KEY_HEADER, viewer.secret())), 200);
+        assertThat(initial.get("lifecycleStatus").asText()).isEqualTo("DRAFT");
+        assertThat(initial.get("readinessStatus").asText()).isEqualTo("INCOMPLETE");
+        JsonNode viewerQueue = json(mockMvc.perform(get("/risk/disputes")
+                .header(RISK_KEY_HEADER, viewer.secret())), 200);
+        assertThat(viewerQueue).hasSize(1);
+        assertThat(viewerQueue.get(0).get("chargebackId").asText()).isEqualTo(chargebackId.toString());
+        assertThat(Instant.parse(initial.get("dueAt").asText()))
+                .isEqualTo(receivedAt.plus(7, java.time.temporal.ChronoUnit.DAYS)
+                        .truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        assertThat(Instant.parse(initial.get("dueAt").asText())).isNotEqualTo(callerClaimedDueAt);
+        int ledgerRows = count("ledger_entries");
+        int fraudLabels = count("fraud_labels");
+
+        String incompleteEvidence = "{\"deliveryConfirmed\":false,"
+                + "\"customerCommunicationPresent\":false,\"deviceContinuity\":false}";
+        mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                        .header(RISK_KEY_HEADER, viewer.secret()).header(IDEMPOTENCY_KEY, "viewer-evidence")
+                        .contentType(APPLICATION_JSON).content(incompleteEvidence))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                        .header(RISK_KEY_HEADER, analyst.secret()).header(IDEMPOTENCY_KEY, "analyst-evidence")
+                        .contentType(APPLICATION_JSON).content(incompleteEvidence))
+                .andExpect(status().isForbidden());
+        JsonNode incomplete = json(mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                .header(RISK_KEY_HEADER, manager.secret()).header(IDEMPOTENCY_KEY, "dispute-evidence-v1")
+                .contentType(APPLICATION_JSON)
+                .content(incompleteEvidence)), 200);
+        assertThat(incomplete.get("latestEvidenceVersion").asInt()).isEqualTo(1);
+        assertThat(incomplete.get("missingRequirements").toString())
+                .contains("AUTHENTICATION_OR_DEVICE_CONTINUITY");
+
+        JsonNode ready = json(mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                .header(RISK_KEY_HEADER, manager.secret()).header(IDEMPOTENCY_KEY, "dispute-evidence-v2")
+                .contentType(APPLICATION_JSON)
+                .content("{\"deliveryConfirmed\":false,\"customerCommunicationPresent\":false,"
+                        + "\"deviceContinuity\":true}")), 200);
+        assertThat(ready.get("lifecycleStatus").asText()).isEqualTo("READY");
+        assertThat(ready.get("latestEvidenceVersion").asInt()).isEqualTo(2);
+
+        mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                        .header(RISK_KEY_HEADER, analyst.secret()).header(IDEMPOTENCY_KEY, "analyst-submit")
+                        .contentType(APPLICATION_JSON).content("{\"expectedEvidenceVersion\":2}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                        .header(RISK_KEY_HEADER, viewer.secret()).header(IDEMPOTENCY_KEY, "viewer-submit")
+                        .contentType(APPLICATION_JSON).content("{\"expectedEvidenceVersion\":2}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                        .header(RISK_KEY_HEADER, manager.secret()).header(IDEMPOTENCY_KEY, "stale-submit")
+                        .contentType(APPLICATION_JSON).content("{\"expectedEvidenceVersion\":1}"))
+                .andExpect(status().isConflict());
+        JsonNode submitted = json(mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                .header(RISK_KEY_HEADER, manager.secret()).header(IDEMPOTENCY_KEY, "manager-submit")
+                .contentType(APPLICATION_JSON).content("{\"expectedEvidenceVersion\":2}")), 200);
+        assertThat(submitted.get("lifecycleStatus").asText()).isEqualTo("SUBMITTED");
+
+        Instant outcomeAt = Instant.now();
+        String outcomeBody = "{\"externalEventKey\":\"dispute.outcome.1\",\"outcome\":\"WON\","
+                + "\"occurredAt\":\"" + outcomeAt + "\"}";
+        mockMvc.perform(post("/simulator/disputes/{id}/outcomes", chargebackId)
+                        .header(API_KEY_HEADER, fixture.apiKey()).header(IDEMPOTENCY_KEY, "untrusted-outcome")
+                        .contentType(APPLICATION_JSON).content(outcomeBody))
+                .andExpect(status().isForbidden());
+        JsonNode outcome = json(mockMvc.perform(post("/simulator/disputes/{id}/outcomes", chargebackId)
+                .header(API_KEY_HEADER, fixture.apiKey())
+                .header(SCENARIO_TOKEN_HEADER, "test-scenario-runner-token")
+                .header(IDEMPOTENCY_KEY, "trusted-outcome")
+                .contentType(APPLICATION_JSON).content(outcomeBody)), 200);
+        JsonNode replay = json(mockMvc.perform(post("/simulator/disputes/{id}/outcomes", chargebackId)
+                .header(API_KEY_HEADER, fixture.apiKey())
+                .header(SCENARIO_TOKEN_HEADER, "test-scenario-runner-token")
+                .header(IDEMPOTENCY_KEY, "trusted-outcome")
+                .contentType(APPLICATION_JSON).content(outcomeBody)), 200);
+        assertThat(replay).isEqualTo(outcome);
+        assertThat(outcome.get("outcome").asText()).isEqualTo("WON");
+
+        assertThat(count("dispute_evidence_versions")).isEqualTo(2);
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'EVIDENCE_REVISED'")).isEqualTo(2);
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'SUBMITTED'")).isOne();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'OUTCOME_WON'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.evidence_revised'")).isEqualTo(2);
+        assertThat(countWhere("audit_logs", "action = 'dispute.submitted'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.outcome_recorded'")).isOne();
+        assertThat(count("ledger_entries")).isEqualTo(ledgerRows);
+        assertThat(count("fraud_labels")).isEqualTo(fraudLabels);
+        assertThat(value("SELECT lifecycle_status FROM dispute_workflows WHERE chargeback_id = ?", chargebackId))
+                .isEqualTo("WON");
+
+        UUID workflowId = UUID.fromString(initial.get("id").asText());
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE dispute_evidence_versions SET device_continuity = FALSE WHERE dispute_workflow_id = ?",
+                workflowId)).hasMessageContaining("Dispute operations history is append-only");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM dispute_workflow_events WHERE dispute_workflow_id = ?", workflowId))
+                .hasMessageContaining("Dispute operations history is append-only");
+    }
+
+    @Test
+    void forcedConcurrentSubmissionsSerializeToOneSubmittedVersionAndEvent() throws Exception {
+        CapturedFixture fixture = captured("dispute-submit-race", 6200L);
+        OperatorAccess manager = createOperator(fixture, "submit-race-manager", "RISK_MANAGER");
+        Instant receivedAt = Instant.now().minusSeconds(60);
+        JsonNode chargeback = postChargeback(fixture.apiKey(), "submit-race-chargeback",
+                chargebackRequest("dispute.submit.race", fixture.paymentIntentId(), 6200L,
+                        "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
+                        receivedAt.plusSeconds(86400)), 201);
+        UUID chargebackId = UUID.fromString(chargeback.get("id").asText());
+        json(mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                .header(RISK_KEY_HEADER, manager.secret()).header(IDEMPOTENCY_KEY, "submit-race-evidence")
+                .contentType(APPLICATION_JSON)
+                .content("{\"deliveryConfirmed\":false,\"customerCommunicationPresent\":false,"
+                        + "\"deviceContinuity\":true}")), 200);
+        CountDownLatch ownerPreparedSubmission = new CountDownLatch(1);
+        CountDownLatch releaseOwnerCommit = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<MvcResult> owner = executor.submit(() -> new TransactionTemplate(transactionManager).execute(
+                    transactionStatus -> {
+                        try {
+                            MvcResult result = mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                                    .header(RISK_KEY_HEADER, manager.secret())
+                                    .header(IDEMPOTENCY_KEY, "submit-race-owner")
+                                    .contentType(APPLICATION_JSON)
+                                    .content("{\"expectedEvidenceVersion\":1}"))
+                                    .andReturn();
+                            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+                            ownerPreparedSubmission.countDown();
+                            await(releaseOwnerCommit);
+                            return result;
+                        } catch (Exception exception) {
+                            throw new IllegalStateException(exception);
+                        }
+                    }));
+            assertThat(ownerPreparedSubmission.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRiskOperatorLockConflict(manager.id());
+            Future<MvcResult> contender = executor.submit(() -> mockMvc.perform(
+                    post("/risk/disputes/{id}/submit", chargebackId)
+                            .header(RISK_KEY_HEADER, manager.secret())
+                            .header(IDEMPOTENCY_KEY, "submit-race-contender")
+                            .contentType(APPLICATION_JSON)
+                            .content("{\"expectedEvidenceVersion\":1}"))
+                    .andReturn());
+            awaitDatabaseLockWait("risk_operators");
+            releaseOwnerCommit.countDown();
+            assertThat(owner.get(5, TimeUnit.SECONDS).getResponse().getStatus()).isEqualTo(200);
+            assertThat(contender.get(5, TimeUnit.SECONDS).getResponse().getStatus()).isEqualTo(409);
+        }
+
+        assertThat(value("SELECT lifecycle_status FROM dispute_workflows WHERE chargeback_id = ?", chargebackId))
+                .isEqualTo("SUBMITTED");
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'SUBMITTED'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.submitted'")).isOne();
+    }
+
+    @Test
+    void forcedOperatorDisableBeforeEvidenceRevisionRejectsInFlightAndFutureMutations()
+            throws Exception {
+        CapturedFixture fixture = captured("dispute-operator-disable", 6300L);
+        Merchant merchant = merchantRepository.findById(fixture.merchantId()).orElseThrow();
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix());
+        RiskOperatorService.CreationResult manager = riskOperatorService.create(
+                merchantContext, "dispute-operator-disable-manager",
+                RiskOperatorRole.RISK_MANAGER, "dispute-operator-disable-manager");
+        RiskOperatorContext managerContext = new RiskOperatorContext(
+                merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
+                manager.operator().getRole(), manager.credentialPrefix());
+        Instant receivedAt = Instant.now().minusSeconds(60);
+        JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-operator-disable-create",
+                chargebackRequest("dispute.operator.disable", fixture.paymentIntentId(), 6300L,
+                        "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
+                        receivedAt.plusSeconds(86400)), 201);
+        UUID chargebackId = UUID.fromString(chargeback.get("id").asText());
+        CountDownLatch disableOwnsActorLock = new CountDownLatch(1);
+        CountDownLatch releaseDisable = new CountDownLatch(1);
+        CountDownLatch revisionStarted = new CountDownLatch(1);
+        AtomicInteger revisionBackendPid = new AtomicInteger();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    riskOperatorService.disable(merchantContext, manager.operator().getId(),
+                            "dispute-operator-disable-disable");
+                    disableOwnsActorLock.countDown();
+                    await(releaseDisable);
+                });
+                return null;
+            });
+            assertThat(disableOwnsActorLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRiskOperatorLockConflict(manager.operator().getId());
+
+            Future<?> revision = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                        revisionBackendPid.set(currentBackendPid());
+                        revisionStarted.countDown();
+                        disputeOperationsService.reviseEvidence(managerContext, chargebackId,
+                                false, false, true, "dispute-operator-disable-in-flight");
+                    }));
+            assertThat(revisionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitBackendLockWait(revisionBackendPid.get());
+
+            releaseDisable.countDown();
+            disable.get(5, TimeUnit.SECONDS);
+            assertNotFound(revision);
+        } finally {
+            releaseDisable.countDown();
+        }
+
+        assertThat(value("SELECT status FROM risk_operators WHERE id = ?",
+                manager.operator().getId())).isEqualTo("DISABLED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT disabled_at IS NOT NULL FROM risk_operator_credentials
+                 WHERE merchant_id = ? AND risk_operator_id = ?
+                """, Boolean.class, merchant.getId(), manager.operator().getId())).isTrue();
+        assertThat(value("SELECT lifecycle_status FROM dispute_workflows WHERE chargeback_id = ?",
+                chargebackId)).isEqualTo("DRAFT");
+        assertThat(count("dispute_evidence_versions")).isZero();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'EVIDENCE_REVISED'")).isZero();
+        assertThat(countWhere("audit_logs", "action = 'dispute.evidence_revised'")).isZero();
+        assertThatThrownBy(() -> disputeOperationsService.reviseEvidence(managerContext,
+                chargebackId, false, false, true, "dispute-operator-disable-future"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        mockMvc.perform(post("/risk/disputes/{id}/evidence-versions", chargebackId)
+                        .header(RISK_KEY_HEADER, manager.rawSecret())
+                        .header(IDEMPOTENCY_KEY, "dispute-operator-disable-future-http")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"deliveryConfirmed\":false,"
+                                + "\"customerCommunicationPresent\":false,"
+                                + "\"deviceContinuity\":true}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(count("dispute_evidence_versions")).isZero();
+    }
+
+    @Test
+    void forcedOperatorDisableBeforeSubmissionRejectsInFlightAndFutureMutations()
+            throws Exception {
+        CapturedFixture fixture = captured("dispute-submit-operator-disable", 6350L);
+        Merchant merchant = merchantRepository.findById(fixture.merchantId()).orElseThrow();
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix());
+        RiskOperatorService.CreationResult manager = riskOperatorService.create(
+                merchantContext, "dispute-submit-operator-disable-manager",
+                RiskOperatorRole.RISK_MANAGER, "dispute-submit-operator-disable-manager");
+        RiskOperatorContext managerContext = new RiskOperatorContext(
+                merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
+                manager.operator().getRole(), manager.credentialPrefix());
+        Instant receivedAt = Instant.now().minusSeconds(60);
+        JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-submit-operator-disable-create",
+                chargebackRequest("dispute.submit.operator.disable", fixture.paymentIntentId(), 6350L,
+                        "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
+                        receivedAt.plusSeconds(86400)), 201);
+        UUID chargebackId = UUID.fromString(chargeback.get("id").asText());
+        DisputeOperationsService.WorkflowView ready = disputeOperationsService.reviseEvidence(
+                managerContext, chargebackId, false, false, true,
+                "dispute-submit-operator-disable-evidence");
+        assertThat(ready.lifecycleStatus()).isEqualTo(DisputeWorkflowStatus.READY);
+        assertThat(ready.latestEvidenceVersion()).isEqualTo(1);
+        CountDownLatch disableOwnsActorLock = new CountDownLatch(1);
+        CountDownLatch releaseDisable = new CountDownLatch(1);
+        CountDownLatch submissionStarted = new CountDownLatch(1);
+        AtomicInteger submissionBackendPid = new AtomicInteger();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    riskOperatorService.disable(merchantContext, manager.operator().getId(),
+                            "dispute-submit-operator-disable-disable");
+                    disableOwnsActorLock.countDown();
+                    await(releaseDisable);
+                });
+                return null;
+            });
+            assertThat(disableOwnsActorLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRiskOperatorLockConflict(manager.operator().getId());
+
+            Future<?> submission = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                        submissionBackendPid.set(currentBackendPid());
+                        submissionStarted.countDown();
+                        disputeOperationsService.submit(managerContext, chargebackId, 1,
+                                "dispute-submit-operator-disable-in-flight");
+                    }));
+            assertThat(submissionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitBackendLockWait(submissionBackendPid.get());
+
+            releaseDisable.countDown();
+            disable.get(5, TimeUnit.SECONDS);
+            assertNotFound(submission);
+        } finally {
+            releaseDisable.countDown();
+        }
+
+        assertThat(value("SELECT status FROM risk_operators WHERE id = ?",
+                manager.operator().getId())).isEqualTo("DISABLED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT disabled_at IS NOT NULL FROM risk_operator_credentials
+                 WHERE merchant_id = ? AND risk_operator_id = ?
+                """, Boolean.class, merchant.getId(), manager.operator().getId())).isTrue();
+        assertThat(value("SELECT lifecycle_status FROM dispute_workflows WHERE chargeback_id = ?",
+                chargebackId)).isEqualTo("READY");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT submitted_evidence_version_id IS NULL AND submitted_at IS NULL
+                  FROM dispute_workflows WHERE chargeback_id = ?
+                """, Boolean.class, chargebackId)).isTrue();
+        assertThat(count("dispute_evidence_versions")).isOne();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'EVIDENCE_REVISED'")).isOne();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'SUBMITTED'")).isZero();
+        assertThat(countWhere("audit_logs", "action = 'dispute.evidence_revised'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.submitted'")).isZero();
+        assertThatThrownBy(() -> disputeOperationsService.submit(managerContext,
+                chargebackId, 1, "dispute-submit-operator-disable-future"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        mockMvc.perform(post("/risk/disputes/{id}/submit", chargebackId)
+                        .header(RISK_KEY_HEADER, manager.rawSecret())
+                        .header(IDEMPOTENCY_KEY, "dispute-submit-operator-disable-future-http")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"expectedEvidenceVersion\":1}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM idempotency_records WHERE idempotency_key = ?
+                """, Integer.class, "dispute-submit-operator-disable-future-http")).isZero();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'SUBMITTED'")).isZero();
+    }
+
+    @Test
+    void completedDisputeMutationReplaysReauthorizeLiveManagerAfterDisable()
+            throws Exception {
+        CapturedFixture fixture = captured("dispute-disabled-completed-replay", 6375L);
+        Merchant merchant = merchantRepository.findById(fixture.merchantId()).orElseThrow();
+        MerchantContext merchantContext = new MerchantContext(
+                merchant.getId(), merchant.getName(), merchant.getApiKeyPrefix());
+        RiskOperatorService.CreationResult manager = riskOperatorService.create(
+                merchantContext, "dispute-disabled-completed-replay-manager",
+                RiskOperatorRole.RISK_MANAGER, "dispute-disabled-completed-replay-manager");
+        RiskOperatorContext managerContext = new RiskOperatorContext(
+                merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
+                manager.operator().getRole(), manager.credentialPrefix());
+        Instant receivedAt = Instant.now().minusSeconds(60);
+        JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-disabled-completed-replay-create",
+                chargebackRequest("dispute.disabled.completed.replay", fixture.paymentIntentId(), 6375L,
+                        "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
+                        receivedAt.plusSeconds(86400)), 201);
+        UUID chargebackId = UUID.fromString(chargeback.get("id").asText());
+        String evidenceKey = "dispute-disabled-completed-replay-evidence";
+        String evidenceOperation = "risk.disputes.evidence.revise:" + chargebackId;
+        DisputeOperationsController.EvidenceRevisionRequest evidenceRequest =
+                new DisputeOperationsController.EvidenceRevisionRequest(false, false, true);
+        ResponseEntity<DisputeOperationsService.WorkflowView> revised =
+                idempotencyService.executeAuthorized(managerContext, evidenceKey,
+                        evidenceOperation, evidenceRequest,
+                        DisputeOperationsService.WorkflowView.class,
+                        () -> disputeOperationsService.authorizeEvidenceRevisionReplay(
+                                managerContext, chargebackId),
+                        () -> ResponseEntity.ok(disputeOperationsService.reviseEvidence(
+                                managerContext, chargebackId, false, false, true,
+                                "dispute-disabled-completed-replay-evidence-original")));
+        ResponseEntity<DisputeOperationsService.WorkflowView> activeEvidenceReplay =
+                idempotencyService.executeAuthorized(managerContext, evidenceKey,
+                        evidenceOperation, evidenceRequest,
+                        DisputeOperationsService.WorkflowView.class,
+                        () -> disputeOperationsService.authorizeEvidenceRevisionReplay(
+                                managerContext, chargebackId),
+                        () -> {
+                            throw new AssertionError("Completed evidence replay invoked its operation");
+                        });
+        assertThat(activeEvidenceReplay.getBody()).isEqualTo(revised.getBody());
+
+        String submitKey = "dispute-disabled-completed-replay-submit";
+        String submitOperation = "risk.disputes.submit:" + chargebackId;
+        DisputeOperationsController.SubmitRequest submitRequest =
+                new DisputeOperationsController.SubmitRequest(1);
+        ResponseEntity<DisputeOperationsService.WorkflowView> submitted =
+                idempotencyService.executeAuthorized(managerContext, submitKey,
+                        submitOperation, submitRequest,
+                        DisputeOperationsService.WorkflowView.class,
+                        () -> disputeOperationsService.authorizeSubmissionReplay(
+                                managerContext, chargebackId),
+                        () -> ResponseEntity.ok(disputeOperationsService.submit(
+                                managerContext, chargebackId, 1,
+                                "dispute-disabled-completed-replay-submit-original")));
+        ResponseEntity<DisputeOperationsService.WorkflowView> activeSubmitReplay =
+                idempotencyService.executeAuthorized(managerContext, submitKey,
+                        submitOperation, submitRequest,
+                        DisputeOperationsService.WorkflowView.class,
+                        () -> disputeOperationsService.authorizeSubmissionReplay(
+                                managerContext, chargebackId),
+                        () -> {
+                            throw new AssertionError("Completed submission replay invoked its operation");
+                        });
+        assertThat(activeSubmitReplay.getBody()).isEqualTo(submitted.getBody());
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus ->
+                riskOperatorService.disable(merchantContext, manager.operator().getId(),
+                        "dispute-disabled-completed-replay-disable"));
+
+        assertThatThrownBy(() -> idempotencyService.executeAuthorized(
+                managerContext, evidenceKey, evidenceOperation, evidenceRequest,
+                DisputeOperationsService.WorkflowView.class,
+                () -> disputeOperationsService.authorizeEvidenceRevisionReplay(
+                        managerContext, chargebackId),
+                () -> {
+                    throw new AssertionError("Disabled evidence replay invoked its operation");
+                }))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        assertThatThrownBy(() -> idempotencyService.executeAuthorized(
+                managerContext, submitKey, submitOperation, submitRequest,
+                DisputeOperationsService.WorkflowView.class,
+                () -> disputeOperationsService.authorizeSubmissionReplay(
+                        managerContext, chargebackId),
+                () -> {
+                    throw new AssertionError("Disabled submission replay invoked its operation");
+                }))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+
+        assertThat(value("SELECT status FROM risk_operators WHERE id = ?",
+                manager.operator().getId())).isEqualTo("DISABLED");
+        assertThat(value("SELECT lifecycle_status FROM dispute_workflows WHERE chargeback_id = ?",
+                chargebackId)).isEqualTo("SUBMITTED");
+        assertThat(count("dispute_evidence_versions")).isOne();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'EVIDENCE_REVISED'")).isOne();
+        assertThat(countWhere("dispute_workflow_events", "event_type = 'SUBMITTED'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.evidence_revised'")).isOne();
+        assertThat(countWhere("audit_logs", "action = 'dispute.submitted'")).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM idempotency_records
+                 WHERE idempotency_key IN (?, ?) AND status = 'COMPLETED' AND http_status = 200
+                """, Integer.class, evidenceKey, submitKey)).isEqualTo(2);
+    }
+
     private CapturedFixture captured(String name, long amount) {
         return captured(name, amount, CaptureMethod.AUTOMATIC);
     }
@@ -591,6 +1073,20 @@ class ChargebackAndDisputeContractTests {
         String response = performChargeback(apiKey, idempotencyKey, body)
                 .andExpect(status().is(statusCode)).andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(response);
+    }
+
+    private OperatorAccess createOperator(CapturedFixture fixture, String key, String role) throws Exception {
+        JsonNode response = json(mockMvc.perform(post("/risk/operators")
+                .header(API_KEY_HEADER, fixture.apiKey()).header(IDEMPOTENCY_KEY, key)
+                .contentType(APPLICATION_JSON).content("{\"role\":\"" + role + "\"}")), 201);
+        return new OperatorAccess(UUID.fromString(response.get("id").asText()),
+                response.get("credential").asText());
+    }
+
+    private JsonNode json(org.springframework.test.web.servlet.ResultActions action, int statusCode)
+            throws Exception {
+        return objectMapper.readTree(action.andExpect(status().is(statusCode)).andReturn()
+                .getResponse().getContentAsString());
     }
 
     private org.springframework.test.web.servlet.ResultActions performChargeback(
@@ -675,6 +1171,28 @@ class ChargebackAndDisputeContractTests {
         throw new AssertionError("Expected PaymentIntent row lock was not observed");
     }
 
+    private void awaitRiskOperatorLockConflict(UUID operatorId) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            try (Connection connection = dataSource.getConnection();
+                    PreparedStatement statement = connection.prepareStatement("""
+                            SELECT id FROM risk_operators WHERE id = ? FOR UPDATE NOWAIT
+                            """)) {
+                connection.setAutoCommit(false);
+                statement.setObject(1, operatorId);
+                statement.executeQuery();
+                connection.rollback();
+            } catch (SQLException exception) {
+                if ("55P03".equals(exception.getSQLState())) {
+                    return;
+                }
+                throw exception;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Expected risk operator row lock was not observed");
+    }
+
     private void awaitDatabaseLockWait(String tableName) throws Exception {
         long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
@@ -694,6 +1212,45 @@ class ChargebackAndDisputeContractTests {
         throw new AssertionError("Competing operation did not wait on " + tableName);
     }
 
+    private int currentBackendPid() {
+        Integer backendPid = jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class);
+        if (backendPid == null) {
+            throw new IllegalStateException("PostgreSQL backend PID was unavailable");
+        }
+        return backendPid;
+    }
+
+    private void awaitBackendLockWait(int backendPid) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            Boolean waiting = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                         WHERE pid = ? AND wait_event_type = 'Lock'
+                    )
+                    """, Boolean.class, backendPid);
+            if (Boolean.TRUE.equals(waiting)) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Dispute mutation did not wait on the risk operator lock");
+    }
+
+    private void assertNotFound(Future<?> future) throws Exception {
+        try {
+            future.get(5, TimeUnit.SECONDS);
+            throw new AssertionError("Expected disabled-actor operation to fail");
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            while (cause.getCause() != null && !(cause instanceof ResponseStatusException)) {
+                cause = cause.getCause();
+            }
+            assertThat(cause).isInstanceOf(ResponseStatusException.class);
+            assertThat(((ResponseStatusException) cause).getStatusCode().value()).isEqualTo(404);
+        }
+    }
+
     private void await(CountDownLatch latch) {
         try {
             if (!latch.await(5, TimeUnit.SECONDS)) {
@@ -707,5 +1264,8 @@ class ChargebackAndDisputeContractTests {
 
     private record CapturedFixture(UUID merchantId, String apiKey, UUID paymentIntentId,
             UUID paymentAttemptId, UUID authorizationId) {
+    }
+
+    private record OperatorAccess(UUID id, String secret) {
     }
 }

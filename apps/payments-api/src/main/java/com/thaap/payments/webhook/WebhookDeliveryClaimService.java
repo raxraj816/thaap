@@ -175,7 +175,7 @@ public class WebhookDeliveryClaimService {
             if (delivery.getStatus() == WebhookDeliveryStatus.DELIVERING) {
                 WebhookDeliveryAttempt expiredAttempt = closeExpiredAttempt(delivery, now);
                 boolean attemptsExhausted =
-                        delivery.getAttemptCount() >= WebhookRetryPolicy.MAX_ATTEMPTS;
+                        delivery.getGenerationAttemptCount() >= WebhookRetryPolicy.MAX_ATTEMPTS;
                 boolean endpointDisabled =
                         endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED;
                 recoveries.add(new RecoveryObservation(delivery.getEventType(),
@@ -203,14 +203,22 @@ public class WebhookDeliveryClaimService {
             }
             WebhookEvent event = eventRepository.findById(delivery.getWebhookEventId())
                     .orElseThrow(() -> new IllegalStateException("Webhook event lineage disappeared"));
+            int deliveryGeneration = delivery.getDeliveryGeneration();
+            UUID redeliveryRequestId = deliveryGeneration == 1 ? null : requireRedeliveryRequestId(
+                    delivery.getMerchantId(), delivery.getId(), deliveryGeneration);
             UUID claimToken = delivery.claim(now, now.plus(leaseDuration));
             WebhookDeliveryAttempt attempt = attemptRepository.save(new WebhookDeliveryAttempt(
-                    delivery.getMerchantId(), delivery.getId(), delivery.getAttemptCount(), now));
+                    delivery.getMerchantId(), delivery.getId(), delivery.getAttemptCount(),
+                    deliveryGeneration, delivery.getGenerationAttemptCount(),
+                    deliveryGeneration == 1 ? "AUTOMATIC_RETRY" : "MANUAL_REDELIVERY",
+                    event.getPayloadSha256(), endpoint.getSigningSecretGeneration(),
+                    redeliveryRequestId, now));
             claims.add(new WebhookDeliveryClaim(delivery.getId(), delivery.getMerchantId(),
                     endpoint.getId(), event.getId(), event.getEventType(), endpoint.getUrl(),
                     event.getPayload(), event.getPayloadSha256(), claimToken,
                     attempt.getAttemptNumber(), endpoint.getSigningSecretGeneration(), now,
-                    delivery.getCreatedAt()));
+                    delivery.getCreatedAt(), deliveryGeneration,
+                    delivery.getGenerationAttemptCount(), redeliveryRequestId));
         }
         entityManager.flush();
         return new ClaimBatch(List.copyOf(claims), List.copyOf(recoveries));
@@ -397,7 +405,7 @@ public class WebhookDeliveryClaimService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Expired webhook delivery lease has no attempt evidence"));
         if (attempt.getDispatchStartedAt() == null) {
-            if (delivery.getAttemptCount() >= WebhookRetryPolicy.MAX_ATTEMPTS) {
+            if (delivery.getGenerationAttemptCount() >= WebhookRetryPolicy.MAX_ATTEMPTS) {
                 attempt.failTerminally(now, false, null, WebhookDeliveryErrorCode.LEASE_EXPIRED);
             } else {
                 attempt.failRetryably(now, false, null, WebhookDeliveryErrorCode.LEASE_EXPIRED);
@@ -406,6 +414,18 @@ public class WebhookDeliveryClaimService {
             attempt.markOutcomeUnknown(now, WebhookDeliveryErrorCode.LEASE_EXPIRED);
         }
         return attempt;
+    }
+
+    private UUID requireRedeliveryRequestId(UUID merchantId, UUID deliveryId, int generation) {
+        List<UUID> requestIds = jdbcTemplate.queryForList("""
+                SELECT id FROM webhook_redelivery_requests
+                 WHERE merchant_id = ? AND webhook_delivery_id = ?
+                   AND requested_generation = ?
+                """, UUID.class, merchantId, deliveryId, generation);
+        if (requestIds.size() != 1) {
+            throw new IllegalStateException("Manual webhook generation has no redelivery request evidence");
+        }
+        return requestIds.getFirst();
     }
 
     private record ClaimBatch(
