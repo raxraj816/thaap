@@ -57,17 +57,37 @@ public class IdempotencyService {
     public <T> ResponseEntity<T> execute(MerchantContext merchantContext, String key, String operation, Object request,
             Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
         return execute(IdempotencyPrincipal.merchant(merchantContext), key, operation,
-                request, responseType, operationSupplier);
+                request, responseType, () -> { }, operationSupplier);
+    }
+
+    /**
+     * Reserves and completes idempotency in short transactions while running the supplied
+     * operation outside a database transaction. This is reserved for operations whose service
+     * explicitly splits durable preparation/finalization around external I/O.
+     */
+    public <T> ResponseEntity<T> executeDetached(MerchantContext merchantContext, String key,
+            String operation, Object request, Class<T> responseType,
+            Supplier<ResponseEntity<T>> operationSupplier) {
+        return executeDetached(IdempotencyPrincipal.merchant(merchantContext), key,
+                operation, request, responseType, operationSupplier);
     }
 
     public <T> ResponseEntity<T> execute(RiskOperatorContext operatorContext, String key, String operation,
             Object request, Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
         return execute(IdempotencyPrincipal.riskOperator(operatorContext), key, operation,
-                request, responseType, operationSupplier);
+                request, responseType, () -> { }, operationSupplier);
+    }
+
+    public <T> ResponseEntity<T> executeAuthorized(RiskOperatorContext operatorContext,
+            String key, String operation, Object request, Class<T> responseType,
+            Runnable replayAuthorization, Supplier<ResponseEntity<T>> operationSupplier) {
+        return execute(IdempotencyPrincipal.riskOperator(operatorContext), key, operation,
+                request, responseType, replayAuthorization, operationSupplier);
     }
 
     private <T> ResponseEntity<T> execute(IdempotencyPrincipal principal, String key, String operation,
-            Object request, Class<T> responseType, Supplier<ResponseEntity<T>> operationSupplier) {
+            Object request, Class<T> responseType, Runnable replayAuthorization,
+            Supplier<ResponseEntity<T>> operationSupplier) {
         if (key == null || key.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
         }
@@ -83,6 +103,7 @@ public class IdempotencyService {
                 principal, key, operation, serializedRequest,
                 currentRequestHash, sensitiveValueHasher.currentKeyVersion());
         if (reservation.replayRecord() != null) {
+            replayAuthorization.run();
             return replay(reservation.replayRecord(), responseType);
         }
 
@@ -93,6 +114,42 @@ public class IdempotencyService {
             releaseReservation(reservation.recordId(), reservation.leaseToken());
             throw exception;
         }
+    }
+
+    private <T> ResponseEntity<T> executeDetached(IdempotencyPrincipal principal, String key,
+            String operation, Object request, Class<T> responseType,
+            Supplier<ResponseEntity<T>> operationSupplier) {
+        requireKey(key);
+        String serializedRequest = write(request);
+        String currentRequestHash = requestHash(
+                serializedRequest, sensitiveValueHasher.currentKeyVersion());
+        IdempotencyReservation reservation = reserve(
+                principal, key, operation, serializedRequest,
+                currentRequestHash, sensitiveValueHasher.currentKeyVersion());
+        if (reservation.replayRecord() != null) {
+            return replay(reservation.replayRecord(), responseType);
+        }
+        try {
+            ResponseEntity<T> response = operationSupplier.get();
+            return completeDetached(reservation.recordId(), reservation.leaseToken(), response);
+        } catch (RuntimeException | Error exception) {
+            releaseReservation(reservation.recordId(), reservation.leaseToken());
+            throw exception;
+        }
+    }
+
+    private <T> ResponseEntity<T> completeDetached(UUID recordId, UUID leaseToken,
+            ResponseEntity<T> response) {
+        return operationTransaction.execute(status -> {
+            IdempotencyRecord record = idempotencyRepository.findByIdForUpdate(recordId)
+                    .orElseThrow(() -> new IllegalStateException("Idempotency reservation disappeared"));
+            record.requireOwnedInProgress(leaseToken);
+            Instant completedAt = clock.instant();
+            String responseBody = protectResponse(record, write(response.getBody()));
+            record.complete(leaseToken, response.getStatusCode().value(), responseBody,
+                    completedAt, completedAt.plus(DEFAULT_KEY_TTL));
+            return response;
+        });
     }
 
     private <T> ResponseEntity<T> replay(IdempotencyRecord record, Class<T> responseType) {
@@ -116,6 +173,16 @@ public class IdempotencyService {
             return reservationTransaction.execute(status -> handleExisting(
                     principal, key, operation, serializedRequest,
                     currentRequestHash, currentRequestHashKeyVersion));
+        }
+    }
+
+    private void requireKey(String key) {
+        if (key == null || key.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
+        }
+        if (key.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Idempotency-Key must contain at most 255 characters");
         }
     }
 
@@ -223,18 +290,25 @@ public class IdempotencyService {
     }
 
     private String protectResponse(IdempotencyRecord record, String responseBody) {
-        if (!responseBody.matches("(?s).*\\\"clientSecret\\\"\\s*:\\s*\\\"authc_[A-Za-z0-9_-]{43}\\\".*")) {
+        boolean authenticationSecret = responseBody.matches(
+                "(?s).*\\\"clientSecret\\\"\\s*:\\s*\\\"authc_[A-Za-z0-9_-]{43}\\\".*");
+        boolean protectedContent = responseBody.matches(
+                "(?s).*\\\"content\\\"\\s*:\\s*\\\".*");
+        if (!authenticationSecret && !protectedContent) {
             return responseBody;
         }
         AuthenticationReplayCipher.EncryptedReplay replay = authenticationReplayCipher.encrypt(
                 responseBody, record.getMerchantId(), record.getId());
-        return write(new ProtectedAuthenticationReplay("authentication-replay-v1",
+        String format = authenticationSecret
+                ? "authentication-replay-v1" : "sensitive-replay-v1";
+        return write(new ProtectedAuthenticationReplay(format,
                 replay.ciphertext(), replay.nonce(), replay.keyVersion()));
     }
 
     private String unprotectResponse(IdempotencyRecord record) throws JsonProcessingException {
         String responseBody = record.getResponseBody();
-        if (responseBody == null || !responseBody.contains("\"format\":\"authentication-replay-v1\"")) {
+        if (responseBody == null || (!responseBody.contains("\"format\":\"authentication-replay-v1\"")
+                && !responseBody.contains("\"format\":\"sensitive-replay-v1\""))) {
             return responseBody;
         }
         ProtectedAuthenticationReplay protectedReplay = objectMapper.readValue(

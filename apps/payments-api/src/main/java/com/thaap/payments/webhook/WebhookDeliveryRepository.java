@@ -23,6 +23,16 @@ public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery
             """)
     Optional<WebhookDelivery> findByIdForUpdate(@Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT delivery
+            FROM WebhookDelivery delivery
+            WHERE delivery.id = :id
+              AND delivery.merchantId = :merchantId
+            """)
+    Optional<WebhookDelivery> findByIdAndMerchantIdForUpdate(
+            @Param("id") UUID id, @Param("merchantId") UUID merchantId);
+
     List<WebhookDelivery> findByMerchantIdOrderByCreatedAtDescIdDesc(UUID merchantId, Pageable pageable);
 
     @Query("""
@@ -42,6 +52,34 @@ public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery
             @Param("merchantId") UUID merchantId,
             @Param("beforeCreatedAt") java.time.Instant beforeCreatedAt,
             @Param("beforeId") UUID beforeId,
+            Pageable pageable);
+
+    @Query("""
+            SELECT delivery
+            FROM WebhookDelivery delivery
+            WHERE delivery.merchantId = :merchantId
+              AND delivery.status = com.thaap.payments.webhook.WebhookDeliveryStatus.EXHAUSTED
+              AND (:hasEventType = FALSE OR delivery.eventType = :eventType)
+              AND (:hasErrorCode = FALSE OR delivery.lastErrorCode = :errorCode)
+              AND (:hasCreatedAfter = FALSE OR delivery.createdAt >= :createdAfter)
+              AND (:hasCreatedBefore = FALSE OR delivery.createdAt < :createdBefore)
+              AND (:hasCursor = FALSE OR delivery.createdAt < :cursorCreatedAt
+                   OR (delivery.createdAt = :cursorCreatedAt AND delivery.id < :cursorId))
+            ORDER BY delivery.createdAt DESC, delivery.id DESC
+            """)
+    List<WebhookDelivery> findDeadLetters(
+            @Param("merchantId") UUID merchantId,
+            @Param("hasEventType") boolean hasEventType,
+            @Param("eventType") String eventType,
+            @Param("hasErrorCode") boolean hasErrorCode,
+            @Param("errorCode") WebhookDeliveryErrorCode errorCode,
+            @Param("hasCreatedAfter") boolean hasCreatedAfter,
+            @Param("createdAfter") java.time.Instant createdAfter,
+            @Param("hasCreatedBefore") boolean hasCreatedBefore,
+            @Param("createdBefore") java.time.Instant createdBefore,
+            @Param("hasCursor") boolean hasCursor,
+            @Param("cursorCreatedAt") java.time.Instant cursorCreatedAt,
+            @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
     @Query(value = """

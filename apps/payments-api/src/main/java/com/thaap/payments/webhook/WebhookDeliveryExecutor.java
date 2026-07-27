@@ -148,8 +148,13 @@ public class WebhookDeliveryExecutor {
                 WebhookDeliveryFinalizationResult result =
                         finalizationService.succeed(claim, completedAt, response.statusCode());
                 recordFinalization(claim, result, attemptStartedAt, completedAt);
-            } else {
+            } else if (isRetryableHttpStatus(response.statusCode())) {
                 WebhookDeliveryFinalizationResult result = finalizationService.failRetryably(
+                        claim, completedAt, true, response.statusCode(),
+                        WebhookDeliveryErrorCode.HTTP_NON_SUCCESS);
+                recordFinalization(claim, result, attemptStartedAt, completedAt);
+            } else {
+                WebhookDeliveryFinalizationResult result = finalizationService.failTerminally(
                         claim, completedAt, true, response.statusCode(),
                         WebhookDeliveryErrorCode.HTTP_NON_SUCCESS);
                 recordFinalization(claim, result, attemptStartedAt, completedAt);
@@ -187,7 +192,7 @@ public class WebhookDeliveryExecutor {
                     claim.signingSecretGeneration(), claim.payload(),
                     preparationStartedAt, signer);
         } catch (WebhookStaleSecretGenerationException exception) {
-            if (claim.attemptNumber() < WebhookRetryPolicy.MAX_ATTEMPTS) {
+            if (claim.generationAttemptNumber() < WebhookRetryPolicy.MAX_ATTEMPTS) {
                 throw exception;
             }
             LOGGER.warn("Final webhook attempt is rebinding a stale secret generation before HTTP "
@@ -205,6 +210,11 @@ public class WebhookDeliveryExecutor {
         WebhookDeliveryFinalizationResult result =
                 finalizationService.failRetryably(claim, completedAt, false, null, errorCode);
         recordFinalization(claim, result, startedAt, completedAt);
+    }
+
+    static boolean isRetryableHttpStatus(int statusCode) {
+        return statusCode == 408 || statusCode == 425 || statusCode == 429
+                || (statusCode >= 500 && statusCode <= 599);
     }
 
     private void requirePayloadIntegrity(WebhookDeliveryClaim claim) {

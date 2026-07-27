@@ -15,13 +15,24 @@ import com.thaap.payments.risk.RiskOperatorService;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.workspace.ReviewNote;
+import com.thaap.payments.workspace.ReviewNoteCipher;
+import com.thaap.payments.workspace.ReviewNoteRepository;
+import com.thaap.payments.workspace.ReviewNoteService;
+import com.thaap.payments.workspace.AnalystQueueService;
+import com.thaap.payments.workspace.ReviewQueueColumn;
+import com.thaap.payments.workspace.ReviewQueueSort;
+import com.thaap.payments.workspace.ReviewSavedSearchService;
+import com.thaap.payments.workspace.SavedSearchVisibility;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -79,6 +90,11 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
     @Autowired private MeterRegistry meterRegistry;
     @Autowired private ReviewOperationsService reviewOperationsService;
     @Autowired private RiskOperatorService riskOperatorService;
+    @Autowired private ReviewNoteService reviewNoteService;
+    @Autowired private ReviewNoteRepository reviewNoteRepository;
+    @Autowired private ReviewNoteCipher reviewNoteCipher;
+    @Autowired private ReviewSavedSearchService reviewSavedSearchService;
+    @Autowired private AnalystQueueService analystQueueService;
 
     private MockMvc mockMvc;
 
@@ -347,6 +363,272 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
         assertThat(review.get("assigned_operator_id")).isEqualTo(manager.id());
         assertThat(((Number) review.get("assignment_version")).longValue()).isEqualTo(2L);
         assertThat(count("review_assignment_events")).isEqualTo(2);
+    }
+
+    @Test
+    void forcedRetentionFirstMakesManagerRedactionWaitAndConvergesToOneExpiredEvent()
+            throws Exception {
+        Fixture fixture = createFixture("workspace-retention-first");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "workspace-retention-first-assign");
+        OperatorAccess manager = createOperator(
+                fixture.merchant(), "workspace-retention-first-manager", "RISK_MANAGER");
+        UUID noteId = createDueReviewNote(fixture);
+        CountDownLatch retentionOwnsNoteLock = new CountDownLatch(1);
+        CountDownLatch releaseRetention = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> retention = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .execute(transactionStatus -> {
+                        int expired = reviewNoteService.expireDueNotes();
+                        retentionOwnsNoteLock.countDown();
+                        await(releaseRetention);
+                        return expired;
+                    }));
+            assertThat(retentionOwnsNoteLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("review_notes", noteId);
+            Future<ReviewNoteService.ReviewNoteView> redaction = executor.submit(() ->
+                    reviewNoteService.redact(manager.context(), fixture.review().reviewCaseId(),
+                            noteId, "workspace-retention-first-redaction"));
+            awaitDatabaseLockWait("review_notes");
+
+            releaseRetention.countDown();
+            assertThat(retention.get(5, TimeUnit.SECONDS)).isOne();
+            assertThat(redaction.get(5, TimeUnit.SECONDS).lifecycleStatus().name())
+                    .isEqualTo("EXPIRED");
+        }
+
+        assertTerminalNote(noteId, "EXPIRED", "RETENTION_EXPIRED");
+    }
+
+    @Test
+    void forcedManagerRedactionFirstMakesRetentionSkipLockedAndConvergesToOneRedactedEvent()
+            throws Exception {
+        Fixture fixture = createFixture("workspace-redaction-first");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "workspace-redaction-first-assign");
+        OperatorAccess manager = createOperator(
+                fixture.merchant(), "workspace-redaction-first-manager", "RISK_MANAGER");
+        UUID noteId = createDueReviewNote(fixture);
+        CountDownLatch redactionOwnsNoteLock = new CountDownLatch(1);
+        CountDownLatch releaseRedaction = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> redaction = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    reviewNoteService.redact(manager.context(), fixture.review().reviewCaseId(),
+                            noteId, "workspace-redaction-first");
+                    redactionOwnsNoteLock.countDown();
+                    await(releaseRedaction);
+                });
+                return null;
+            });
+            assertThat(redactionOwnsNoteLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("review_notes", noteId);
+            Future<Integer> skippedRetention = executor.submit(reviewNoteService::expireDueNotes);
+            assertThat(skippedRetention.get(5, TimeUnit.SECONDS)).isZero();
+
+            releaseRedaction.countDown();
+            redaction.get(5, TimeUnit.SECONDS);
+        }
+
+        assertThat(reviewNoteService.expireDueNotes()).isZero();
+        assertTerminalNote(noteId, "REDACTED", "MANAGER_REDACTION");
+    }
+
+    @Test
+    void forcedRedactionFirstBlocksReadUntilCiphertextIsDestroyed() throws Exception {
+        Fixture fixture = createFixture("workspace-redact-read");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "workspace-redact-read-assign");
+        OperatorAccess manager = createOperator(
+                fixture.merchant(), "workspace-redact-read-manager", "RISK_MANAGER");
+        ReviewNoteService.ReviewNoteView created = reviewNoteService.create(fixture.analyst().context(),
+                fixture.review().reviewCaseId(), 1L, "Verified delivery-address context",
+                null, "workspace-redact-read-create");
+        CountDownLatch redactionOwnsCaseAndNoteLocks = new CountDownLatch(1);
+        CountDownLatch releaseRedaction = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> redaction = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    reviewNoteService.redact(manager.context(), fixture.review().reviewCaseId(),
+                            created.id(), "workspace-redact-read-redaction");
+                    redactionOwnsCaseAndNoteLocks.countDown();
+                    await(releaseRedaction);
+                });
+                return null;
+            });
+            assertThat(redactionOwnsCaseAndNoteLocks.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("review_notes", created.id());
+            Future<List<ReviewNoteService.ReviewNoteView>> read = executor.submit(() ->
+                    reviewNoteService.list(fixture.analyst().context(),
+                            fixture.review().reviewCaseId(), 1L,
+                            "workspace-redact-read-list"));
+            awaitDatabaseLockWait("manual_review_cases");
+
+            releaseRedaction.countDown();
+            redaction.get(5, TimeUnit.SECONDS);
+            List<ReviewNoteService.ReviewNoteView> notes = read.get(5, TimeUnit.SECONDS);
+            assertThat(notes).singleElement().satisfies(note -> {
+                assertThat(note.lifecycleStatus().name()).isEqualTo("REDACTED");
+                assertThat(note.content()).isNull();
+            });
+        }
+    }
+
+    @Test
+    void forcedSavedSearchUpdateFirstMakesDisableWaitAndRejectsItsStaleVersion()
+            throws Exception {
+        Fixture fixture = createFixture("workspace-search-update-first");
+        OperatorAccess owner = createOperator(
+                fixture.merchant(), "workspace-search-update-owner", "RISK_MANAGER");
+        OperatorAccess secondManager = createOperator(
+                fixture.merchant(), "workspace-search-update-manager", "RISK_MANAGER");
+        ReviewSavedSearchService.SavedSearchView search = createSharedSavedSearch(owner,
+                "Update first queue");
+        CountDownLatch updateOwnsSearchLock = new CountDownLatch(1);
+        CountDownLatch releaseUpdate = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> update = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    reviewSavedSearchService.update(owner.context(), search.id(), 1L,
+                            "Updated priority queue", SavedSearchVisibility.MERCHANT_SHARED,
+                            null, ReviewQueueSort.CREATED_AT_ASC,
+                            Set.of(ReviewQueueColumn.CREATED_AT, ReviewQueueColumn.STATUS),
+                            "workspace-search-update-first");
+                    updateOwnsSearchLock.countDown();
+                    await(releaseUpdate);
+                });
+                return null;
+            });
+            assertThat(updateOwnsSearchLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("review_saved_searches", search.id());
+            Future<?> staleDisable = executor.submit(() -> reviewSavedSearchService.disable(
+                    secondManager.context(), search.id(), 1L, "workspace-stale-disable"));
+            awaitDatabaseLockWait("review_saved_searches");
+
+            releaseUpdate.countDown();
+            update.get(5, TimeUnit.SECONDS);
+            assertConflict(staleDisable);
+        }
+
+        Map<String, Object> durable = jdbcTemplate.queryForMap("""
+                SELECT name, lifecycle_status, lifecycle_version
+                  FROM review_saved_searches WHERE id = ?
+                """, search.id());
+        assertThat(durable.get("name")).isEqualTo("Updated priority queue");
+        assertThat(durable.get("lifecycle_status")).isEqualTo("ACTIVE");
+        assertThat(((Number) durable.get("lifecycle_version")).longValue()).isEqualTo(2L);
+    }
+
+    @Test
+    void forcedSavedSearchDisableFirstMakesUpdateWaitAndPreservesDisabledMeaning()
+            throws Exception {
+        Fixture fixture = createFixture("workspace-search-disable-first");
+        OperatorAccess owner = createOperator(
+                fixture.merchant(), "workspace-search-disable-owner", "RISK_MANAGER");
+        OperatorAccess secondManager = createOperator(
+                fixture.merchant(), "workspace-search-disable-manager", "RISK_MANAGER");
+        ReviewSavedSearchService.SavedSearchView search = createSharedSavedSearch(owner,
+                "Disable first queue");
+        CountDownLatch disableOwnsSearchLock = new CountDownLatch(1);
+        CountDownLatch releaseDisable = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> disable = executor.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+                    reviewSavedSearchService.disable(secondManager.context(), search.id(), 1L,
+                            "workspace-search-disable-first");
+                    disableOwnsSearchLock.countDown();
+                    await(releaseDisable);
+                });
+                return null;
+            });
+            assertThat(disableOwnsSearchLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("review_saved_searches", search.id());
+            Future<?> staleUpdate = executor.submit(() -> reviewSavedSearchService.update(
+                    owner.context(), search.id(), 1L, "Should not replace disabled meaning",
+                    SavedSearchVisibility.MERCHANT_SHARED, null,
+                    ReviewQueueSort.CREATED_AT_DESC,
+                    Set.of(ReviewQueueColumn.CREATED_AT), "workspace-stale-update"));
+            awaitDatabaseLockWait("review_saved_searches");
+
+            releaseDisable.countDown();
+            disable.get(5, TimeUnit.SECONDS);
+            assertConflict(staleUpdate);
+        }
+
+        Map<String, Object> durable = jdbcTemplate.queryForMap("""
+                SELECT name, lifecycle_status, lifecycle_version
+                  FROM review_saved_searches WHERE id = ?
+                """, search.id());
+        assertThat(durable.get("name")).isEqualTo("Disable first queue");
+        assertThat(durable.get("lifecycle_status")).isEqualTo("DISABLED");
+        assertThat(((Number) durable.get("lifecycle_version")).longValue()).isEqualTo(2L);
+    }
+
+    @Test
+    void equalTimestampQueuePagesHaveNoDuplicateOrOmissionOnPostgreSql() throws Exception {
+        Fixture fixture = createFixture("workspace-equal-time-first");
+        UUID secondCustomer = createCustomer(
+                fixture.merchant(), "workspace-equal-time-second@example.com");
+        UUID secondMethod = createPaymentMethod(
+                fixture.merchant(), secondCustomer, "workspace-equal-time-second-card");
+        ReviewFixture second = createReview(fixture.merchant(), secondCustomer, secondMethod,
+                "workspace-equal-time-second");
+        Instant equalCreatedAt = Instant.parse("2026-07-25T00:00:00.123456Z");
+        new TransactionTemplate(transactionManager).executeWithoutResult(transactionStatus -> {
+            jdbcTemplate.execute("ALTER TABLE manual_review_cases DISABLE TRIGGER USER");
+            try {
+                jdbcTemplate.update("UPDATE manual_review_cases SET created_at = ? WHERE id IN (?, ?)",
+                        java.sql.Timestamp.from(equalCreatedAt), fixture.review().reviewCaseId(),
+                        second.reviewCaseId());
+            } finally {
+                jdbcTemplate.execute("ALTER TABLE manual_review_cases ENABLE TRIGGER USER");
+            }
+        });
+
+        AnalystQueueService.ReviewQueuePage first = analystQueueService.search(
+                fixture.analyst().context(), null, ReviewQueueSort.CREATED_AT_ASC, 1, null);
+        AnalystQueueService.ReviewQueuePage next = analystQueueService.search(
+                fixture.analyst().context(), null, ReviewQueueSort.CREATED_AT_ASC, 1,
+                first.nextCursor());
+
+        assertThat(first.rows()).hasSize(1);
+        assertThat(next.rows()).hasSize(1);
+        assertThat(List.of(first.rows().getFirst().id(), next.rows().getFirst().id()))
+                .containsExactlyInAnyOrder(fixture.review().reviewCaseId(), second.reviewCaseId());
+        assertThat(next.nextCursor()).isNull();
+    }
+
+    @Test
+    void postgresRejectsNoteMutationMismatchedTerminalEventAndEventRewrite() throws Exception {
+        Fixture fixture = createFixture("workspace-history-guard");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "workspace-history-guard-assign");
+        UUID noteId = createDueReviewNote(fixture);
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE review_notes SET ciphertext = 'rewritten' WHERE id = ?", noteId))
+                .isInstanceOf(DataAccessException.class)
+                .rootCause().hasMessageContaining(
+                        "Review note history permits only terminal ciphertext destruction");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO review_note_redaction_events (
+                    id, merchant_id, review_note_id, manual_review_case_id,
+                    event_type, actor_operator_id, created_at)
+                VALUES (?, ?, ?, ?, 'RETENTION_EXPIRED', NULL, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), fixture.merchant().id(), noteId,
+                fixture.review().reviewCaseId()))
+                .isInstanceOf(DataAccessException.class)
+                .rootCause().hasMessageContaining(
+                        "Review note redaction event must match terminal note state");
+        assertThat(reviewNoteService.expireDueNotes()).isOne();
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE review_note_redaction_events SET created_at = CURRENT_TIMESTAMP
+                 WHERE review_note_id = ?
+                """, noteId))
+                .isInstanceOf(DataAccessException.class)
+                .rootCause().hasMessageContaining("Review note redaction events are append-only");
+        assertTerminalNote(noteId, "EXPIRED", "RETENTION_EXPIRED");
     }
 
     @Test
@@ -750,6 +1032,44 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                 """, newLabelId, fixture.merchant().id(), fixture.review().paymentIntentId(),
                 fixture.review().paymentAttemptId(), fixture.review().fraudDecisionId(),
                 resolutionId, fixture.analyst().id(), supersedesLabelId);
+    }
+
+    private UUID createDueReviewNote(Fixture fixture) {
+        Instant createdAt = Instant.now().minus(java.time.Duration.ofDays(91));
+        Instant retentionExpiresAt = Instant.now().minus(java.time.Duration.ofDays(1));
+        UUID noteId = UUID.randomUUID();
+        ReviewNoteCipher.EncryptedNote encrypted = reviewNoteCipher.encrypt(
+                "Historical delivery verification context", fixture.merchant().id(),
+                fixture.review().reviewCaseId(), noteId, fixture.analyst().id(), createdAt);
+        ReviewNote note = new ReviewNote(noteId, fixture.merchant().id(),
+                fixture.review().reviewCaseId(), fixture.analyst().id(), 1L, null,
+                encrypted, 40, createdAt, retentionExpiresAt);
+        return new TransactionTemplate(transactionManager).execute(transactionStatus ->
+                reviewNoteRepository.saveAndFlush(note).getId());
+    }
+
+    private ReviewSavedSearchService.SavedSearchView createSharedSavedSearch(
+            OperatorAccess owner, String name) {
+        return reviewSavedSearchService.create(owner.context(), name,
+                SavedSearchVisibility.MERCHANT_SHARED, null,
+                ReviewQueueSort.CREATED_AT_DESC,
+                Set.of(ReviewQueueColumn.CREATED_AT, ReviewQueueColumn.STATUS),
+                "workspace-search-create");
+    }
+
+    private void assertTerminalNote(UUID noteId, String lifecycle, String reason) {
+        Map<String, Object> note = jdbcTemplate.queryForMap("""
+                SELECT lifecycle_status, ciphertext, nonce, key_version, redaction_reason
+                  FROM review_notes WHERE id = ?
+                """, noteId);
+        assertThat(note.get("lifecycle_status")).isEqualTo(lifecycle);
+        assertThat(note.get("ciphertext")).isNull();
+        assertThat(note.get("nonce")).isNull();
+        assertThat(note.get("key_version")).isNull();
+        assertThat(note.get("redaction_reason")).isEqualTo(reason);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM review_note_redaction_events WHERE review_note_id = ?
+                """, Integer.class, noteId)).isOne();
     }
 
     private Fixture createFixture(String name) throws Exception {

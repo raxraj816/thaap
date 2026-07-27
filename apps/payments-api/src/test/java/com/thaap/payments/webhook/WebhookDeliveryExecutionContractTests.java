@@ -472,7 +472,7 @@ class WebhookDeliveryExecutionContractTests {
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
         jdbcTemplate.update(
-                "UPDATE webhook_deliveries SET attempt_count = 4 WHERE id = ?",
+                "UPDATE webhook_deliveries SET attempt_count = 4, generation_attempt_count = 4 WHERE id = ?",
                 delivery.getId());
         Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         WebhookDeliveryClaim staleFinalClaim = claimService.claimDue(claimedAt, 1).getFirst();

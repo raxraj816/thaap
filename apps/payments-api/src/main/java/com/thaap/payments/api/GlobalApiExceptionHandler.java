@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import com.thaap.payments.ratelimit.RateLimitExceededException;
 import com.thaap.payments.ratelimit.RateLimitUnavailableException;
+import com.thaap.payments.workspace.SavedSearchUpgradeRequiredException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -135,6 +137,22 @@ public class GlobalApiExceptionHandler {
         return error(status, errorCode(status), reasonOrDefault(exception.getBody().getDetail(), status), request,
                 response,
                 List.of());
+    }
+
+    @ExceptionHandler(QueryTimeoutException.class)
+    public ResponseEntity<ApiErrorResponse> handleQueryTimeout(QueryTimeoutException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.RETRY_AFTER, "1");
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "query_timeout",
+                "Database query exceeded its bounded execution time", request, response, List.of());
+    }
+
+    @ExceptionHandler(SavedSearchUpgradeRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> handleSavedSearchUpgrade(
+            SavedSearchUpgradeRequiredException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        return error(HttpStatus.CONFLICT, "saved_search_upgrade_required",
+                exception.getMessage(), request, response, List.of());
     }
 
     @ExceptionHandler(Exception.class)

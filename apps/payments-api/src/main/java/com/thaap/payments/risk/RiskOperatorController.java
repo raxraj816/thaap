@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -27,6 +28,12 @@ public class RiskOperatorController {
     public RiskOperatorController(RiskOperatorService operatorService, IdempotencyService idempotencyService) {
         this.operatorService = operatorService;
         this.idempotencyService = idempotencyService;
+    }
+
+    @GetMapping("/me")
+    public RiskOperatorSessionResponse session(RiskOperatorContext context) {
+        return new RiskOperatorSessionResponse(
+                context.operatorId(), context.operatorCode(), context.role());
     }
 
     @PostMapping
@@ -56,6 +63,9 @@ public class RiskOperatorController {
     public record CreateRiskOperatorRequest(@NotNull RiskOperatorRole role) {
     }
     public record EmptyRequest() {
+    }
+    public record RiskOperatorSessionResponse(UUID id, String operatorCode,
+            RiskOperatorRole role) {
     }
     public record RiskOperatorResponse(UUID id, String operatorCode, RiskOperatorRole role,
             RiskOperatorStatus status, long lifecycleEpoch, Instant createdAt, Instant disabledAt) {

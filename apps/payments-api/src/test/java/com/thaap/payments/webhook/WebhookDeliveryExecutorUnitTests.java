@@ -429,6 +429,37 @@ class WebhookDeliveryExecutorUnitTests {
     }
 
     @Test
+    void permanentHttpFailureExhaustsImmediatelyWithExactResponseStatus() throws Exception {
+        ExecutorFixture fixture = fixture();
+        WebhookDeliveryClaim claim = claim(1);
+        when(fixture.targetPolicy().validate(claim.endpointUrl())).thenReturn(new ValidatedWebhookTarget(
+                URI.create("http://127.0.0.1/webhook"), InetAddress.getByName("127.0.0.1"), 80));
+        when(fixture.claimService().prepareForDispatch(eq(claim), any(Instant.class))).thenReturn(true);
+        when(fixture.endpointSecretService().signForDelivery(
+                eq(claim.merchantId()), eq(claim.endpointId()), eq(claim.signingSecretGeneration()),
+                eq(claim.payload()), any(Instant.class), eq(fixture.signer())))
+                .thenReturn(new WebhookSignature(1L, "a".repeat(64), "t=1,v1=" + "a".repeat(64)));
+        when(fixture.transport().send(any(WebhookHttpRequest.class)))
+                .thenReturn(new WebhookHttpResponse(400));
+        when(fixture.finalizationService().failTerminally(
+                eq(claim), any(Instant.class), eq(true), eq(400),
+                eq(WebhookDeliveryErrorCode.HTTP_NON_SUCCESS)))
+                .thenReturn(new WebhookDeliveryFinalizationResult(
+                        true, WebhookDeliveryStatus.EXHAUSTED,
+                        WebhookDeliveryErrorCode.HTTP_NON_SUCCESS,
+                        WebhookAttemptOutcome.TERMINAL_FAILURE,
+                        WebhookDeliveryErrorCode.HTTP_NON_SUCCESS));
+
+        fixture.executor().processClaim(claim);
+
+        verify(fixture.finalizationService()).failTerminally(
+                eq(claim), any(Instant.class), eq(true), eq(400),
+                eq(WebhookDeliveryErrorCode.HTTP_NON_SUCCESS));
+        verify(fixture.finalizationService(), never()).failRetryably(
+                eq(claim), any(Instant.class), eq(true), eq(400), any());
+    }
+
+    @Test
     void resolverCapacityFailureRetriesWithoutTerminalTargetDenialOrHttp() {
         ExecutorFixture fixture = fixture();
         WebhookDeliveryClaim claim = claim(1);

@@ -45,7 +45,7 @@ REQUIRED_LENSES = {
     "OPERATIONS_RESILIENCE",
 }
 PLACEHOLDER = re.compile(r"\b(TBD|TODO|FIXME|PLACEHOLDER)\b", re.IGNORECASE)
-CHAPTER_NUMBER = re.compile(r"\bChapter\s+(\d+)\b", re.IGNORECASE)
+CHAPTER_COORDINATE = re.compile(r"\bChapter\s+(\d+)([A-Z]?)\b", re.IGNORECASE)
 
 
 def fields(text: str) -> dict[str, str]:
@@ -65,7 +65,7 @@ def validate_matrix(path: pathlib.Path, text: str) -> list[str]:
     if provenance not in {"PRE_IMPLEMENTATION", "RETROACTIVE_RECOVERY"}:
         errors.append(
             f"{path}: Matrix provenance must be PRE_IMPLEMENTATION or RETROACTIVE_RECOVERY")
-    chapter_match = CHAPTER_NUMBER.search(metadata.get("Chapter", ""))
+    chapter_match = CHAPTER_COORDINATE.search(metadata.get("Chapter", ""))
     if not chapter_match:
         errors.append(f"{path}: Chapter metadata must contain a numeric chapter")
     elif provenance == "RETROACTIVE_RECOVERY" and chapter_match.group(1) != "19":

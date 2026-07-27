@@ -84,7 +84,8 @@ public class RiskOperatorService {
         }
         Instant now = clock.instant();
         operator.disable(now);
-        credentialRepository.findByMerchantIdAndRiskOperatorId(merchantContext.merchantId(), operatorId)
+        credentialRepository.findByMerchantIdAndRiskOperatorIdForUpdate(
+                        merchantContext.merchantId(), operatorId)
                 .ifPresent(credential -> credential.disable(now));
         auditLogService.recordMerchantApiAction(merchantContext, requestId,
                 "risk_operator.disabled", "risk_operator", operatorId,

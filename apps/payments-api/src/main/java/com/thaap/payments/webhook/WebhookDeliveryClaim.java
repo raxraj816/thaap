@@ -16,7 +16,29 @@ public record WebhookDeliveryClaim(
         int attemptNumber,
         UUID signingSecretGeneration,
         Instant claimedAt,
-        Instant deliveryCreatedAt) {
+        Instant deliveryCreatedAt,
+        int deliveryGeneration,
+        int generationAttemptNumber,
+        UUID redeliveryRequestId) {
+
+    public WebhookDeliveryClaim(
+            UUID deliveryId,
+            UUID merchantId,
+            UUID endpointId,
+            UUID eventId,
+            String eventType,
+            String endpointUrl,
+            String payload,
+            String payloadSha256,
+            UUID claimToken,
+            int attemptNumber,
+            UUID signingSecretGeneration,
+            Instant claimedAt,
+            Instant deliveryCreatedAt) {
+        this(deliveryId, merchantId, endpointId, eventId, eventType, endpointUrl, payload,
+                payloadSha256, claimToken, attemptNumber, signingSecretGeneration,
+                claimedAt, deliveryCreatedAt, 1, attemptNumber, null);
+    }
 
     public WebhookDeliveryClaim(
             UUID deliveryId,
@@ -32,6 +54,7 @@ public record WebhookDeliveryClaim(
             Instant claimedAt,
             Instant deliveryCreatedAt) {
         this(deliveryId, merchantId, endpointId, eventId, eventType, endpointUrl, payload,
-                payloadSha256, claimToken, attemptNumber, null, claimedAt, deliveryCreatedAt);
+                payloadSha256, claimToken, attemptNumber, null, claimedAt, deliveryCreatedAt,
+                1, attemptNumber, null);
     }
 }

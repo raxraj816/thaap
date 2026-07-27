@@ -130,7 +130,9 @@ public class WebhookController {
     public record WebhookEndpointResponse(UUID id, UUID merchantId, String url,
             WebhookEndpointStatus operationalStatus, boolean active, String signingSecretPrefix,
             String previousSigningSecretPrefix, Instant previousSigningSecretExpiresAt,
-            String signingSecret, Set<String> enabledEvents) {
+            String signingSecret, Set<String> enabledEvents,
+            WebhookEndpointVerificationStatus verificationStatus,
+            Instant verifiedAt) {
 
         static WebhookEndpointResponse from(WebhookEndpointService.EndpointSecretResult result) {
             WebhookEndpoint endpoint = result.endpoint();
@@ -138,7 +140,8 @@ public class WebhookController {
                     endpoint.getOperationalStatus(), endpoint.isActive(), endpoint.getSigningSecretPrefix(),
                     endpoint.getPreviousSigningSecretPrefix(),
                     endpoint.getPreviousSigningSecretExpiresAt(),
-                    result.rawSigningSecret(), result.enabledEvents());
+                    result.rawSigningSecret(), result.enabledEvents(),
+                    endpoint.getVerificationStatus(), endpoint.getVerifiedAt());
         }
 
         static WebhookEndpointResponse withoutSecret(WebhookEndpointService.EndpointStateResult result) {
@@ -147,12 +150,14 @@ public class WebhookController {
                     endpoint.getOperationalStatus(), endpoint.isActive(), endpoint.getSigningSecretPrefix(),
                     endpoint.getPreviousSigningSecretPrefix(),
                     endpoint.getPreviousSigningSecretExpiresAt(),
-                    null, result.enabledEvents());
+                    null, result.enabledEvents(), endpoint.getVerificationStatus(),
+                    endpoint.getVerifiedAt());
         }
     }
 
     public record WebhookDeliveryResponse(UUID id, UUID merchantId, UUID webhookEndpointId, UUID webhookEventId,
             String eventType, UUID resourceId, WebhookDeliveryStatus status, int attemptCount,
+            int deliveryGeneration, int generationAttemptCount,
             Instant nextAttemptAt, Instant lastAttemptAt, Instant deliveredAt,
             String lastError, WebhookDeliveryErrorCode lastErrorCode, Instant createdAt) {
 
@@ -160,6 +165,7 @@ public class WebhookController {
             return new WebhookDeliveryResponse(delivery.getId(), delivery.getMerchantId(),
                     delivery.getWebhookEndpointId(), delivery.getWebhookEventId(), delivery.getEventType(),
                     delivery.getResourceId(), delivery.getStatus(), delivery.getAttemptCount(),
+                    delivery.getDeliveryGeneration(), delivery.getGenerationAttemptCount(),
                     delivery.getNextAttemptAt(), delivery.getLastAttemptAt(), delivery.getDeliveredAt(),
                     delivery.getLastErrorCode() == null ? null : delivery.getLastErrorCode().name(),
                     delivery.getLastErrorCode(), delivery.getCreatedAt());
@@ -178,11 +184,14 @@ public class WebhookController {
     }
 
     public record WebhookAttemptResponse(UUID id, int attemptNumber, WebhookAttemptOutcome outcome,
+            int deliveryGeneration, int generationAttemptNumber, String dispatchSource,
             Boolean httpRequestSent, Instant dispatchStartedAt, Integer responseStatus,
             WebhookDeliveryErrorCode errorCode, Instant startedAt, Instant completedAt, Long latencyMs) {
 
         static WebhookAttemptResponse from(WebhookDeliveryAttempt attempt) {
             return new WebhookAttemptResponse(attempt.getId(), attempt.getAttemptNumber(), attempt.getOutcome(),
+                    attempt.getDeliveryGeneration(), attempt.getGenerationAttemptNumber(),
+                    attempt.getDispatchSource(),
                     attempt.getHttpRequestSent(), attempt.getDispatchStartedAt(), attempt.getResponseStatus(),
                     attempt.getErrorCode(), attempt.getStartedAt(), attempt.getCompletedAt(), attempt.getLatencyMs());
         }

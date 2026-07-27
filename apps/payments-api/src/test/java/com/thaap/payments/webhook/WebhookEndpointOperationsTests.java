@@ -20,6 +20,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -97,6 +98,11 @@ class WebhookEndpointOperationsTests {
 
     @BeforeEach
     void cleanDatabase() {
+        databaseCleaner.clean();
+    }
+
+    @AfterEach
+    void cleanDatabaseAfterTest() {
         databaseCleaner.clean();
     }
 

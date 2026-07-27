@@ -3296,6 +3296,65 @@ Done when:
 
 ### Phase 4.5: Product-Grade Risk Operations
 
+Detailed source of truth:
+[`PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md).
+The detailed plan proposes the product-facing monitoring definitions, fraud
+taxonomy, analyst workspace and protected-note contract, historical simulation
+semantics, governed rule/exception grammar, dispute workflow, developer console,
+webhook operations, UI security boundary, transaction ordering, hostile failure
+inventory, proof strategy, and Chapter 36–43 sequence.
+
+Current state: **COMPLETE THROUGH CHAPTER 43R — ER-0064 THROUGH ER-0073
+RESOLVED AND RE-PROVED.** Founder implementation authorization confirmed the
+twelve product decisions on 2026-07-25, and the detailed plan remains
+`APPROVED`. The later end-to-end review correctly withdrew the earlier closure
+claim, then expanded and re-proved point-in-time monitoring, mixed-control
+simulation, live-actor authorization, note-read audit, scenario-report lineage,
+webhook dispatch fencing, authorization reconciliation, and cockpit
+integration/resilience at their real enforcement layers.
+
+Chapters 36–43R now have `FROZEN`/`VERIFIED` pre-implementation matrices with
+every invariant `PASS` and nine `READY_TO_MERGE` dossiers recommending `MERGE`.
+V50–V64, fresh/retained migrations, forced PostgreSQL orderings, restart,
+property, protocol, privacy, seven public workflows, and live browser evidence
+remain green. The final recovery run passed 759 backend tests with no skips,
+140 repository tests, 20 UI tests, and the production UI build. All escaped
+findings are resolved, all five debt entries remain resolved with zero open,
+and Phase 5 durable events and analytics is unblocked.
+
+Proposed chapter sequence:
+
+1. Chapter 36: Fraud Taxonomy And Merchant-Risk Monitoring.
+   Status: complete; `ER-0064` is resolved and all 7 inherited PostgreSQL
+   monitoring tests pass, including before/exact/after `linked_at` semantics.
+2. Chapter 37: Analyst Workspace, Saved Searches, And Protected Notes.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, every row `PASS`, dossier
+   `READY_TO_MERGE`, V52/V53, protected workspace PostgreSQL/browser proof,
+   and the public queue-to-note-to-redaction demo pass.
+3. Chapter 38: Historical Risk Policy Simulation.
+   Status: complete; `ER-0065` is resolved and all 8 inherited PostgreSQL
+   simulation tests pass with mixed-control reconstruction and restart proof.
+4. Chapter 39: Governed Rule Authoring And Safety Exceptions.
+   Status: complete; V56–V58, bounded canonical rules, dual control, exact
+   simulation activation, narrow purpose-HMAC exceptions, immutable decision
+   evidence, rollback, PostgreSQL proof, cockpit, and public demo pass.
+5. Chapter 40: Dispute Deadline And Outcome Operations.
+   Status: complete; `ER-0067` is resolved and all 19 PostgreSQL dispute
+   contracts pass, including disable-before-submit and replay after disable.
+6. Chapter 41: Developer Console And Trusted Scenario Operations.
+   Status: complete; matrix `FROZEN`/`VERIFIED`, every row `PASS`, dossier
+   `READY_TO_MERGE`, V61/V62, deterministic leased scenario execution,
+   PostgreSQL/client/UI proof, and public reconciliation demo pass.
+7. Chapter 42: Webhook Verification, Redelivery, And Dead-Letter Operations.
+   Status: complete; `ER-0066`, `ER-0068`, and `ER-0071` are resolved, including
+   post-sign terminal-winner PostgreSQL proof with zero network side effects.
+8. Chapter 43: Integrated Phase 4.5 Closure.
+   Status: complete; all inherited chapter proofs and the integrated closure
+   matrix/dossier pass.
+9. Chapter 43R: Phase 4.5 Product Closure Recovery.
+   Status: complete; `ER-0059`–`ER-0073`, all nine closure pairs, and the
+   aggregate phase gate pass with a `MERGE` recommendation.
+
 Build:
 
 - Fraud taxonomy in labels, synthetic scenarios, analytics, and dashboard

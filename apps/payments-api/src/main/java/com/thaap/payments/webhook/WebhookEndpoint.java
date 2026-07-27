@@ -71,6 +71,22 @@ public class WebhookEndpoint {
     @Column(name = "previous_signing_secret_expires_at")
     private Instant previousSigningSecretExpiresAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", nullable = false, length = 24)
+    private WebhookEndpointVerificationStatus verificationStatus;
+
+    @Column(name = "pending_verification_id")
+    private UUID pendingVerificationId;
+
+    @Column(name = "verified_url", length = 2048)
+    private String verifiedUrl;
+
+    @Column(name = "verified_signing_secret_generation")
+    private UUID verifiedSigningSecretGeneration;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -86,6 +102,7 @@ public class WebhookEndpoint {
         this.signingSecretPrefix = SecretHasher.prefix(rawSigningSecret);
         this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
         this.signingSecretGeneration = UUID.randomUUID();
+        this.verificationStatus = WebhookEndpointVerificationStatus.NOT_REQUESTED;
         this.createdAt = Instant.now();
     }
 
@@ -101,6 +118,7 @@ public class WebhookEndpoint {
         this.signingSecretNonce = encryptedSecret.nonce();
         this.signingSecretKeyVersion = encryptedSecret.keyVersion();
         this.signingSecretGeneration = UUID.randomUUID();
+        this.verificationStatus = WebhookEndpointVerificationStatus.NOT_REQUESTED;
         this.createdAt = createdAt;
     }
 
@@ -126,6 +144,7 @@ public class WebhookEndpoint {
         replaceEncryptedSecret(encryptedSecret);
         this.signingSecretGeneration = UUID.randomUUID();
         this.operationalStatus = WebhookEndpointStatus.ACTIVE;
+        resetVerification();
     }
 
     public void reencryptSecret(WebhookEncryptedSecret encryptedSecret) {
@@ -150,6 +169,46 @@ public class WebhookEndpoint {
 
     public void disable() {
         this.operationalStatus = WebhookEndpointStatus.DISABLED;
+    }
+
+    public void beginVerification(UUID verificationId) {
+        this.verificationStatus = WebhookEndpointVerificationStatus.PENDING;
+        this.pendingVerificationId = verificationId;
+        clearVerifiedEvidence();
+    }
+
+    public void verify(String normalizedUrl, UUID signingGeneration, Instant completedAt) {
+        if (verificationStatus != WebhookEndpointVerificationStatus.PENDING) {
+            throw new IllegalStateException("Webhook endpoint is not pending verification");
+        }
+        this.verificationStatus = WebhookEndpointVerificationStatus.VERIFIED;
+        this.pendingVerificationId = null;
+        this.verifiedUrl = normalizedUrl;
+        this.verifiedSigningSecretGeneration = signingGeneration;
+        this.verifiedAt = completedAt;
+    }
+
+    public void finishVerification(WebhookEndpointVerificationStatus terminalStatus) {
+        if (verificationStatus != WebhookEndpointVerificationStatus.PENDING
+                || (terminalStatus != WebhookEndpointVerificationStatus.FAILED
+                    && terminalStatus != WebhookEndpointVerificationStatus.EXPIRED)) {
+            throw new IllegalStateException("Invalid webhook endpoint verification transition");
+        }
+        this.verificationStatus = terminalStatus;
+        this.pendingVerificationId = null;
+        clearVerifiedEvidence();
+    }
+
+    private void resetVerification() {
+        this.verificationStatus = WebhookEndpointVerificationStatus.NOT_REQUESTED;
+        this.pendingVerificationId = null;
+        clearVerifiedEvidence();
+    }
+
+    private void clearVerifiedEvidence() {
+        this.verifiedUrl = null;
+        this.verifiedSigningSecretGeneration = null;
+        this.verifiedAt = null;
     }
 
     public UUID getId() {
@@ -232,5 +291,25 @@ public class WebhookEndpoint {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public WebhookEndpointVerificationStatus getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public String getVerifiedUrl() {
+        return verifiedUrl;
+    }
+
+    public UUID getPendingVerificationId() {
+        return pendingVerificationId;
+    }
+
+    public UUID getVerifiedSigningSecretGeneration() {
+        return verifiedSigningSecretGeneration;
+    }
+
+    public Instant getVerifiedAt() {
+        return verifiedAt;
     }
 }

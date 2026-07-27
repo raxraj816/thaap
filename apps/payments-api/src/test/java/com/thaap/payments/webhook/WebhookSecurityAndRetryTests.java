@@ -246,6 +246,14 @@ class WebhookSecurityAndRetryTests {
         assertThat(new WebhookHttpResponse(300).isSuccessful()).isFalse();
         assertThat(new WebhookHttpResponse(404).isSuccessful()).isFalse();
         assertThat(new WebhookHttpResponse(503).isSuccessful()).isFalse();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(307)).isFalse();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(400)).isFalse();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(408)).isTrue();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(425)).isTrue();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(429)).isTrue();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(500)).isTrue();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(599)).isTrue();
+        assertThat(WebhookDeliveryExecutor.isRetryableHttpStatus(600)).isFalse();
     }
 
     @Test
@@ -566,6 +574,91 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
+    void socketTransportCapturesOneExactVerificationFieldOnlyFromFinalSuccess() throws Exception {
+        String token = "Abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE";
+        assertThat(token).hasSize(43);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server,
+                    "HTTP/1.1 100 Continue\r\n"
+                            + "THAAP-Webhook-Verification: " + "x".repeat(43) + "\r\n\r\n"
+                            + "HTTP/1.1 204 No Content\r\n"
+                            + "thaap-webhook-verification:\t" + token + " \t\r\n\r\n"));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            WebhookHttpResponse response = transport.send(requestFor(server));
+
+            assertThat(response.statusCode()).isEqualTo(204);
+            assertThat(response.verificationToken()).isEqualTo(token);
+        }
+
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            serverExecutor.submit(() -> sendRawResponse(server,
+                    "HTTP/1.1 302 Found\r\n"
+                            + "THAAP-Webhook-Verification: " + token + "\r\n\r\n"));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            WebhookHttpResponse response = transport.send(requestFor(server));
+
+            assertThat(response.statusCode()).isEqualTo(302);
+            assertThat(response.verificationToken()).isNull();
+        }
+    }
+
+    @Test
+    void socketTransportRejectsEveryInvalidVerificationFieldPartition() throws Exception {
+        String valid = "a".repeat(43);
+        List<String> invalidFinalHeads = List.of(
+                "THAAP-Webhook-Verification: " + "a".repeat(42),
+                "THAAP-Webhook-Verification: " + "a".repeat(44),
+                "THAAP-Webhook-Verification: " + "a".repeat(42) + "=",
+                "THAAP-Webhook-Verification: " + "a".repeat(42) + "+",
+                "THAAP-Webhook-Verification: " + valid + "\r\n"
+                        + "thaap-webhook-verification: " + valid);
+
+        for (String invalidFinalHead : invalidFinalHeads) {
+            try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                    ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+                serverExecutor.submit(() -> sendRawResponse(server,
+                        "HTTP/1.1 204 No Content\r\n" + invalidFinalHead + "\r\n\r\n"));
+                SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                        Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+                assertThatThrownBy(() -> transport.send(requestFor(server)))
+                        .as("invalid verification response %s", invalidFinalHead)
+                        .isInstanceOf(WebhookTransportException.class)
+                        .satisfies(exception -> {
+                            WebhookTransportException transportException =
+                                    (WebhookTransportException) exception;
+                            assertThat(transportException.getErrorCode())
+                                    .isEqualTo(WebhookDeliveryErrorCode.TRANSPORT_ERROR);
+                            assertThat(transportException.getRequestSent()).isTrue();
+                        });
+            }
+        }
+    }
+
+    @Test
+    void socketTransportDoesNotTreatResponseBodyAsVerificationEvidence() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
+            String token = "a".repeat(43);
+            serverExecutor.submit(() -> sendRawResponse(server,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 43\r\n\r\n" + token));
+            SocketWebhookHttpTransport transport = new SocketWebhookHttpTransport(
+                    Duration.ofSeconds(1), Duration.ofSeconds(1));
+
+            WebhookHttpResponse response = transport.send(requestFor(server));
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.verificationToken()).isNull();
+        }
+    }
+
+    @Test
     void socketTransportRejectsTruncatedFinalResponseHead() throws Exception {
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
                 ExecutorService serverExecutor = Executors.newSingleThreadExecutor()) {
@@ -835,7 +928,7 @@ class WebhookSecurityAndRetryTests {
     }
 
     @Test
-    void disabledExecutionAcceptsCompleteAdministrationKeyInventoryWithoutWorkerSettings() {
+    void disabledExecutionStillRequiresVerificationTransportLeaseBound() {
         WebhookEndpointRepository endpointRepository = mock(WebhookEndpointRepository.class);
         Instant validationTime = Instant.parse("2026-06-28T10:00:00Z");
         when(endpointRepository.findRequiredSecretKeyVersions(validationTime))
@@ -845,6 +938,23 @@ class WebhookSecurityAndRetryTests {
                 new WebhookTargetPolicy(false, Set.of()), endpointRepository,
                 Clock.fixed(validationTime, ZoneOffset.UTC),
                 Duration.ZERO, Duration.ZERO, Duration.ZERO);
+
+        assertThatThrownBy(configuration::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("lease duration");
+    }
+
+    @Test
+    void disabledExecutionDoesNotRequireDeliveryWorkerHostAllowlist() {
+        WebhookEndpointRepository endpointRepository = mock(WebhookEndpointRepository.class);
+        Instant validationTime = Instant.parse("2026-06-28T10:00:00Z");
+        when(endpointRepository.findRequiredSecretKeyVersions(validationTime))
+                .thenReturn(java.util.List.of("current-v1"));
+        WebhookExecutionConfiguration configuration = new WebhookExecutionConfiguration(
+                false, new WebhookSecretCipher(ENCODED_KEY, "current-v1", new SecureRandom()),
+                new WebhookTargetPolicy(false, Set.of()), endpointRepository,
+                Clock.fixed(validationTime, ZoneOffset.UTC),
+                Duration.ofSeconds(30), Duration.ofSeconds(2), Duration.ofSeconds(5));
 
         configuration.validate();
     }

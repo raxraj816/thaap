@@ -14,6 +14,11 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
 
 management:
   endpoint:
@@ -62,7 +67,27 @@ thaap:
     request-timeout: 5s
     target-resolution-timeout: 2s
     resolver-threads: 2
+    verification-challenge-ttl: 2m
+    verification-expiry-enabled: false
+    verification-expiry-batch-size: 50
+    verification-expiry-poll-delay: 24h
     # Contract tests invoke scheduler behavior directly. A long test-only delay
     # prevents cached Spring contexts from polling a Testcontainers database
     # after that class-owned container has shut down.
     poll-delay: 24h
+  workspace:
+    notes:
+      encryption-key: dGVzdC1yZXZpZXctbm90ZS1rZXktMzItYnl0ZXMtMTI=
+      key-version: test-v1
+      decryption-keys:
+      retention-poll-delay: 24h
+  simulation:
+    worker-enabled: false
+    creation-enabled: false
+    chunk-size: 2
+    maximum-cohort-days: 365
+    report-freshness: 24h
+  disputes:
+    expiry-enabled: false
+    expiry-batch-size: 10
+    expiry-poll-delay: 24h

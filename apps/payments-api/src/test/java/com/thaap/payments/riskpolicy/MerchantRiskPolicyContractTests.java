@@ -11,6 +11,10 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.processor.ProcessorAdapter;
 import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.simulation.RiskSimulationCandidateSnapshotService;
+import com.thaap.payments.simulation.RiskSimulationCandidateType;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +29,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 @ActiveProfiles("test")
-@SpringBootTest
+@SpringBootTest(properties = {
+        "thaap.simulation.gate.minimum-eligible-population=1",
+        "thaap.simulation.gate.minimum-label-coverage-percent=0"
+})
 class MerchantRiskPolicyContractTests {
 
     private static final String API_KEY = "X-Api-Key";
@@ -38,6 +45,7 @@ class MerchantRiskPolicyContractTests {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DatabaseCleaner databaseCleaner;
+    @Autowired private RiskSimulationCandidateSnapshotService simulationCandidateSnapshotService;
     @MockitoSpyBean private ProcessorAdapter processorAdapter;
 
     private MockMvc mockMvc;
@@ -115,6 +123,97 @@ class MerchantRiskPolicyContractTests {
                    AND policy_version_id = ?
                 """, Integer.class, afterDecision, policyId)).isOne();
         Mockito.verify(processorAdapter, Mockito.times(1)).authorize(Mockito.any(ProcessorAuthorizationRequest.class));
+    }
+
+    @Test
+    void governedAuthoredRuleRequiresDualControlAndExactSimulationThenPersistsDecisionEvidence() throws Exception {
+        MerchantAccess merchant = createMerchant("authored-rule-control");
+        OperatorAccess creator = createOperator(merchant, "authored-rule-creator", "RISK_MANAGER");
+        OperatorAccess approver = createOperator(merchant, "authored-rule-approver", "RISK_MANAGER");
+        UUID customerId = createCustomer(merchant, "authored@example.com");
+        UUID methodId = createPaymentMethod(merchant, customerId);
+
+        String createBody = """
+                {"code":"HIGH_VALUE_BLOCK","displayName":"High value block","candidateAction":"BLOCK",
+                 "expression":{"all":[
+                    {"feature":"payment.currency","operator":"EQ","value":"USD"},
+                    {"feature":"payment.amount_minor","operator":"GTE","value":1000}]}}
+                """;
+        JsonNode created = objectMapper.readTree(mockMvc.perform(post("/risk/controls/rules")
+                        .header(RISK_KEY, creator.secret()).header(IDEMPOTENCY_KEY, "authored-create")
+                        .contentType(APPLICATION_JSON).content(createBody))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        UUID ruleId = UUID.fromString(created.get("id").asText());
+        transitionControl(creator, "rules", ruleId, "submit", "authored-submit", null, 200);
+        transitionControl(creator, "rules", ruleId, "approve", "authored-self-approve", null, 403);
+        transitionControl(approver, "rules", ruleId, "approve", "authored-approve", null, 200);
+        transitionControl(approver, "rules", ruleId, "activate", "authored-no-simulation", null, 400);
+
+        UUID simulationId = insertSuccessfulControlSimulation(merchant.id(), creator.id(),
+                "AUTHORED_RULE", ruleId);
+        JsonNode active = transitionControl(approver, "rules", ruleId, "activate",
+                "authored-activate", simulationId, 200);
+        assertThat(active.get("lifecycleStatus").asText()).isEqualTo("ACTIVE");
+
+        UUID intentId = createIntent(merchant, customerId, 1_200L, "authored-intent");
+        JsonNode attempt = confirm(merchant, intentId, methodId, "authored-confirm");
+        assertThat(attempt.get("status").asText()).isEqualTo("BLOCKED");
+        UUID decisionId = UUID.fromString(attempt.get("fraudDecisionId").asText());
+        assertThat(jdbcTemplate.queryForObject("SELECT reason_codes FROM fraud_decisions WHERE id = ?",
+                String.class, decisionId)).contains("AUTHORED_RULE_MATCH");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM authored_rule_evaluations
+                 WHERE fraud_decision_id = ? AND rule_version_id = ? AND matched = TRUE
+                   AND candidate_action = 'BLOCK' AND exception_disposition = 'NONE'
+                   AND effective_action = 'BLOCK'
+                """, Integer.class, decisionId, ruleId)).isOne();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM authorizations WHERE payment_attempt_id = ?",
+                Integer.class, UUID.fromString(attempt.get("id").asText()))).isZero();
+
+        Instant validFrom = Instant.now().minusSeconds(86_400)
+                .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant expiresAt = Instant.now().plusSeconds(86_400)
+                .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        String exceptionBody = "{\"code\":\"TRUSTED_CARD\",\"sourceRuleVersionId\":\"" + ruleId
+                + "\",\"paymentMethodId\":\"" + methodId
+                + "\",\"reasonCode\":\"FALSE_POSITIVE_REMEDIATION\",\"validFrom\":\""
+                + validFrom + "\",\"expiresAt\":\"" + expiresAt + "\"}";
+        String exceptionResponse = mockMvc.perform(post("/risk/controls/exceptions")
+                        .header(RISK_KEY, creator.secret()).header(IDEMPOTENCY_KEY, "exception-create")
+                        .contentType(APPLICATION_JSON).content(exceptionBody))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        assertThat(exceptionResponse).doesNotContain("424242", "subjectIdentityHmac", "subjectHmacKeyVersion");
+        UUID exceptionId = UUID.fromString(objectMapper.readTree(exceptionResponse).get("id").asText());
+        transitionControl(creator, "exceptions", exceptionId, "submit", "exception-submit", null, 200);
+        transitionControl(creator, "exceptions", exceptionId, "approve", "exception-self-approve", null, 403);
+        transitionControl(approver, "exceptions", exceptionId, "approve", "exception-approve", null, 200);
+        UUID exceptionSimulationId = insertSuccessfulControlSimulation(merchant.id(), creator.id(),
+                "SAFETY_EXCEPTION", exceptionId);
+        transitionControl(approver, "exceptions", exceptionId, "activate", "exception-activate",
+                exceptionSimulationId, 200);
+
+        UUID exceptedIntentId = createIntent(merchant, customerId, 1_200L, "excepted-intent");
+        JsonNode exceptedAttempt = confirm(merchant, exceptedIntentId, methodId, "excepted-confirm");
+        assertThat(exceptedAttempt.get("status").asText()).isNotEqualTo("BLOCKED");
+        UUID exceptedDecisionId = UUID.fromString(exceptedAttempt.get("fraudDecisionId").asText());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM authored_rule_evaluations
+                 WHERE fraud_decision_id = ? AND rule_version_id = ? AND matched = TRUE
+                   AND exception_disposition = 'APPLIED' AND applied_exception_version_id = ?
+                   AND effective_action IS NULL
+                """, Integer.class, exceptedDecisionId, ruleId, exceptionId)).isOne();
+
+        transitionControl(approver, "rules", ruleId, "retire", "authored-retire", null, 200);
+        UUID rollbackSimulationId = insertSuccessfulControlSimulation(merchant.id(), creator.id(),
+                "AUTHORED_RULE", ruleId);
+        JsonNode rolledBack = transitionControl(approver, "rules", ruleId, "rollback",
+                "authored-rollback", rollbackSimulationId, 200);
+        assertThat(rolledBack.get("lifecycleStatus").asText()).isEqualTo("ACTIVE");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM authored_rule_events
+                 WHERE merchant_id = ? AND rule_version_id = ?
+                   AND event_type = 'ROLLBACK_ACTIVATED' AND simulation_run_id = ?
+                """, Integer.class, merchant.id(), ruleId, rollbackSimulationId)).isOne();
     }
 
     @Test
@@ -310,6 +409,51 @@ class MerchantRiskPolicyContractTests {
                         .header(RISK_KEY, operator.secret()).header(IDEMPOTENCY_KEY, key)
                         .contentType(APPLICATION_JSON).content("{}"))
                 .andExpect(status().is(expectedStatus)).andReturn().getResponse().getContentAsString());
+    }
+
+    private JsonNode transitionControl(OperatorAccess operator, String family, UUID id,
+            String transition, String key, UUID simulationId, int expectedStatus) throws Exception {
+        String body = simulationId == null ? "{}" : "{\"simulationRunId\":\"" + simulationId + "\"}";
+        String content = mockMvc.perform(post("/risk/controls/{family}/{id}/{transition}", family, id, transition)
+                        .header(RISK_KEY, operator.secret()).header(IDEMPOTENCY_KEY, key)
+                        .contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().is(expectedStatus)).andReturn().getResponse().getContentAsString();
+        return content.isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(content);
+    }
+
+    private UUID insertSuccessfulControlSimulation(UUID merchantId, UUID creatorId,
+            String candidateType, UUID candidateId) {
+        RiskSimulationCandidateSnapshotService.FrozenCandidate candidate = simulationCandidateSnapshotService.freeze(
+                merchantId, RiskSimulationCandidateType.valueOf(candidateType), candidateId);
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        UUID runId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO risk_simulation_runs
+                    (id, merchant_id, created_by_operator_id, candidate_type, candidate_version_id,
+                     candidate_schema_version, candidate_json, candidate_digest, cohort_start, cohort_end,
+                     as_of, traffic_origin_policy, label_cutoff, label_resolution_policy, evaluator_version,
+                     feature_catalogue_version, rule_catalogue_version, taxonomy_version, query_digest,
+                     lifecycle_status, execution_token, projection_version, processed_count, eligible_count,
+                     excluded_count, created_at, queued_at, started_at, completed_at, report_expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LIVE_ONLY', ?,
+                        'CURRENT_AT_CUTOFF', 'historical_policy_v1', 'v1', 'rules_v1',
+                        'fraud_taxonomy_v1', ?, 'SUCCEEDED', ?, 2, 1, 1, 0, ?, ?, ?, ?, ?)
+                """, runId, merchantId, creatorId, candidateType, candidateId, candidate.schemaVersion(),
+                candidate.canonicalJson(), candidate.digest(),
+                Timestamp.from(now.minusSeconds(3_600)), Timestamp.from(now.minusSeconds(1_800)),
+                Timestamp.from(now.minusSeconds(1_200)), Timestamp.from(now.minusSeconds(1_200)),
+                "1".repeat(64), UUID.randomUUID(), Timestamp.from(now.minusSeconds(600)),
+                Timestamp.from(now.minusSeconds(600)), Timestamp.from(now.minusSeconds(500)),
+                Timestamp.from(now.minusSeconds(400)), Timestamp.from(now.plusSeconds(86_400)));
+        jdbcTemplate.update("""
+                INSERT INTO risk_simulation_reports
+                    (id, merchant_id, simulation_run_id, canonical_report_json, report_digest,
+                     processed_count, eligible_count, excluded_count, protected_suppression_count,
+                     blocking_data_quality_count, labelled_count, created_at, expires_at)
+                VALUES (?, ?, ?, '{}', ?, 1, 1, 0, 0, 0, 0, ?, ?)
+                """, UUID.randomUUID(), merchantId, runId, "2".repeat(64),
+                Timestamp.from(now.minusSeconds(400)), Timestamp.from(now.plusSeconds(86_400)));
+        return runId;
     }
 
     private void createThreshold(OperatorAccess operator, UUID policyId, String code, String feature,

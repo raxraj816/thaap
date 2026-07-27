@@ -2,6 +2,75 @@
 
 Developer utilities for repeatable local workflows.
 
+## Trusted Developer Scenario Quickstart
+
+After creating a local merchant and starting `payments-api` with a scenario
+runner token, export the two reveal-once values into the current shell and run:
+
+```bash
+export THAAP_MERCHANT_API_KEY='the local merchant API key'
+export THAAP_SCENARIO_RUNNER_TOKEN='the separately configured runner token'
+python3 scripts/demo-developer-scenario-console.py
+```
+
+No source inspection or database mutation is required. The client first creates
+one ordinary live reference payment, then creates or resumes an
+`APPROVED_PAYMENT` scenario, follows the server-issued public API steps, and
+submits each resource ID for tenant/outcome/origin verification. It finishes by
+checking the immutable report reconciles at least one `MERCHANT_API` and one
+`SYNTHETIC_SCENARIO` attempt. `--scenario ISSUER_DECLINE` and
+`--scenario CARD_TESTING_BURST` select the other governed plans.
+
+Create, claim, step completion, and terminal failure are all transport-idempotent.
+The client derives a stable per-operation retry key while the server separately
+enforces worker ownership and lease epoch; neither boundary substitutes for the
+other.
+
+The client accepts only an explicit loopback HTTP origin, installs no ambient
+proxy, rejects redirects, accepts only the closed customer/payment step paths,
+uses bounded request timeouts, reads credentials only from environment
+variables, and never prints them, the raw seed, customer contact, or test-card
+values. Run its safety contract with:
+
+```bash
+python3 scripts/developer_scenario_demo_tests.py
+```
+
+## Phase 4.5 Risk Operations Demos
+
+Start the retained local stack with the normal production-safe defaults, then
+run the monitoring, workspace, historical-simulation, and dispute workflows:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+export THAAP_SCENARIO_RUNNER_TOKEN=change-me-local-scenario-runner-token
+python3 scripts/demo-merchant-risk-monitoring.py
+python3 scripts/demo-analyst-workspace.py
+python3 scripts/demo-historical-risk-simulation.py
+python3 scripts/demo-dispute-operations.py
+```
+
+The governed-controls demo intentionally builds a one-row cohort so it remains
+fast and deterministic. The real runtime default rejects activation until a
+simulation has at least 100 eligible rows and 50% label coverage. For this
+local proof only, restart `payments-api` with the explicit reduced gate:
+
+```bash
+export THAAP_SIMULATION_GATE_MINIMUM_ELIGIBLE_POPULATION=1
+export THAAP_SIMULATION_GATE_MINIMUM_LABEL_COVERAGE_PERCENT=0
+python3 scripts/demo-governed-controls.py
+```
+
+These variables change only the evidence threshold; they do not bypass the
+successful-run, exact-candidate, freshness, tenant, creator, or dual-control
+checks. Do not use the reduced threshold in a shared or production-like
+environment. The default remains `100`/`50` when the variables are absent.
+
+All five clients accept only loopback HTTP, ignore ambient proxies, reject
+redirects, provision fresh tenant-owned resources through public APIs, and use
+only read-only PostgreSQL queries for final reconciliation. Credentials remain
+in environment memory and are never printed.
+
 ## Local Infrastructure
 
 Start PostgreSQL and Redis:
@@ -95,6 +164,25 @@ response statuses, and verification results under
 `build/reports/webhook-delivery/`. The script waits for the deterministic
 one-minute retry and proves two attempts share one immutable event and apply
 exactly one durable callback effect.
+
+Run the Chapter 42 signed verification, dead-letter, and exact-redelivery proof:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+python3 scripts/demo-webhook-operations.py
+```
+
+Start `payments-api` first with local webhook execution enabled and loopback in
+`THAAP_WEBHOOK_ALLOWED_HOSTS`. The client accepts only an explicit loopback API
+origin, ignores environment proxies, rejects redirects, and provisions a fresh
+merchant plus risk manager without printing either credential. Its loopback
+receiver echoes the exact signed verification challenge in the final 2xx
+response field, returns one permanent 400 for the business event, and then
+returns 204 after the operator requests `RECEIVER_REPAIRED` redelivery. The
+script proves `VERIFIED -> EXHAUSTED -> generation 2 -> SUCCEEDED`, validates
+both HMAC signatures, and reports only event ID, payload digest, statuses, and
+generation evidence. Supplying both `THAAP_MERCHANT_API_KEY` and
+`THAAP_RISK_OPERATOR_KEY` skips provisioning; supplying only one fails closed.
 
 Run the Chapter 20 complete deterministic processor-catalog demo:
 

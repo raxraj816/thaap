@@ -976,3 +976,275 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Exact test-count claims require an automated repository-wide reconciliation or must be generated from the same completed test invocation.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-25
+
+## ER-0058
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 39
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Chapter 43 integrated public-demo reconciliation
+- Invariant: The governed-controls public demo must either satisfy the production-safe simulation activation population/coverage gate or explicitly configure and document a local-only evidence threshold without weakening the runtime default or bypassing any other activation check.
+- Finding: `demo-governed-controls.py` builds a deliberate one-row cohort, while `RiskSimulationActivationGate` defaults to 100 eligible rows and 50% label coverage. Chapter 39 claimed the public demo passed against the current binary, but no durable public instruction named the local-only `1`/`0` threshold configuration, so a documented/default retained runtime correctly returned `409` with `INSUFFICIENT_ELIGIBLE_POPULATION` and `INSUFFICIENT_LABEL_COVERAGE`.
+- Why prior review missed it: The earlier live shell carried reduced Spring properties used by focused activation proof, and closure recorded the successful output without reconstructing the runtime from public documentation and production defaults.
+- Resolution evidence: `application.yml` now exposes explicit `THAAP_SIMULATION_GATE_MINIMUM_ELIGIBLE_POPULATION` and `THAAP_SIMULATION_GATE_MINIMUM_LABEL_COVERAGE_PERCENT` variables while retaining defaults `100` and `50`. `scripts/README.md` and the payments API README document the local-only `1`/`0` proof configuration, warn against shared use, and state that exact successful-run, candidate, freshness, tenant, creator, and dual-control checks remain enforced. Chapter 43 restarts the retained V64 API with only those evidence thresholds reduced and reruns the complete governed-rule/exception/rollback demo plus the activation contracts.
+- Process correction: Every public demo closure claim must be reproduced from a clean runtime whose complete non-default configuration is present in durable user-facing instructions; successful output from an inherited developer shell is not documentation proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0059
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 43R
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Phase 4.5 post-closure recovery audit
+- Invariant: An integrated Phase 4.5 completion claim must execute and pass every inherited Chapter 36–43 closure contract, not only the Chapter 43 matrix and dossier supplied to the readiness gate.
+- Finding: Phase 4.5 was declared complete although the closure validator rejected Chapter 36's README completion marker and the exact failure-inventory, boundary-evidence, and migration-evidence sections in the Chapter 38 and 39 dossiers.
+- Why prior review missed it: The integrated readiness invocation validated only the supplied Chapter 43 artifacts and did not aggregate the inherited chapter closure contracts.
+- Resolution evidence: Chapter 36's README marker and Chapter 38/39 dossier sections are repaired. `phase-closure-check.py` independently validates Chapters 36–43 and 43R; its negative/positive unit tests and the final aggregate invocation pass.
+- Process correction: Integrated Phase 4.5 readiness now automatically enumerates every inherited matrix/dossier pair when Chapter 43 or 43R is supplied.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0060
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 43R
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Phase 4.5 product-surface traceability audit
+- Invariant: The shipped cockpit must expose the promised merchant monitoring summary and cohort lineage plus endpoint verification and actionable idempotency guidance.
+- Finding: The backend capabilities existed, but the cockpit omitted monitoring summary/cohort drill-down, webhook endpoint verification, and concrete retry-key guidance.
+- Why prior review missed it: Earlier closure treated backend API and isolated UI slices as sufficient without tracing every approved product promise through the integrated cockpit.
+- Resolution evidence: The cockpit now renders all nine monitoring metrics with exact evidence and cohort drill-down, starts merchant-authorized endpoint verification, and gives actionable stable-key retry guidance. Thirteen UI tests/build, all seven public clients, and the isolated V64 browser pass succeed.
+- Process correction: The Chapter 43R matrix/dossier maps every approved product promise to a public route, visible control, real enforcement boundary, and exact proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0061
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 43R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Phase 4.5 hostile browser-proof audit
+- Invariant: Browser proof must cover role visibility, tenant substitution, stale conflicts, exact idempotent retry, and loading, empty, partial, denied, and dependency-failure states without secret disclosure.
+- Finding: Seven component tests and a happy-path browser walkthrough did not prove the complete hostile browser boundary family.
+- Why prior review missed it: The earlier proof sampled successful workflows and accessibility but did not enumerate the browser failure and authorization partitions frozen by the plan.
+- Resolution evidence: UI contracts prove authentication/denied/stale/dependency states, exact idempotent retry, partial/empty/loading behavior, endpoint authority, and role visibility. Live browser proof verifies manager monitoring/cohort, VIEWER read-only rendering, and credential clearing on reload; tenant substitution remains covered by backend two-tenant contracts.
+- Process correction: The recovery matrix freezes the browser boundary table before implementation, and the dossier requires component plus retained-stack browser evidence before closure.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0062
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 43R
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Developer scenario mutation-contract audit
+- Invariant: Every developer scenario mutation must require a generic actor-scoped idempotency key in addition to lease owner and lease epoch protection.
+- Finding: Scenario creation required `Idempotency-Key`, but claim, step completion, and fail mutations did not pass through the generic idempotency boundary.
+- Why prior review missed it: Lease/version replay semantics were incorrectly treated as a substitute for transport-level request deduplication.
+- Resolution evidence: Claim, complete, and fail authorize the runner before actor-scoped `IdempotencyService` execution; UI/Python clients send stable operation keys. Missing-key, exact-replay, changed-body, missing-runner, lease/event, PostgreSQL concurrency, full regression, and public demo proof pass.
+- Process correction: The Chapter 43R mutation inventory checks transport idempotency and domain lease/version fencing as independent required layers.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0063
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 43R
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Frontend dependency and architecture reconciliation
+- Invariant: The approved frontend architecture must match the shipped dependency graph, or an explicit evidence-backed recovery decision must replace the unimplemented promise.
+- Finding: The plan named TanStack Query, Tailwind CSS, and Recharts while the cockpit package shipped only React, Vite, TypeScript, and handwritten CSS.
+- Why prior review missed it: Architecture prose was not reconciled against `package.json` and the product's actual visualization needs.
+- Resolution evidence: `@tanstack/react-query` now owns bounded non-secret session/monitoring server state with explicit invalidation and disconnect clearing. The detailed plan and cockpit README record the evidence-table/handwritten-CSS decision and reject Tailwind/Recharts until a frozen visualization promise justifies them.
+- Process correction: Chapter 43R closure reconciles the plan, package manifest, runtime use, production build, and dependency rationale as one UI evidence boundary.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0064
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 36
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff point-in-time monitoring review
+- Invariant: A monitoring result and its drill-down must observe only evidence available at the declared `asOf`, so appending later evidence cannot rewrite an earlier report.
+- Finding: `ENUMERATION_RATIO` treated every incident evidence link as visible without requiring `linked_at <= asOf`; the summary and cohort could therefore change for an unchanged historical window after a later card-testing link was appended.
+- Why prior review missed it: Point-in-time tests covered late chargebacks and labels but generalized that evidence to the incident-link family without enumerating its distinct observed-versus-linked availability boundary.
+- Resolution evidence: Summary and cohort SQL now require both authorization creation and incident association availability at `asOf`. `MerchantRiskMonitoringPostgreSqlTests` passed 7/7 on PostgreSQL 16.14, including the before/exact/after `linked_at` family. Its semantic-drift fixture now uses a deliberately privileged, test-only trigger suspension to inject corruption; ordinary taxonomy UPDATE/DELETE remains rejected by the separate migration contract. The complete backend suite then passed 759/759 with no skips.
+- Process correction: Every point-in-time review must inventory and test the availability column for each joined evidence table rather than borrowing proof from another late-evidence family.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0065
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 38
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff counterfactual-decision review
+- Invariant: Historical simulation must preserve the complete decision-time production control stack and replace or suppress only the exact candidate family being evaluated.
+- Finding: The simulation baseline loaded legacy rule, fraud-list, and velocity evidence but omitted merchant-policy and authored-rule evaluations, so policy, rule, and safety-exception reports could calculate a counterfactual action that production never would have produced.
+- Why prior review missed it: The simulation proof used a single isolated candidate and source inspection, then treated the presence of generic control evidence as proof of mixed-control reconstruction.
+- Resolution evidence: The processor now reconstructs legacy, policy, and authored-rule evidence; authored candidates replace the immutable `rule_code` family, while safety exceptions suppress only an exact historically evaluated source version and preserve its recorded effective action. `HistoricalRiskSimulationPostgreSqlTests` passed 8/8 on PostgreSQL 16.14, including mixed-control reconstruction and injected chunk/finalization restart edges; the complete backend suite then passed 759/759 with no skips.
+- Process correction: Counterfactual proof must use cross-family fixtures and explicitly show which historical control is preserved, replaced, or suppressed for every candidate type.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0066
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 42
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff webhook lifecycle review
+- Invariant: A webhook verification challenge may be dispatched only when its locked projection is still pending, unexpired, and bound to the current active endpoint generation.
+- Finding: `markDispatchStarted` silently returned for a terminal challenge while its caller continued to sign and send, allowing expiry or recovery to win the state transition yet lose the external-side-effect race.
+- Why prior review missed it: Existing tests forced secret rotation and standalone expiry but omitted expiry/recovery winning specifically between the pre-dispatch clock check and the dispatch-state lock.
+- Resolution evidence: Verification now signs the exact endpoint generation and then acquires a locked dispatch permit that revalidates pending, expiry, endpoint status, URL, generation, and challenge identity before any transport call. `WebhookDeliveryPostgreSqlConcurrencyTests.terminalVerificationWinnerAfterSigningRevokesDispatchBeforeAnyNetworkSideEffect` passed on PostgreSQL 16.14 and proves a post-sign terminal winner leaves `dispatch_started_at` null and makes zero transport calls; the complete backend suite then passed 759/759 with no skips.
+- Process correction: Every external-I/O preparation method must return an explicit permit/outcome, and hostile tests must force every terminal state between precheck, lock, signature, and socket dispatch.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0067
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 40
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff dispute authorization review
+- Invariant: A dispute mutation revalidates and locks the live operator and credential before locking or changing dispute state.
+- Finding: Evidence revision and submission trusted the request-time `RiskOperatorContext` and locked only the workflow, so a concurrent operator disable could commit while the stale request still appended evidence or submitted a packet.
+- Why prior review missed it: Tests rejected actors already disabled before request dispatch but did not force disable after argument resolution and before the dispute mutation lock.
+- Resolution evidence: Evidence revision, submission, and completed replay now lock and revalidate the live operator and credential before the workflow. `ChargebackAndDisputeContractTests` passed 19/19 on PostgreSQL 16.14, including disable-before-submit and completed revise/submit replay-after-disable; the complete backend suite then passed 759/759 with no skips.
+- Process correction: Authorization matrices must distinguish already-disabled requests from disable-during-mutation and require a shared database lock in every state-changing operator path.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0068
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 42
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff webhook authorization review
+- Invariant: Operator redelivery revalidates and locks the live operator and credential before endpoint and delivery state can advance to a new generation.
+- Finding: Operator redelivery checked only the role captured during argument resolution, allowing a concurrent disable to commit while the stale request still scheduled external webhook work.
+- Why prior review missed it: Replay tests covered an actor disabled before the replay request, while concurrency tests forced endpoint disable rather than operator disable after authentication.
+- Resolution evidence: Redelivery execution and completed replay lock and revalidate the live operator and credential before endpoint and delivery state. `forcedOperatorDisableBeforeRedeliveryRejectsAuthenticatedInFlightAndFutureRequests` passed on PostgreSQL and proves disable wins with no new generation, request, attempt, or audit side effect.
+- Process correction: Endpoint-state races and actor-state races are separate authorization families and must each have deterministic real-database proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0069
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 37
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff protected-note review
+- Invariant: Every authorized decryption and return of analyst note plaintext leaves metadata-only access evidence without copying the plaintext into any sink.
+- Finding: `ReviewNoteService.list` authorized and decrypted note content but recorded no access audit, despite the detailed plan explicitly promising access-audited notes.
+- Why prior review missed it: The contract scanned audit rows for forbidden plaintext but never asserted that a successful plaintext read created a required access record.
+- Resolution evidence: `ReviewNoteService.list` records `review_note.accessed` with request ID and count-only metadata in the authorized read transaction. Workspace contracts prove audit presence, denied-read absence, redacted-content counts, and plaintext absence; the retained PostgreSQL redaction/read ordering also passes.
+- Process correction: Privacy proof must assert both absence of sensitive bytes and presence of every required access-control event.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0070
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 41
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 Senior Staff scenario-report lineage review
+- Invariant: A scenario's terminal report and digest are functions only of that run's immutable specification and verified durable results.
+- Finding: `originBreakdown` counted every payment attempt owned by the merchant, so unrelated historical or concurrent traffic changed the run report and digest.
+- Why prior review missed it: The live demo intentionally created one merchant reference attempt and treated the expected mixed total as reconciliation proof without testing a second unrelated attempt or an identical run under different tenant history.
+- Resolution evidence: Origin breakdown now traverses only the target run's completed `CONFIRM_PAYMENT_INTENT` step resources to their attempts. The scenario contract injects unrelated same-tenant traffic before and after finalization and proves both the owned breakdown and canonical report digest remain unchanged.
+- Process correction: Report-determinism tests must inject unrelated same-tenant rows before and during finalization and prove they cannot change run-owned bytes.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0071
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 42
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 authorization source-of-truth reconciliation
+- Invariant: The shipped webhook role boundary must match the founder-confirmed Phase 4.5 authorization matrix across backend, UI, README, tests, matrix, and dossier.
+- Finding: The phase plan and cockpit restricted inspection/redelivery to `RISK_MANAGER`, while the Chapter 42 service, tests, matrix, and dossier granted `ANALYST`, creating an unreviewed privilege expansion and contradictory product truth.
+- Why prior review missed it: Chapter-local proof was internally consistent, but the integrated review compared artifact presence rather than row-by-row authorization semantics against the authoritative phase matrix.
+- Resolution evidence: Webhook dead-letter inspection and redelivery now require a live `RISK_MANAGER` in the service and cockpit; VIEWER and ANALYST are denied, and controller/service tests, the phase matrix, Chapter 42 matrix/dossier, service README, and demo agree on the same actor/action cells.
+- Process correction: Integrated closure must mechanically or manually compare every actor/action cell across the master matrix, controllers, services, UI affordances, and chapter-local proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0072
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 43R
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 local cockpit integration review
+- Invariant: Every public API route invoked by the advertised local Vite cockpit reaches the payments API through the documented same-origin development boundary.
+- Finding: Endpoint verification called `/webhook_endpoints/...` while Vite proxied neither `/webhook_endpoints` nor `/webhook_deliveries`, producing a local Vite 404 that mocked fetch tests could not reveal.
+- Why prior review missed it: UI component tests replaced `fetch`, and the retained browser proof did not execute endpoint verification through the actual Vite proxy.
+- Resolution evidence: Vite now proxies both `/webhook_endpoints` and `/webhook_deliveries`; the configuration test inventories those routes, all 20 UI tests pass, and the production build succeeds.
+- Process correction: Browser closure must exercise every client route through the real development proxy or validate the route-to-proxy inventory exhaustively.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
+
+## ER-0073
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 43R
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-07-27
+- Escaped gate: Post-Phase-4.5 cockpit resilience review
+- Invariant: After successful authentication, failure of one independent workspace dependency is explicit but does not discard usable monitoring, review, or operational slices that loaded successfully.
+- Finding: The initial `Promise.all` made monitoring, queue, searches, controls, and disputes one all-or-nothing connection, so one optional 503 returned the user to the entry surface and discarded every successful result.
+- Why prior review missed it: Failure tests made every request return the same 403 or 503 and verified classification, but never tested one failed auxiliary dependency alongside successful core slices.
+- Resolution evidence: Authentication is a hard first gate, while independent workspace dependencies settle separately with per-slice state and bounded retry. UI contracts prove a saved-search 503 and dispute 403 preserve successful monitoring/review slices, an auxiliary 401 fails closed, credentials remain memory-only, and all 20 UI tests plus the production build pass.
+- Process correction: Client failure inventories must include mixed dependency outcomes, not only all-success and all-failure partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-07-27
