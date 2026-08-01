@@ -1,5 +1,13 @@
 # THAAP Risk And Developer Cockpit
 
+Phase 6 planning source:
+[`../../docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`](../../docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
+The founder-confirmed Chapters 53–59 extend this existing cockpit into a routed
+investigation/developer product. The 2026-08-02 promise freeze now has frozen
+pre-implementation matrices and open `DO_NOT_MERGE` dossiers for every Chapter
+53–59 slice. Chapters 53 and 57 may begin against those contracts; runtime
+behavior has not changed yet.
+
 The Chapter 37 cockpit is a thin React/TypeScript client over the typed analyst
 workspace APIs. It keeps the risk-operator credential and protected note drafts
 in React memory only: the implementation does not use `localStorage`,

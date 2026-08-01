@@ -245,6 +245,13 @@ merchant endpoints.
 
 Frontend for investigation and operations.
 
+The founder-confirmed Phase 6 plan evolves this same local client into a routed decision-
+intelligence and developer product. One payment route will reconcile source
+payment/fraud/ledger truth, canonical stream-version timeline evidence, and
+Phase 5 projection freshness/coverage without flattening them into one
+authority. Same-merchant relationship pivots expose bounded reason codes only;
+raw/HMAC identities and cross-merchant inference remain prohibited.
+
 Responsibilities:
 
 - overview metrics
@@ -256,6 +263,8 @@ Responsibilities:
 - model performance, later
 - graph investigation, later
 - agent reports, later
+- generated OpenAPI/error/version guidance and SDK-led sandbox onboarding,
+  frozen for Phase 6 but not yet implemented
 
 ### 4.7 `model-serving-service`
 

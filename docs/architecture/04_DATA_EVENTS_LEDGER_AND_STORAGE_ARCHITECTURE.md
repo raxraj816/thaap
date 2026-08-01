@@ -942,3 +942,28 @@ Complete when:
 - ML dataset rows can be built from persisted snapshots
 - graph ingestion has idempotent event handling
 - audit logs exist for high-risk actions
+
+## 17. Frozen Phase 6 Investigation Read Architecture
+
+Phase 6 does not introduce an authoritative case projection. Its investigation
+composition layer uses three distinct sources:
+
+- domain tables for current payment, fraud, review, label, dispute, webhook,
+  and ledger truth
+- canonical payment-stream versions for immutable business ordering
+- active Phase 5 projections for discovery and aggregate insight with exact
+  generation, cutoff, freshness, coverage, and origin policy
+
+Potentially growing collections use separate signed cursors. A source detail
+snapshot is bounded and repeatable-read; projection and transport sections keep
+their own declared as-of/freshness state.
+
+V86–V87 are frozen to normalize only already-safe same-merchant correlation
+HMAC aliases into tenant/source-qualified investigation anchors. These rows are
+an immutable lookup child of the original payment/risk lineage, never a fraud
+input or cross-merchant graph. The API returns relation reason codes, not HMACs
+or raw values. V88–V90 are proposed for typed investigation saved views and
+restart-safe bounded bulk-assignment evidence; V91 is limited to measured query
+support. The 2026-08-02 founder promise freeze has a pre-implementation proof
+contract for every Chapter 53–59 slice; Chapters 53 and 57 are the first
+dependency-ready implementation entries.

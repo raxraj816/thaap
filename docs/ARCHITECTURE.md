@@ -138,6 +138,13 @@ Technology:
 
 Operational UI for fraud and payment investigation.
 
+The founder-confirmed Phase 6 contract extends this existing client rather than adding
+a second frontend. It composes authoritative source facts, canonical payment-
+stream order, and generation/freshness/coverage-qualified Phase 5 projections
+into routed payment investigation, related-payment, queue, insight, and
+developer-contract surfaces. Source actions still execute through existing
+typed APIs; a projection row or browser action hint never authorizes mutation.
+
 Responsibilities:
 
 - transaction search
@@ -148,6 +155,14 @@ Responsibilities:
 - model metrics, later
 - graph investigation, later
 - agent reports, later
+
+Phase 6 also freezes a generated date-versioned OpenAPI contract and one
+supported Python sandbox SDK. Hosted identity, deployed multi-version
+compatibility, active model explanations, cross-merchant graph/network pivots,
+and real PSP guidance remain later-phase boundaries. All Chapter 53–59
+pre-implementation matrices freeze the source, event, projection, tenant,
+browser, contract, SDK, migration, and operational boundaries before their
+implementation evidence is collected.
 
 Technology:
 

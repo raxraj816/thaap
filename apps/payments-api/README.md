@@ -2,6 +2,13 @@
 
 Primary V1 backend deployable.
 
+The founder-confirmed Phase 6 API, investigation, versioning, OpenAPI, error, and Python
+SDK contracts are specified in
+[`../../docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`](../../docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
+The 2026-08-02 promise freeze now has frozen pre-implementation matrices and
+open `DO_NOT_MERGE` dossiers for every Chapter 53–59 slice. Chapters 53 and 57
+are dependency-ready; runtime behavior has not changed yet.
+
 V1 uses the deterministic processor simulator. THAAP's declared destination is
 a hosted merchant-facing fraud/risk platform integrating first through
 versioned existing-PSP adapters; this service must therefore preserve external

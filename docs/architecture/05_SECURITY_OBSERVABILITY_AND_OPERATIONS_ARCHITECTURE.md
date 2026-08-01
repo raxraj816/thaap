@@ -257,6 +257,28 @@ or checkout UI work must still model PCI-shaped browser risk:
 
 This is a learning requirement, not a PCI-compliance claim.
 
+### 4.5 Frozen Phase 6 Investigation And Developer-Contract Security
+
+Phase 6 keeps risk-operator, merchant API, scenario-runner, and platform-data
+identities separate. The routed local browser and supported SDK attach exactly
+one applicable credential per request and keep credentials out of URLs,
+storage, logs, examples, redirects, proxy forwarding, error text, and metrics.
+
+Payment investigation composes tenant-qualified source facts and safe event
+presentation DTOs; it never returns raw canonical payload bytes, note plaintext
+outside authorized note reads, webhook targets/payloads, raw or HMAC identity
+values, database exceptions, or cross-merchant relationship counts. Related-
+payment lookup begins from an authorized seed payment and accepts only bounded
+reason/range/page inputs.
+
+The frozen date-based API version is resolved before mutation and returned on
+every response. Generated OpenAPI excludes internal/platform/Actuator routes,
+uses operation-specific credential schemes, and contains only synthetic safe
+examples. Stable error codes and retryability replace message parsing. The
+Python sandbox client rejects redirects, ignores ambient proxy settings for
+loopback execution, uses bounded timeouts, and retries mutations only with the
+same idempotency identity and body.
+
 ## 5. Idempotency Security
 
 Threats:
@@ -815,6 +837,14 @@ Ready when:
 - card-testing incident detail works
 - merchant risk profile detail works
 - dispute evidence packet detail works
+- Phase 6 payment investigation distinguishes source, event, and projection
+  authority and exposes section-specific loading/empty/partial/stale/denied/
+  unavailable/conflict states
+- lifecycle and related-payment traversal is bounded, tenant-safe, and
+  losslessly paginated
+- accessibility, memory-only credential, safe-route, and focus behavior pass
+- generated OpenAPI, stable errors, and the supported SDK complete the
+  zero-source-reading sandbox journey when Phase 6 is implemented
 
 ### 17.3 ML Readiness
 
