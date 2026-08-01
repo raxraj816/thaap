@@ -13,8 +13,10 @@ the product ceiling.
 The authoritative cross-phase implementation source is
 [docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md). Where
 that plan incorporates a detailed phase plan, the incorporated plan controls
-that phase's exact frozen contract; for Phase 5 this is
-[docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md).
+that phase's exact frozen contract; for Phase 5 and Phase 6 these are
+[docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
+and
+[docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md](docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
 Permanent challenger-promise ownership is tracked in
 [docs/THAAP_VISION_COVERAGE_MATRIX.md](docs/THAAP_VISION_COVERAGE_MATRIX.md)
 and enforced by `scripts/vision-coverage-check.py`.
@@ -118,6 +120,18 @@ Chapter 45 is complete. Chapter 46 is complete. Chapter 47 is complete. Chapter
 48 is complete. Chapter 49 is complete. Chapter 50 is complete. Chapter 51 is
 complete. Chapter 52 is complete. Every dossier is `READY_TO_MERGE`/`MERGE`.
 Phase 5 implementation status: COMPLETE
+The
+[Phase 6 detailed implementation plan](docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md)
+was founder-confirmed on 2026-08-02. It freezes Chapters 53–59 for a source-reconciled
+payment investigation and complete decision explanation, canonical lifecycle
+timeline, HMAC-safe same-merchant pivots, investigation saved views, bounded
+restart-safe review assignment, denominator-honest insights, a routed and
+accessibility-tested workspace, date-versioned generated OpenAPI, stable error
+contracts, and one supported Python sandbox SDK. Implementation has not
+started. The twenty decisions are confirmed, and all Chapter 53–59
+`PRE_IMPLEMENTATION` matrices are frozen proof contracts with open
+`IN_PROGRESS` / `DO_NOT_MERGE` dossiers. Chapter 53 and Chapter 57 are the
+dependency-ready implementation entries; all evidence remains pending.
 The vision matrix registers 23 `VP-NNN` promises and rebaselines Phases 6–10
 around unified decision/analyst product, developer contracts, governed ML and
 drift, privacy-safe network/graph intelligence, merchant underwriting and

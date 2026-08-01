@@ -10,11 +10,14 @@ This directory is organized to avoid conflicting plans during implementation.
 - [PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_DETAILED_IMPLEMENTATION_PLAN.md)
 - [PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md)
 - [PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
+- [PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md)
 
 The master plan is the authoritative cross-phase implementation source. When it
 incorporates a detailed phase plan, that incorporated plan controls the exact
 frozen contract for its phase and the two documents must agree. The Phase 5
-detailed plan is incorporated, not a non-authoritative companion reference.
+detailed plan is incorporated, not a non-authoritative companion reference;
+the founder-confirmed Phase 6 detailed plan now has the same relationship to
+the master plan for Chapters 53–59.
 The completed Phase 3 detailed plan defines Chapters 22–25. The confirmed Phase
 4 detailed plan is incorporated by reference and defines its review/label,
 RiskContext, Redis, policy, authentication, dispute, failure, proof, and
@@ -33,6 +36,14 @@ one product set. All Chapter 44–52 pre-implementation contracts are
 `FROZEN`/`VERIFIED`/all-`PASS`, with exact matrix/dossier links in the detailed
 plan, and all dossiers recommend `MERGE`.
 Phase 5 implementation status: COMPLETE
+The Phase 6 detailed plan was founder-confirmed on 2026-08-02 and freezes
+Chapters 53–59. Its source-reconciled investigation, timeline/relationship,
+saved-view/bulk-workflow, insight, API contract, SDK, and integrated-trust
+decisions are now the implementation promise. All Chapter 53–59
+`PRE_IMPLEMENTATION` matrices are frozen and all matching closure dossiers are
+open as `IN_PROGRESS` / `DO_NOT_MERGE`. Chapter 53 and Chapter 57 are the
+dependency-ready implementation entries; implementation evidence is not yet
+complete.
 The
 vision coverage matrix registers 23 product promises and rebaselines Phases
 6–10 so later work extends current product truth rather than duplicating Phase

@@ -3567,6 +3567,55 @@ demo, full-regression, matrix, dossier, debt, and escaped-review gates pass.
 
 Vision owners: `VP-004`, `VP-005`, and `VP-016`.
 
+Detailed source of truth:
+[`PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
+
+Current state: **FOUNDER CONFIRMED 2026-08-02; IMPLEMENTATION AUTHORIZED, NOT
+STARTED.** Phase
+5 / Chapter 52 is complete and merged, so the entry gate is satisfied. The
+detailed plan proposes one coherent promise freeze across source-reconciled
+payment investigation, complete deterministic decision explanation, canonical
+stream-version timelines, same-merchant HMAC-safe related-payment pivots,
+typed saved views, restart-safe bounded bulk review assignment, denominator-
+honest insights, routed/accessibility-tested UI, date-versioned OpenAPI, stable
+errors, and one supported Python sandbox SDK. Its twenty decisions were
+founder-confirmed as one coherent product set before production code or V86.
+All Chapter 53–59 matrices are now frozen `PRE_IMPLEMENTATION` proof contracts
+with open `IN_PROGRESS` / `DO_NOT_MERGE` dossiers; implementation evidence
+remains pending. Chapter 53 and Chapter 57 are the first dependency-ready
+entries.
+
+Frozen chapter proof contracts:
+
+- Chapter 53:
+  [`CHAPTER_53_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_53_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_53_CLOSURE_DOSSIER.md`](reviews/CHAPTER_53_CLOSURE_DOSSIER.md)
+- Chapter 54:
+  [`CHAPTER_54_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_54_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_54_CLOSURE_DOSSIER.md`](reviews/CHAPTER_54_CLOSURE_DOSSIER.md)
+- Chapter 55:
+  [`CHAPTER_55_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_55_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_55_CLOSURE_DOSSIER.md`](reviews/CHAPTER_55_CLOSURE_DOSSIER.md)
+- Chapter 56:
+  [`CHAPTER_56_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_56_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_56_CLOSURE_DOSSIER.md`](reviews/CHAPTER_56_CLOSURE_DOSSIER.md)
+- Chapter 57:
+  [`CHAPTER_57_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_57_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_57_CLOSURE_DOSSIER.md`](reviews/CHAPTER_57_CLOSURE_DOSSIER.md)
+- Chapter 58:
+  [`CHAPTER_58_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_58_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_58_CLOSURE_DOSSIER.md`](reviews/CHAPTER_58_CLOSURE_DOSSIER.md)
+- Chapter 59:
+  [`CHAPTER_59_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_59_INVARIANT_PROOF_MATRIX.md)
+  and
+  [`CHAPTER_59_CLOSURE_DOSSIER.md`](reviews/CHAPTER_59_CLOSURE_DOSSIER.md)
+
 Current truth: Phase 4.5 already delivered a thin cockpit, review workspace,
 saved searches, protected notes, monitoring, simulation, governed controls,
 disputes, webhooks, and developer scenarios. Phase 6 must extend those surfaces;
@@ -3574,36 +3623,90 @@ it may not spend a phase rebuilding them under “dashboard MVP” names.
 
 Named owner slices:
 
-1. **Unified Decision Explanation And Lifecycle Timeline**
+1. Chapter 53: Unified Payment Investigation And Decision Explanation
+   - Status: dependency-ready; frozen matrix; implementation not started.
    - Product DRI: Fraud/Risk Product.
    - Technical DRI: Risk Platform.
-   - Build one freshness-aware payment/attempt detail that reconciles processor,
-     decision, feature, rule/model, review, label, dispute, webhook, and ledger
-     evidence without turning the projection into source truth.
-2. **Analyst Investigation Workspace And Business Insights**
-   - Product DRI: Risk Operations and Product Design.
+   - Compose one bounded repeatable-read source snapshot with Phase 5
+     freshness/coverage context and expose every deterministic control result,
+     precedence winner, dependency state, and explicit model-not-configured
+     truth.
+2. Chapter 54: Canonical Timeline And Safe Related-Payment Pivots
+   - Status: dependency-blocked on Chapter 53 merge-ready evidence; frozen
+     matrix; implementation not started.
+   - Product DRI: Fraud/Risk Product and Risk Operations.
    - Technical DRI: Risk Platform.
-   - Add related-transaction pivots, unified case timeline, bounded bulk
-     actions, queue productivity, SLA/outcome analysis, saved views, and
-     merchant/risk performance insights over Phase 5 projections.
-3. **Developer Contract, OpenAPI, SDK, And Sandbox**
+   - Security DRI: Security/Platform.
+   - Add safe event-type mappers ordered by payment-stream version, frozen
+     pagination, separately labelled webhook evidence, V86–V87 normalized HMAC
+     relationship anchors, and bounded same-merchant pivots with no raw or
+     cross-tenant identity exposure.
+3. Chapter 55: Investigation Saved Views And Bounded Bulk Review Assignment
+   - Status: dependency-blocked on Chapters 53–54 merge-ready evidence; frozen
+     matrix; implementation not started.
+   - Product DRI: Risk Operations.
+   - Technical DRI: Risk Platform.
+   - Supporting DRIs: Product Design and Security/Platform.
+   - Add V88 typed payment-investigation views and V89–V90 durable Spring Batch
+     execution for at most 25 assignment/release items with idempotency,
+     per-item truth, live-actor checks, fencing, partial completion, and no
+     bulk resolution, label, money, dispute, or control action.
+4. Chapter 56: Queue Productivity And Decision/Business Insights
+   - Status: dependency-blocked on Chapter 55 merge-ready evidence; frozen
+     matrix; implementation not started.
+   - Product DRI: Risk Operations and Product Design.
+   - Technical DRI: Risk Platform and Data Platform.
+   - Use active Phase 5 projections for outcome insights and authoritative
+     review facts for workload/SLA metrics, preserving separate as-of semantics,
+     exact numerator/denominator/unknown partitions, origin policy, partial
+     coverage, role filtering, and currency-separated money.
+5. Chapter 57: Versioned OpenAPI And Stable Error Contract
+   - Status: dependency-ready; frozen matrix; implementation not started.
    - Product DRI: Developer Experience.
    - Technical DRI: Payments Core.
-   - Add generated OpenAPI, API-version visibility, complete error catalogue,
-     onboarding quickstart, idempotency/webhook examples, one supported
-     SDK/reference client, and contract tests that require no source reading.
-4. **Workspace Trust And Integrated Closure**
-   - Product DRI: Product Design.
-   - Technical DRI: Security/Platform.
+   - Supporting DRIs: Risk Platform and Security/Platform.
+   - Add initial `Thaap-Version: 2026-08-01`, typed public error codes and retry
+     guidance, generated/committed OpenAPI, public/internal route partition,
+     safe examples, and mature lint/regeneration/semantic-diff gates.
+6. Chapter 58: Supported Python SDK And Sandbox Onboarding
+   - Status: dependency-blocked on Chapter 57 merge-ready evidence; frozen
+     matrix; implementation not started.
+   - Product DRI: Developer Experience.
+   - Technical DRI: Payments Core.
+   - Security DRI: Security/Platform.
+   - Generate typed operations/models from OpenAPI, add a narrow secure
+     transport/auth/webhook wrapper, and prove a clean-install, zero-source-
+     reading payment-risk/webhook/analytics journey.
+7. Chapter 59: Workspace Trust And Integrated Phase 6 Closure
+   - Status: dependency-blocked on Chapters 53–58 merge-ready evidence; frozen
+     matrix; implementation not started.
+   - Primary DRI: Founding Staff Engineering.
+   - Supporting DRIs: all Phase 6 product and technical owners.
    - Prove role/accessibility, memory-only credentials, loading/empty/partial/
-     stale/permission/dependency states, safe links, browser routing, tenant
-     isolation, and all public workflows together.
+     stale/permission/dependency/conflict states, safe routing/links, tenant
+     isolation, fresh/retained V91, OpenAPI/SDK drift protection, and both
+     public workflows together.
+
+Proposed dependency sequence:
+
+```text
+Chapter 52 -> 53 -> 54 -> 55 -> 56 --+
+Chapter 52 -> 57 -> 58 ---------------+-> 59 integrated closure
+```
+
+Chapter 53 and Chapter 57 are independently dependency-ready under the same
+founder-confirmed promise freeze. The exact V86–V91 allocation, API routes, authority
+model, failure inventory, proof boundaries, and named exclusions are in the
+detailed plan.
 
 Phase 6 is done only when an analyst can investigate and act from one coherent
 freshness-aware workflow, a merchant developer can integrate from published
 contracts alone, the UI does not duplicate or contradict Phase 4.5 operations,
 and every `VP-004`, `VP-005`, and `VP-016` gap assigned to Phase 6 has exact
-API/browser/demo and real-database evidence.
+API/browser/demo and real-database evidence. Phase 6 does not claim active ML,
+cross-merchant/network intelligence, hosted identity, multi-version production
+deployment, public package distribution, or a real PSP integration guide;
+those retain their exact Phase 7–10 owners.
 
 ### Phase 7: Governed ML Baseline And Lifecycle
 

@@ -177,6 +177,7 @@ Current concept notes:
 - [Deterministic Rule Decisioning](concepts/DETERMINISTIC_RULE_DECISIONING.md)
 - [Review Resolution And Label Lineage](concepts/REVIEW_RESOLUTION_AND_LABEL_LINEAGE.md)
 - [Safe RiskContext And Feature Lineage](concepts/SAFE_RISK_CONTEXT_AND_FEATURE_LINEAGE.md)
+- [Source-Reconciled Investigation And Executable API Contracts](concepts/SOURCE_RECONCILED_INVESTIGATION_AND_EXECUTABLE_API_CONTRACTS.md)
 - [Docker Compose Local Infrastructure From First Principles](concepts/DOCKER_COMPOSE_LOCAL_INFRASTRUCTURE.md)
 - [Health Checks And Actuator From First Principles](concepts/HEALTH_CHECKS_AND_ACTUATOR.md)
 - [Idempotency From First Principles](concepts/IDEMPOTENCY.md)
