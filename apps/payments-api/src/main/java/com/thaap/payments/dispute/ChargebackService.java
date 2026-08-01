@@ -13,11 +13,13 @@ import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.payment.PaymentIntent;
 import com.thaap.payments.payment.PaymentIntentRepository;
 import com.thaap.payments.payment.PaymentIntentStatus;
+import com.thaap.payments.payment.PaymentDomainEventService;
 import com.thaap.payments.payment.CaptureMethod;
 import com.thaap.payments.payment.Refund;
 import com.thaap.payments.payment.RefundRepository;
 import com.thaap.payments.review.FraudLabel;
 import com.thaap.payments.review.FraudLabelRepository;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
@@ -49,6 +51,8 @@ public class ChargebackService {
     private final ChargebackMetrics metrics;
     private final DisputeWorkflowInitializer disputeWorkflowInitializer;
     private final Clock clock;
+    private final PaymentDomainEventService paymentDomainEventService;
+    private final RiskOperationsEventProducer riskOperationsEventProducer;
 
     public ChargebackService(MerchantRepository merchantRepository,
             PaymentIntentRepository paymentIntentRepository, AuthorizationRepository authorizationRepository,
@@ -57,7 +61,9 @@ public class ChargebackService {
             DisputeEvidencePacketRepository evidenceRepository, FraudLabelRepository fraudLabelRepository,
             LedgerService ledgerService, AuditLogService auditLogService,
             WebhookDeliveryService webhookDeliveryService, ChargebackMetrics metrics,
-            DisputeWorkflowInitializer disputeWorkflowInitializer, Clock clock) {
+            DisputeWorkflowInitializer disputeWorkflowInitializer, Clock clock,
+            PaymentDomainEventService paymentDomainEventService,
+            RiskOperationsEventProducer riskOperationsEventProducer) {
         this.merchantRepository = merchantRepository;
         this.paymentIntentRepository = paymentIntentRepository;
         this.authorizationRepository = authorizationRepository;
@@ -73,6 +79,8 @@ public class ChargebackService {
         this.metrics = metrics;
         this.disputeWorkflowInitializer = disputeWorkflowInitializer;
         this.clock = clock;
+        this.paymentDomainEventService = paymentDomainEventService;
+        this.riskOperationsEventProducer = riskOperationsEventProducer;
     }
 
     public ResponseEntity<ChargebackController.ChargebackResponse> create(MerchantContext context,
@@ -142,7 +150,7 @@ public class ChargebackService {
                 authorization.getId(), decision.getId(), request.amount(), allocatedAmount,
                 paymentIntent.getCurrency(), request.reasonCode(), paymentIntent.getTrafficOrigin(),
                 request.evidenceOccurredAt(), request.receivedAt(), availableAt, request.evidenceDueAt()));
-        disputeWorkflowInitializer.initialize(chargeback, availableAt);
+        disputeWorkflowInitializer.initialize(chargeback, availableAt, context, requestId);
         DisputeOffsetAllocation allocation = allocationRepository.saveAndFlush(new DisputeOffsetAllocation(
                 chargeback, refund == null ? null : refund.getId(), paymentIntent.getAmount(), priorRefundAmount,
                 0L, availableAt));
@@ -155,13 +163,35 @@ public class ChargebackService {
         }
         FraudLabel label = null;
         if (request.reasonCode().isFraud()) {
-            label = fraudLabelRepository.saveAndFlush(new FraudLabel(chargeback));
+            java.util.List<FraudLabel> currentLabels = fraudLabelRepository.findCurrentForPaymentIntent(
+                    context.merchantId(), paymentIntent.getId());
+            if (currentLabels.size() > 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "PaymentIntent has contradictory current fraud-label lineage");
+            }
+            UUID supersededLabelId = currentLabels.isEmpty() ? null : currentLabels.getFirst().getId();
+            label = fraudLabelRepository.saveAndFlush(new FraudLabel(chargeback, supersededLabelId));
             webhookDeliveryService.createDeliveriesInCurrentTransaction(context.merchantId(),
                     "fraud_label.created", label.getId(), paymentIntent.getTrafficOrigin());
         }
         webhookDeliveryService.createDeliveriesInCurrentTransaction(context.merchantId(),
                 "chargeback.created", chargeback.getId(), paymentIntent.getTrafficOrigin());
         auditCreate(context, requestId, startingStatus, paymentIntent, chargeback, allocation, ledgerResult, label);
+        paymentDomainEventService.chargebackCreated(paymentIntent, chargeback,
+                paymentDomainEventService.merchantActor(context), requestId, null);
+        if (label != null) {
+            if (label.getSupersedesLabelId() == null) {
+                riskOperationsEventProducer.fraudLabelRecorded(context, paymentIntent.getId(),
+                        label.getAvailableAt(), requestId, label.getLabelValue().name(), label.getSource(),
+                        label.getAvailableAt(), label.getFraudType() == null ? null : label.getFraudType().name(),
+                        label.getTrafficOrigin());
+            } else {
+                riskOperationsEventProducer.fraudLabelSuperseded(context, paymentIntent.getId(),
+                        label.getAvailableAt(), requestId, label.getLabelValue().name(), label.getSource(),
+                        label.getAvailableAt(), label.getFraudType() == null ? null : label.getFraudType().name(),
+                        label.getSupersedesLabelId(), label.getTrafficOrigin());
+            }
+        }
         metrics.recordIngestion(request.reasonCode(), chargeback.getStatus(), "CREATED");
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ChargebackController.ChargebackResponse.from(chargeback));

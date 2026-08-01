@@ -657,7 +657,8 @@ No capture, refund, fee, or chargeback write is valid unless the ledger transact
 - `responseJson`
 - `createdAt`
 
-Phase 5 proposes the following refinement, pending founder confirmation:
+Founder implementation authorization on 2026-07-27 confirmed the following
+Phase 5 refinement before implementation began:
 
 `DomainEvent`
 
@@ -673,6 +674,8 @@ Phase 5 proposes the following refinement, pending founder confirmation:
 - safe correlation, causation, actor, request, trace, and traffic-origin lineage
 - `payloadJson`
 - `payloadSha256`
+- `eventRecordBytes`: exact RFC 8785/JCS-compatible full event-record bytes
+- `eventRecordSha256`: SHA-256 stored beside and excluded from the hashed bytes
 
 `EventPublication`
 
@@ -1759,25 +1762,18 @@ payment confirmation
 
 ### 15.1 Domain Events
 
-Publish these events through an outbox first, then Kafka:
+The founder-confirmed exhaustive initial catalogue is incorporated from Phase 5
+and published through the transactional outbox before Kafka:
 
-- `payment_intent.created`
-- `payment_intent.canceled`
-- `payment_attempt.created`
-- `fraud_decision.created`
-- `authorization.created`
-- `capture.created`
-- `refund.created`
-- `chargeback.created`
-- `dispute_evidence_packet.created`
-- `dispute_evidence_packet.submitted`
-- `review.opened`
-- `review.closed`
-- `card_testing_incident.created`
-- `card_testing_incident.resolved`
-- `merchant_risk_policy.updated`
-- `webhook.delivery_succeeded`
-- `webhook.delivery_failed`
+| Producer owner | Exact V1 event types |
+|---|---|
+| Chapter 45 | `payment_intent.created`, `payment_intent.canceled`, `payment_attempt.completed`, `fraud_decision.created`, `authorization.created`, `authorization.voided`, `capture.created`, `refund.created`, `chargeback.created`, `authentication_challenge.created`, `authentication_challenge.completed` |
+| Chapter 46 | `manual_review.opened`, `manual_review.assigned`, `manual_review.resolved`, `fraud_label.recorded`, `fraud_label.superseded`, `risk_incident.opened`, `risk_incident.resolved`, `merchant_risk_profile.activated`, `merchant_risk_profile.rolled_back`, `risk_policy.activated`, `risk_policy.rolled_back`, `authored_rule.activated`, `authored_rule.rolled_back`, `authored_rule.disabled`, `safety_exception.activated`, `safety_exception.expired`, `safety_exception.disabled`, `dispute_workflow.opened`, `dispute_evidence.submitted`, `dispute_outcome.recorded`, `dispute_workflow.expired`, `webhook_endpoint.verified`, `webhook_endpoint.disabled`, `webhook_endpoint.secret_rotated`, `webhook_delivery.exhausted`, `webhook_redelivery.requested`, `webhook_redelivery.succeeded`, `post_authorization_signal.recorded`, `developer_scenario.created`, `developer_scenario.completed`, `developer_scenario.failed` |
+
+Chapter 45 and Chapter 46 are independent after Chapter 44 is merge-ready.
+Labels are Chapter 46-owned facts on the PaymentIntent stream. Routine webhook
+transport success/failure remains webhook operational evidence and is not a
+canonical domain event unless explicitly listed above.
 
 ### 15.2 Webhook Delivery
 
@@ -3482,19 +3478,33 @@ Done when:
 
 ### Phase 5: Events And Analytics
 
-Detailed source of truth:
+Incorporated Phase 5 source of truth:
 [`PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md).
 
-Current state: **READY FOR FOUNDER REVIEW; IMPLEMENTATION NOT STARTED.** The
-Phase 4.5 / Chapter 43R entry gate is satisfied. The detailed plan proposes the
-canonical event envelope and stream model, atomic event/outbox boundary,
-privacy contract, Kafka publisher, inbox-idempotent consumer, quarantine,
+Current state: **COMPLETE THROUGH CHAPTER 52; MERGE RECOMMENDED.** The Phase 4.5 / Chapter 43R entry gate is satisfied. Founder
+implementation authorization on 2026-07-27 confirmed the detailed plan's
+sixteen decisions as one coherent product set before Phase 5 production code,
+migrations, runtime configuration, product fixtures, UI, or demo changes. The
+plan freezes the canonical event envelope and stream model, atomic event/outbox
+boundary, privacy contract, Kafka publisher, inbox-idempotent consumer, quarantine,
 versioned PostgreSQL analytics projections, shadow rebuild/activation,
 point-in-time offline dataset, local persistent platform-operator boundary,
-failure inventory, proof strategy, and Chapter 44–52 sequence. Its sixteen
-decisions remain proposed until founder
-confirmation. Chapter 44 may not change production code or migrations until
-that confirmation and a frozen `PRE_IMPLEMENTATION` invariant matrix.
+failure inventory, proof strategy, and Chapter 44–52 sequence. Chapters 44–52
+have `FROZEN`/`VERIFIED`/all-`PASS` `PRE_IMPLEMENTATION` matrices and
+`READY_TO_MERGE`/`MERGE` dossiers. V65–V85, the public demo, and real
+Kafka/PostgreSQL boundaries pass. The detailed plan contains the exact Chapter
+44–52 matrix/dossier cross-links.
+
+Phase 5 implementation status: COMPLETE
+
+The incorporated plan freezes `thaap.domain-events.v1` at six partitions and
+seven-day retention, 64 KiB complete records, publisher batch/tenant/stream
+budgets of 100/20/10, a 30-second publication lease, at most 10 capped-backoff
+retries, `acks=all` plus idempotence, 10-second request and 30-second delivery
+timeouts, manual acknowledgement for `payment-risk-projection-v1`, projection
+identifiers `payment-risk-v1`/`merchant-risk-v1`, exact analytics/rebuild/dataset
+routes, per-stream cutoff manifests, and forward migrations V65–V85. Those
+contracts are implemented and proven.
 
 The plan corrects two stale roadmap assumptions:
 
@@ -3505,17 +3515,43 @@ The plan corrects two stale roadmap assumptions:
   adds event-driven projection rebuild and a stable offline dataset, and may
   feed the existing simulation gate only after point-in-time equivalence proof.
 
-Proposed chapter sequence:
+Founder-confirmed chapter sequence:
 
 1. Chapter 44: Canonical Event Contract And Atomic Outbox Foundation.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 2. Chapter 45: Payment And Money Event Integration.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 3. Chapter 46: Fraud And Risk-Operations Event Integration.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 4. Chapter 47: Kafka Publication And Recovery.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 5. Chapter 48: Idempotent Consumer And Projection Substrate.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 6. Chapter 49: Payment-Risk And Merchant-Risk Analytics.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 7. Chapter 50: Projection Rebuild, Reconciliation, And Activation.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 8. Chapter 51: Offline Replay Dataset And Simulation Compatibility.
+
+   Status: complete — matrix verified and dossier recommends merge.
+
 9. Chapter 52: Integrated Phase 5 Closure.
+
+   Status: complete — matrix verified and dossier recommends merge.
 
 Phase 5 is done only when domain state and canonical events commit atomically;
 publication is after commit, retryable, and explicitly at least once; consumers

@@ -29,6 +29,8 @@ import com.thaap.payments.fraud.MaterializedFeatureSet;
 import com.thaap.payments.fraud.RuleEvaluation;
 import com.thaap.payments.fraud.RuleExecutionResult;
 import com.thaap.payments.fraud.RuleExecutionResultRepository;
+import com.thaap.payments.event.DomainEventActor;
+import com.thaap.payments.event.DomainEventWriteResult;
 import com.thaap.payments.fraudlist.FraudListAssessment;
 import com.thaap.payments.fraudlist.FraudListDecisionAggregator;
 import com.thaap.payments.fraudlist.FraudListEvaluationRecord;
@@ -50,6 +52,7 @@ import com.thaap.payments.processor.ProcessorAuthorizationResult;
 import com.thaap.payments.review.ManualReviewCase;
 import com.thaap.payments.review.ManualReviewCaseRepository;
 import com.thaap.payments.review.ManualReviewCaseStatus;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.riskcontext.RiskContext;
 import com.thaap.payments.riskcontext.RiskContextRequest;
 import com.thaap.payments.riskcontext.RiskContextService;
@@ -134,6 +137,8 @@ public class PaymentIntentController {
     private final CardTestingIncidentService cardTestingIncidentService;
     private final ActiveAuthoredRuleEvaluator activeAuthoredRuleEvaluator;
     private final AuthoredRuleDecisionAggregator authoredRuleDecisionAggregator;
+    private final PaymentDomainEventService paymentDomainEventService;
+    private final RiskOperationsEventProducer riskOperationsEventProducer;
 
     public PaymentIntentController(PaymentIntentRepository paymentIntentRepository, CustomerRepository customerRepository,
             PaymentMethodRepository paymentMethodRepository, PaymentAttemptRepository paymentAttemptRepository,
@@ -157,7 +162,9 @@ public class PaymentIntentController {
             RequestRateLimitService requestRateLimitService,
             CardTestingIncidentService cardTestingIncidentService,
             ActiveAuthoredRuleEvaluator activeAuthoredRuleEvaluator,
-            AuthoredRuleDecisionAggregator authoredRuleDecisionAggregator) {
+            AuthoredRuleDecisionAggregator authoredRuleDecisionAggregator,
+            PaymentDomainEventService paymentDomainEventService,
+            RiskOperationsEventProducer riskOperationsEventProducer) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.customerRepository = customerRepository;
         this.paymentMethodRepository = paymentMethodRepository;
@@ -191,18 +198,21 @@ public class PaymentIntentController {
         this.cardTestingIncidentService = cardTestingIncidentService;
         this.activeAuthoredRuleEvaluator = activeAuthoredRuleEvaluator;
         this.authoredRuleDecisionAggregator = authoredRuleDecisionAggregator;
+        this.paymentDomainEventService = paymentDomainEventService;
+        this.riskOperationsEventProducer = riskOperationsEventProducer;
     }
 
     @PostMapping
     public ResponseEntity<PaymentIntentResponse> createPaymentIntent(MerchantContext merchantContext,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            @Valid @RequestBody CreatePaymentIntentRequest request) {
+            @Valid @RequestBody CreatePaymentIntentRequest request, HttpServletRequest httpServletRequest) {
         return idempotencyService.execute(merchantContext, idempotencyKey, "payment_intents.create", request,
-                PaymentIntentResponse.class, () -> createPaymentIntentOnce(merchantContext, request));
+                PaymentIntentResponse.class, () -> createPaymentIntentOnce(
+                        merchantContext, request, requestIdFrom(httpServletRequest)));
     }
 
     protected ResponseEntity<PaymentIntentResponse> createPaymentIntentOnce(MerchantContext merchantContext,
-            CreatePaymentIntentRequest request) {
+            CreatePaymentIntentRequest request, String requestId) {
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
         }
@@ -212,6 +222,8 @@ public class PaymentIntentController {
         webhookDeliveryService.createDeliveriesInCurrentTransaction(
                 merchantContext.merchantId(), "payment_intent.created",
                 paymentIntent.getId(), paymentIntent.getTrafficOrigin());
+        paymentDomainEventService.paymentIntentCreated(paymentIntent,
+                paymentDomainEventService.merchantActor(merchantContext), requestId);
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentIntentResponse.from(paymentIntent));
     }
 
@@ -286,9 +298,11 @@ public class PaymentIntentController {
                 decision, paymentAttempt.getTrafficOrigin(), engineElapsedNanos);
         Instant decisionCompletedAt = Instant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
-        FraudDecision fraudDecision = persistFraudLineage(merchantContext, paymentAttempt, materializedFeatures,
+        PersistedFraudLineage persistedFraudLineage = persistFraudLineage(
+                merchantContext, paymentAttempt, materializedFeatures,
                 fraudListAssessment, merchantPolicyAssessment, authoredRuleAssessment, decision, latencyMs,
                 decisionStartedAt, decisionCompletedAt);
+        FraudDecision fraudDecision = persistedFraudLineage.decision();
         if (riskContext != null) {
             riskContext.attachFraudDecision(fraudDecision.getId());
         }
@@ -333,22 +347,52 @@ public class PaymentIntentController {
                     manualReviewCase == null ? paymentIntent.getId() : manualReviewCase.getId(),
                     paymentIntent.getTrafficOrigin());
         }
-        if (authorization != null && authorization.getStatus() == AuthorizationStatus.APPROVED
-                && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
-            captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
-                    CaptureTrigger.AUTOMATIC_CONFIRM);
-        }
         paymentAttemptRepository.flush();
         fraudDecisionRepository.flush();
         if (authorization != null) {
             authorizationRepository.flush();
         }
         cardTestingIncidentService.detectFromPersistedEvidence(merchantContext, requestId);
+        DomainEventActor eventActor = paymentDomainEventService.merchantActor(merchantContext);
+        DomainEventWriteResult fraudEvent = paymentDomainEventService.fraudDecisionCreated(
+                paymentIntent, fraudDecision, persistedFraudLineage.featureSnapshot(), eventActor,
+                requestId, null);
+        if (manualReviewCase != null) {
+            riskOperationsEventProducer.manualReviewOpenedBySystem(merchantContext.merchantId(),
+                    paymentIntent.getId(), fraudDecision.getDecisionCompletedAt(), requestId,
+                    paymentIntent.getTrafficOrigin(), "STANDARD",
+                    decision.reasonCodes().stream().map(Enum::name).toList());
+        }
+        DomainEventWriteResult authorizationEvent = null;
+        if (authorization != null && authorization.getStatus() == AuthorizationStatus.APPROVED) {
+            authorizationEvent = paymentDomainEventService.authorizationCreated(paymentIntent,
+                    paymentAttempt, authorization, authorization.getCreatedAt(), eventActor,
+                    requestId, fraudEvent.eventId());
+        }
+        DomainEventWriteResult challengeEvent = null;
+        if (createdChallenge != null) {
+            UUID challengeCause = authorizationEvent == null
+                    ? fraudEvent.eventId() : authorizationEvent.eventId();
+            challengeEvent = paymentDomainEventService.authenticationChallengeCreated(
+                    paymentIntent, createdChallenge.challenge(), eventActor, requestId, challengeCause);
+        }
+        if (paymentAttempt.getStatus() != PaymentAttemptStatus.IN_REVIEW) {
+            UUID attemptCause = challengeEvent != null ? challengeEvent.eventId()
+                    : authorizationEvent != null ? authorizationEvent.eventId() : fraudEvent.eventId();
+            paymentDomainEventService.paymentAttemptCompleted(paymentIntent, paymentAttempt,
+                    authorization, eventActor, requestId, attemptCause);
+        }
+        if (authorization != null && authorization.getStatus() == AuthorizationStatus.APPROVED
+                && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
+            captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
+                    CaptureTrigger.AUTOMATIC_CONFIRM, eventActor,
+                    authorizationEvent == null ? fraudEvent.eventId() : authorizationEvent.eventId());
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(PaymentAttemptResponse.from(paymentAttempt,
                 createdChallenge == null ? null : createdChallenge.nextAction()));
     }
 
-    private FraudDecision persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
+    private PersistedFraudLineage persistFraudLineage(MerchantContext merchantContext, PaymentAttempt paymentAttempt,
             MaterializedFeatureSet materializedFeatures, FraudListAssessment fraudListAssessment,
             MerchantPolicyAssessment merchantPolicyAssessment, AuthoredRuleAssessment authoredRuleAssessment,
             ConfirmDecision decision, long latencyMs,
@@ -360,7 +404,8 @@ public class PaymentIntentController {
                     paymentAttempt.getId(), decision, latencyMs, decisionStartedAt, decisionCompletedAt,
                     materializedFeatures.freshnessStatus(), materializedFeatures.maxFeatureAgeMs(),
                     paymentAttempt.getTrafficOrigin()));
-            featureSnapshotRepository.save(new FeatureSnapshot(merchantContext.merchantId(), fraudDecision.getId(),
+            FeatureSnapshot featureSnapshot = featureSnapshotRepository.save(new FeatureSnapshot(
+                    merchantContext.merchantId(), fraudDecision.getId(),
                     paymentAttempt.getId(), materializedFeatures.snapshot(), materializedFeatures.computedAt(),
                     materializedFeatures.oldestFeatureTimestamp(), materializedFeatures.maxFeatureAgeMs(),
                     materializedFeatures.freshnessStatus(), materializedFeatures.staleFeatureNames(),
@@ -387,7 +432,7 @@ public class PaymentIntentController {
                     paymentAttempt.getTrafficOrigin());
             activeAuthoredRuleEvaluator.persist(authoredRuleAssessment, paymentAttempt,
                     fraudDecision.getId(), decisionCompletedAt);
-            return fraudDecision;
+            return new PersistedFraudLineage(fraudDecision, featureSnapshot);
         } catch (RuntimeException exception) {
             featureMaterializationMetrics.recordFailure("PERSISTENCE", "LINEAGE_WRITE_FAILED");
             throw exception;
@@ -504,13 +549,15 @@ public class PaymentIntentController {
                     "Only MANUAL PaymentIntents can use the capture endpoint");
         }
         Authorization authorization = latestApprovedAuthorization(merchantContext, id);
+        DomainEventActor eventActor = paymentDomainEventService.merchantActor(merchantContext);
         captureApprovedPaymentIntent(merchantContext, requestId, paymentIntent, authorization,
-                CaptureTrigger.MANUAL_API);
+                CaptureTrigger.MANUAL_API, eventActor, null);
         return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
     }
 
     private void captureApprovedPaymentIntent(MerchantContext merchantContext, String requestId,
-            PaymentIntent paymentIntent, Authorization authorization, CaptureTrigger captureTrigger) {
+            PaymentIntent paymentIntent, Authorization authorization, CaptureTrigger captureTrigger,
+            DomainEventActor eventActor, UUID causationEventId) {
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (startingStatus != PaymentIntentStatus.REQUIRES_CAPTURE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -536,6 +583,8 @@ public class PaymentIntentController {
                 paymentIntent.getId(), paymentIntent.getTrafficOrigin());
         recordCaptureAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization, ledgerResult,
                 captureTrigger);
+        paymentDomainEventService.captureCreated(paymentIntent, authorization,
+                paymentIntent.getUpdatedAt(), eventActor, requestId, causationEventId);
     }
 
     @PostMapping("/{id}/cancel")
@@ -555,8 +604,11 @@ public class PaymentIntentController {
         Authorization authorization = null;
         AuthorizationVoid authorizationVoid = null;
         ManualReviewCase reviewCase = null;
+        PaymentAttempt canceledReviewAttempt = null;
+        DomainEventWriteResult authenticationCancellationEvent = null;
         if (startingStatus == PaymentIntentStatus.REQUIRES_ACTION) {
-            authenticationChallengeService.cancelPending(merchantContext, paymentIntent.getId(), requestId);
+            authenticationCancellationEvent = authenticationChallengeService.cancelPending(
+                    merchantContext, paymentIntent.getId(), requestId);
         }
         if (startingStatus == PaymentIntentStatus.AUTHORIZED
                 || startingStatus == PaymentIntentStatus.REQUIRES_CAPTURE) {
@@ -581,6 +633,7 @@ public class PaymentIntentController {
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                             "PaymentIntent review case was not found"));
             reviewAttempt.cancelFromReview();
+            canceledReviewAttempt = reviewAttempt;
             reviewCase.cancelByMerchant();
         }
         paymentIntent.cancel();
@@ -595,6 +648,23 @@ public class PaymentIntentController {
         }
         recordCancelAuditLog(merchantContext, requestId, startingStatus, paymentIntent, authorization,
                 authorizationVoid);
+        DomainEventActor eventActor = paymentDomainEventService.merchantActor(merchantContext);
+        DomainEventWriteResult voidEvent = null;
+        if (authorization != null && authorizationVoid != null) {
+            voidEvent = paymentDomainEventService.authorizationVoided(paymentIntent, authorization,
+                    authorizationVoid, eventActor, requestId, null);
+        }
+        DomainEventWriteResult attemptEvent = null;
+        if (canceledReviewAttempt != null) {
+            attemptEvent = paymentDomainEventService.paymentAttemptCompleted(paymentIntent,
+                    canceledReviewAttempt, null, eventActor, requestId, null);
+        }
+        UUID cancellationCause = voidEvent != null ? voidEvent.eventId()
+                : attemptEvent != null ? attemptEvent.eventId()
+                : authenticationCancellationEvent == null ? null
+                : authenticationCancellationEvent.eventId();
+        paymentDomainEventService.paymentIntentCanceled(paymentIntent, "MERCHANT_REQUESTED",
+                eventActor, requestId, cancellationCause);
         return ResponseEntity.ok(PaymentIntentResponse.from(paymentIntent));
     }
 
@@ -723,5 +793,8 @@ public class PaymentIntentController {
     private enum CaptureTrigger {
         AUTOMATIC_CONFIRM,
         MANUAL_API
+    }
+
+    private record PersistedFraudLineage(FraudDecision decision, FeatureSnapshot featureSnapshot) {
     }
 }

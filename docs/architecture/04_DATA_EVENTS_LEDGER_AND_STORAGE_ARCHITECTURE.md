@@ -4,10 +4,20 @@ Date: 2026-05-29
 
 This document defines the storage architecture, transactional boundaries, ledger model, outbox/event strategy, webhook delivery model, analytics stores, and replay/backfill strategy.
 
-For implementation decisions, follow `docs/IMPLEMENTATION_MASTER_PLAN.md`.
-The Phase 5 refinement is proposed in
-`docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md`. It is ready for founder review
-but is not frozen implementation authorization yet.
+`docs/IMPLEMENTATION_MASTER_PLAN.md` is the authoritative cross-phase roadmap.
+For Phase 5, it incorporates
+`docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md`; that detailed plan is the exact
+Phase 5 implementation contract, and both sources must remain consistent.
+Founder implementation authorization on 2026-07-27 froze the Chapter 44–52
+`PRE_IMPLEMENTATION` contracts before implementation began. Chapters 44–52 now
+carry passing invariant matrices and merge-recommending closure dossiers. The
+integrated product path and the architecture, detailed plan, master plan,
+learning trail, and root/product READMEs were reconciled again after the
+2026-08-01 hostile review. V83–V85 make fraud event source identity relational
+and immutable across the exact decision, feature snapshot, attempt, and payment
+stream; timestamp equality is never used as event-source identity.
+
+Phase 5 implementation status: COMPLETE
 
 ## 1. Data Architecture Goals
 
@@ -48,7 +58,7 @@ Runtime queries must use tenant-scoped lookup paths. Database row-level security
 Owns:
 
 - merchants
-- platform operators and credentials, beginning in Phase 5 if founder-confirmed
+- platform operators and credentials, beginning in Phase 5
 - customers
 - payment methods
 - payment intents
@@ -72,8 +82,11 @@ Owns:
 - processor events
 - audit logs
 - immutable domain events, mutable publication state, and publication attempts
+- immutable, tenant-qualified links from fraud-decision events to the exact
+  `FraudDecision` and `FeatureSnapshot` source rows
 - consumer inbox, quarantine, projection generations, stream positions,
-  bootstrap facts, checkpoints, and rebuild state
+  checkpoints, bootstrap facts, immutable per-stream cutoff manifests,
+  append-only rebuild events, reconciliation results, and rebuild state
 
 ### 2.2 Redis
 
@@ -88,19 +101,27 @@ Redis does not own durable truth.
 
 ### 2.3 Kafka
 
-Added after core flows.
+Introduced in Phase 5 for the internal event-to-projection boundary.
 
 Owns:
 
-- domain event stream
+- the fixed internal topic `thaap.domain-events.v1`, with exactly six
+  partitions, seven-day retention, and a `64 KiB` complete-record limit
 - analytics ingestion
 - graph ingestion
 - model monitoring ingestion
 - replayable integration boundary
 
+Phase 5 producers use `acks=all`, Kafka idempotence, a 10-second request
+timeout, a 30-second delivery timeout, and at most 10 capped exponential
+retries before durable `BLOCKED` disposition. The first durable consumer/group
+identity is `payment-risk-projection-v1` and uses manual acknowledgement only
+after its PostgreSQL inbox/projection transaction commits. These settings are
+compatibility contracts; drift fails readiness.
+
 ### 2.4 ClickHouse
 
-Added for analytics.
+Deferred until measured analytics scale justifies a second store.
 
 Owns:
 
@@ -379,13 +400,13 @@ publisher retries later
 
 ### 6.2 Immutable Event And Mutable Publication State
 
-The Phase 5 detailed plan proposes separating the immutable semantic fact from
-its mutable transport progress:
+The founder-confirmed Phase 5 detailed plan separates the immutable semantic
+fact from its mutable transport progress:
 
 - `domain_events` owns tenant, event identity, domain stream identity and
   version, event type/version, occurrence/recording time, correlation and
-  causation, safe actor/request/trace/origin lineage, canonical payload, and
-  exact payload digest.
+  causation, safe actor/request/trace/origin lineage, canonical payload bytes
+  and digest, and exact full event-record bytes plus full-record digest.
 - `event_publications` owns claim token, lease, retry schedule, acknowledgement,
   and blocked-state progress.
 - `event_publication_attempts` owns append-only safe outcome evidence.
@@ -400,7 +421,8 @@ immutable event as `FAILED_FINAL`.
 domain transaction commits
   -> immutable event + publication are durable
   -> publisher claims bounded next-per-stream work with a lease/token
-  -> exact stored bytes publish to Kafka outside the database transaction
+  -> exact stored full event-record bytes publish to Kafka outside the database
+     transaction
   -> matching token records acknowledgement, retry, unknown, or blocked truth
 ```
 
@@ -416,18 +438,21 @@ Payment events:
 
 - `payment_intent.created`
 - `payment_intent.canceled`
-- `payment_attempt.created`
+- `payment_attempt.completed`
 - `authorization.created`
+- `authorization.voided`
 - `capture.created`
 - `refund.created`
 
 Fraud events:
 
 - `fraud_decision.created`
-- `review.opened`
-- `review.closed`
+- `manual_review.opened`
+- `manual_review.assigned`
+- `manual_review.resolved`
 - `chargeback.created`
-- `fraud_label.created`
+- `fraud_label.recorded`
+- `fraud_label.superseded`
 
 Webhook events:
 

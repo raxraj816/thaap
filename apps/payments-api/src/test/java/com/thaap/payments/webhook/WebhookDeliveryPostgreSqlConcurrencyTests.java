@@ -870,7 +870,8 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = Instant.now().minusSeconds(60)
+                .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(claim, claimedAt.plusSeconds(1))).isTrue();
@@ -1287,7 +1288,8 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 serviceClock,
                 hasher,
                 transactionManager,
-                Duration.ofMinutes(15));
+                Duration.ofMinutes(15),
+                org.mockito.Mockito.mock(com.thaap.payments.risk.RiskOperationsEventProducer.class));
     }
 
     private UUID awaitSingleCreationRecordId() throws Exception {

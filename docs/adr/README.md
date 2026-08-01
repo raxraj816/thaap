@@ -21,6 +21,7 @@ ADRs capture durable engineering decisions and the reasoning behind them.
 - [ADR-0008: Use Merchant As The V1 Tenant Boundary](0008-use-merchant-as-v1-tenant-boundary.md)
 - [ADR-0009: Minimize Custom Infrastructure And Prove Required Protocol Boundaries](0009-minimize-custom-infrastructure.md)
 - [ADR-0010: Use Redis As Ephemeral Risk Coordination](0010-use-redis-as-ephemeral-risk-coordination.md)
+- [ADR-0011: Use An Application-Owned Transactional Outbox And Exact Canonical Event Bytes](0011-use-application-owned-transactional-outbox.md)
 
 ## Template
 

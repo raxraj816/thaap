@@ -556,6 +556,7 @@ class WebhookEndpointOperationsTests {
                 Clock.systemUTC(),
                 hasher,
                 transactionManager,
-                Duration.ofMinutes(15));
+                Duration.ofMinutes(15),
+                org.mockito.Mockito.mock(com.thaap.payments.risk.RiskOperationsEventProducer.class));
     }
 }

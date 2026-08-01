@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -112,6 +113,16 @@ class PaymentIntentCaptureLedgerContractTests {
         assertThat(countWebhookDeliveries("payment_intent.captured")).isEqualTo(1);
         assertThat(countAuditLogsByAction("payment_intent.captured")).isEqualTo(1);
         assertBalancedCaptureLedger(paymentIntentId, 2300, "USD");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                """, Integer.class, paymentIntentId)).isEqualTo(5);
+        byte[] capturePayload = jdbcTemplate.queryForObject("""
+                SELECT payload_bytes FROM domain_events
+                WHERE stream_id = ? AND event_type = 'capture.created'
+                """, byte[].class, paymentIntentId);
+        assertThat(new String(capturePayload, StandardCharsets.UTF_8))
+                .isEqualTo("{\"amountMinor\":2300,\"currency\":\"USD\"}");
     }
 
     @Test

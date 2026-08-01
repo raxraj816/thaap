@@ -53,6 +53,7 @@ import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -175,6 +176,17 @@ class ChargebackAndDisputeContractTests {
                 SELECT taxonomy_version FROM fraud_labels
                  WHERE source = 'CHARGEBACK' AND payment_intent_id = ?
                 """, String.class, fixture.paymentIntentId())).isEqualTo("fraud_taxonomy_v1");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM domain_events
+                WHERE stream_id = ? AND event_type = 'chargeback.created'
+                """, Integer.class, fixture.paymentIntentId())).isEqualTo(1);
+        byte[] chargebackPayload = jdbcTemplate.queryForObject("""
+                SELECT payload_bytes FROM domain_events
+                WHERE stream_id = ? AND event_type = 'chargeback.created'
+                """, byte[].class, fixture.paymentIntentId());
+        assertThat(new String(chargebackPayload, StandardCharsets.UTF_8)).isEqualTo(
+                "{\"amountMinor\":6400,\"currency\":\"USD\","
+                        + "\"reasonCode\":\"FRAUDULENT_STOLEN_CREDENTIAL\"}");
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO fraud_labels (
                     id, merchant_id, payment_intent_id, payment_attempt_id, fraud_decision_id,

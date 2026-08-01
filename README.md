@@ -10,7 +10,11 @@ is the safe proving ground for payment and fraud primitives, replay,
 explainability, analyst operations, governed ML, and production regression—not
 the product ceiling.
 
-The authoritative implementation source of truth is [docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md).
+The authoritative cross-phase implementation source is
+[docs/IMPLEMENTATION_MASTER_PLAN.md](docs/IMPLEMENTATION_MASTER_PLAN.md). Where
+that plan incorporates a detailed phase plan, the incorporated plan controls
+that phase's exact frozen contract; for Phase 5 this is
+[docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md).
 Permanent challenger-promise ownership is tracked in
 [docs/THAAP_VISION_COVERAGE_MATRIX.md](docs/THAAP_VISION_COVERAGE_MATRIX.md)
 and enforced by `scripts/vision-coverage-check.py`.
@@ -98,13 +102,22 @@ the production UI build. Every Chapter 36–43R matrix is
 escaped findings are resolved, and no technical debt is open. Phase 5 is
 unblocked. The
 [Phase 5 detailed implementation plan](docs/PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
-is ready for founder review. It proposes Chapters 44–52 for the canonical
+is implemented end to end. Founder implementation
+authorization on 2026-07-27 confirmed its sixteen decisions as one coherent
+product set before Phase 5 production code, migrations, runtime configuration,
+product fixtures, UI, or demo changes. Chapters 44–52 cover the canonical
 event/outbox contract, payment and fraud event integration, Kafka publication,
 inbox-idempotent consumption, rebuildable PostgreSQL analytics, projection
-generation activation, and point-in-time offline replay datasets. Production
-implementation has not started; the sixteen proposed product/architecture
-decisions and Chapter 44 pre-implementation matrix must be confirmed and frozen
-first.
+generation activation, and point-in-time offline replay datasets. V83–V85 bind
+each fraud event to its exact decision, feature snapshot, payment attempt, and
+payment stream; analytics collections are losslessly paginated and basis-point
+scores are rendered to analysts as percentages. The Chapter
+44–52 `PRE_IMPLEMENTATION` contracts are `FROZEN`/`VERIFIED`/all-`PASS`, with
+exact matrix/dossier cross-links in the detailed plan. Chapter 44 is complete.
+Chapter 45 is complete. Chapter 46 is complete. Chapter 47 is complete. Chapter
+48 is complete. Chapter 49 is complete. Chapter 50 is complete. Chapter 51 is
+complete. Chapter 52 is complete. Every dossier is `READY_TO_MERGE`/`MERGE`.
+Phase 5 implementation status: COMPLETE
 The vision matrix registers 23 `VP-NNN` promises and rebaselines Phases 6–10
 around unified decision/analyst product, developer contracts, governed ML and
 drift, privacy-safe network/graph intelligence, merchant underwriting and

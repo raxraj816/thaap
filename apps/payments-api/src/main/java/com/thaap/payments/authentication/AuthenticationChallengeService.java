@@ -8,6 +8,9 @@ import com.thaap.payments.authorization.ThreeDsResult;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerService;
 import com.thaap.payments.payment.CaptureMethod;
+import com.thaap.payments.event.DomainEventActor;
+import com.thaap.payments.event.DomainEventWriteResult;
+import com.thaap.payments.payment.PaymentDomainEventService;
 import com.thaap.payments.payment.PaymentIntent;
 import com.thaap.payments.payment.PaymentIntentRepository;
 import com.thaap.payments.payment.PaymentIntentStatus;
@@ -57,6 +60,7 @@ public class AuthenticationChallengeService {
     private final AuthenticationMetrics authenticationMetrics;
     private final Clock clock;
     private final Duration challengeTtl;
+    private final PaymentDomainEventService paymentDomainEventService;
 
     public AuthenticationChallengeService(AuthenticationChallengeRepository challengeRepository,
             PaymentIntentRepository paymentIntentRepository,
@@ -66,6 +70,7 @@ public class AuthenticationChallengeService {
             SensitiveValueHasher sensitiveValueHasher, LedgerService ledgerService,
             AuditLogService auditLogService, WebhookDeliveryService webhookDeliveryService,
             AuthenticationMetrics authenticationMetrics, Clock clock,
+            PaymentDomainEventService paymentDomainEventService,
             @Value("${thaap.authentication.challenge-ttl:5m}") Duration challengeTtl) {
         if (challengeTtl.isNegative() || challengeTtl.isZero() || challengeTtl.compareTo(Duration.ofHours(1)) > 0) {
             throw new IllegalStateException("Authentication challenge TTL must be in (0, 1h]");
@@ -83,6 +88,7 @@ public class AuthenticationChallengeService {
         this.authenticationMetrics = authenticationMetrics;
         this.clock = clock;
         this.challengeTtl = challengeTtl;
+        this.paymentDomainEventService = paymentDomainEventService;
     }
 
     public CreatedChallenge create(UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId,
@@ -133,6 +139,7 @@ public class AuthenticationChallengeService {
             paymentAttempt.markAuthenticationFailed(true);
             paymentIntent.markRequiresPaymentMethodAfterAuthenticationFailure();
             recordTerminalEvidence(context, requestId, challenge, paymentIntent, paymentAttempt, null);
+            appendTerminalEvents(context, requestId, challenge, paymentIntent, paymentAttempt, null);
             return terminalResult(challenge, paymentIntent, paymentAttempt, context.merchantId());
         }
         if (outcome == CompletionOutcome.FAILURE) {
@@ -140,6 +147,7 @@ public class AuthenticationChallengeService {
             paymentAttempt.markAuthenticationFailed(false);
             paymentIntent.markRequiresPaymentMethodAfterAuthenticationFailure();
             recordTerminalEvidence(context, requestId, challenge, paymentIntent, paymentAttempt, null);
+            appendTerminalEvents(context, requestId, challenge, paymentIntent, paymentAttempt, null);
             return terminalResult(challenge, paymentIntent, paymentAttempt, context.merchantId());
         }
 
@@ -164,24 +172,32 @@ public class AuthenticationChallengeService {
         if (challenge.getAuthorizationId() == null) {
             challenge.attachAuthorization(authorization.getId());
         }
+        recordTerminalEvidence(context, requestId, challenge, paymentIntent, paymentAttempt, authorization);
+        DomainEventWriteResult terminalAttemptEvent = appendTerminalEvents(context, requestId,
+                challenge, paymentIntent, paymentAttempt, authorization);
         if (authorization.getStatus() == AuthorizationStatus.APPROVED
                 && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
-            capture(context, requestId, paymentIntent, authorization);
+            capture(context, requestId, paymentIntent, authorization,
+                    paymentDomainEventService.merchantActor(context),
+                    terminalAttemptEvent.eventId());
         }
-        recordTerminalEvidence(context, requestId, challenge, paymentIntent, paymentAttempt, authorization);
         return new CompletionResult(challenge, authorization,
                 paymentIntent.getStatus(), paymentAttempt.getStatus());
     }
 
-    public void cancelPending(MerchantContext context, UUID paymentIntentId, String requestId) {
+    public DomainEventWriteResult cancelPending(MerchantContext context, UUID paymentIntentId,
+            String requestId) {
         UUID merchantId = context.merchantId();
         AuthenticationChallenge challenge = challengeRepository
                 .findByMerchantIdAndPaymentIntentIdAndStatus(
                         merchantId, paymentIntentId, AuthenticationChallengeStatus.PENDING)
                 .orElse(null);
         if (challenge == null) {
-            return;
+            return null;
         }
+        PaymentIntent paymentIntent = paymentIntentRepository.findByIdAndMerchantIdForUpdate(
+                        paymentIntentId, merchantId)
+                .orElseThrow(this::notFound);
         PaymentAttempt attempt = paymentAttemptRepository.findByIdAndMerchantIdForUpdate(
                         challenge.getPaymentAttemptId(), merchantId)
                 .orElseThrow(this::notFound);
@@ -202,6 +218,7 @@ public class AuthenticationChallengeService {
         webhookDeliveryService.createDeliveriesInCurrentTransaction(merchantId,
                 "authentication_challenge.completed", locked.getId(), locked.getTrafficOrigin());
         authenticationMetrics.recordTerminal(locked.getSource(), locked.getResultCode());
+        return appendTerminalEvents(context, requestId, locked, paymentIntent, attempt, null);
     }
 
     public AuthenticationNextAction nextActionForAttempt(UUID merchantId, UUID paymentAttemptId) {
@@ -255,7 +272,8 @@ public class AuthenticationChallengeService {
     }
 
     private void capture(MerchantContext context, String requestId,
-            PaymentIntent intent, Authorization authorization) {
+            PaymentIntent intent, Authorization authorization, DomainEventActor eventActor,
+            UUID causationEventId) {
         LedgerService.CaptureLedgerResult ledger = ledgerService.recordCapture(
                 context.merchantId(), intent.getId(), authorization.getAuthorizedAmount(),
                 authorization.getCurrency());
@@ -269,6 +287,28 @@ public class AuthenticationChallengeService {
                         "transactionGroupId", ledger.transactionGroupId().toString(),
                         "ledgerEntryIds", ledger.entries().stream()
                                 .map(LedgerEntry::getId).map(UUID::toString).toList()));
+        paymentDomainEventService.captureCreated(intent, authorization, intent.getUpdatedAt(),
+                eventActor, requestId, causationEventId);
+    }
+
+    private DomainEventWriteResult appendTerminalEvents(MerchantContext context, String requestId,
+            AuthenticationChallenge challenge, PaymentIntent paymentIntent, PaymentAttempt attempt,
+            Authorization authorization) {
+        DomainEventActor actor = paymentDomainEventService.merchantActor(context);
+        DomainEventWriteResult challengeEvent = paymentDomainEventService.authenticationChallengeCompleted(
+                paymentIntent, challenge, actor, requestId, null);
+        DomainEventWriteResult authorizationEvent = null;
+        if (authorization != null && authorization.getStatus() == AuthorizationStatus.APPROVED) {
+            authorizationEvent = paymentDomainEventService.authorizationCreated(paymentIntent,
+                    attempt, authorization, challenge.getCompletedAt(), actor, requestId,
+                    challengeEvent.eventId());
+        }
+        UUID attemptCause = authorizationEvent == null
+                ? challengeEvent.eventId() : authorizationEvent.eventId();
+        DomainEventWriteResult attemptEvent = paymentDomainEventService.paymentAttemptCompleted(
+                paymentIntent, attempt, authorization,
+                actor, requestId, attemptCause);
+        return attemptEvent;
     }
 
     private void recordTerminalEvidence(MerchantContext context, String requestId,

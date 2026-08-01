@@ -68,6 +68,20 @@ class AuthenticationChallengeContractTests {
         assertThat(value("SELECT three_ds_result FROM authorizations")).isEqualTo("AUTHENTICATED");
         assertThat(value("SELECT processor_reference_id FROM authorizations"))
                 .isEqualTo("auth_sim_" + fixture.attemptId().toString().replace("-", ""));
+        java.util.List<java.util.Map<String, Object>> events = jdbcTemplate.queryForList("""
+                SELECT id, event_type, causation_event_id
+                FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                ORDER BY stream_version
+                """, fixture.intentId());
+        assertThat(events).extracting(event -> event.get("EVENT_TYPE")).containsExactly(
+                "payment_intent.created", "fraud_decision.created",
+                "authentication_challenge.created", "payment_attempt.completed",
+                "authentication_challenge.completed", "authorization.created",
+                "payment_attempt.completed", "capture.created");
+        assertThat(events.get(5).get("CAUSATION_EVENT_ID")).isEqualTo(events.get(4).get("ID"));
+        assertThat(events.get(6).get("CAUSATION_EVENT_ID")).isEqualTo(events.get(5).get("ID"));
+        assertThat(events.get(7).get("CAUSATION_EVENT_ID")).isEqualTo(events.get(6).get("ID"));
     }
 
     @Test

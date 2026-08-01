@@ -82,6 +82,20 @@ public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery
             @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT delivery
+            FROM WebhookDelivery delivery
+            WHERE delivery.merchantId = :merchantId
+              AND delivery.webhookEndpointId = :endpointId
+              AND delivery.status IN :queuedStatuses
+            ORDER BY delivery.createdAt, delivery.id
+            """)
+    List<WebhookDelivery> findQueuedForEndpointForUpdate(
+            @Param("merchantId") UUID merchantId,
+            @Param("endpointId") UUID endpointId,
+            @Param("queuedStatuses") List<WebhookDeliveryStatus> queuedStatuses);
+
     @Query(value = """
             SELECT COUNT(*)
             FROM webhook_deliveries delivery

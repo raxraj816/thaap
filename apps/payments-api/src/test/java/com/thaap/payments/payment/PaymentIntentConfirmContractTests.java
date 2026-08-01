@@ -256,6 +256,53 @@ class PaymentIntentConfirmContractTests {
                 .doesNotContain(merchant.apiKey())
                 .doesNotContain("confirm-attempt-a");
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
+
+        List<java.util.Map<String, Object>> events = jdbcTemplate.queryForList("""
+                SELECT id, merchant_id, stream_type, stream_id, stream_version, event_type,
+                       event_version, correlation_id, causation_event_id, request_id,
+                       actor_type, actor_id, traffic_origin, payload_bytes, event_record_bytes
+                FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                ORDER BY stream_version
+                """, paymentIntentId);
+        assertThat(events).extracting(event -> event.get("EVENT_TYPE")).containsExactly(
+                "payment_intent.created", "fraud_decision.created",
+                "authorization.created", "payment_attempt.completed");
+        assertThat(events).extracting(event -> event.get("STREAM_VERSION"))
+                .containsExactly(1L, 2L, 3L, 4L);
+        assertThat(events).allSatisfy(event -> {
+            assertThat(event.get("MERCHANT_ID")).isEqualTo(merchant.id());
+            assertThat(event.get("STREAM_TYPE")).isEqualTo("PAYMENT");
+            assertThat(event.get("STREAM_ID")).isEqualTo(paymentIntentId);
+            assertThat(event.get("EVENT_VERSION")).isEqualTo(1);
+            assertThat(event.get("CORRELATION_ID")).isEqualTo(paymentIntentId.toString());
+            assertThat(event.get("ACTOR_TYPE")).isEqualTo("MERCHANT_API_KEY");
+            assertThat(event.get("ACTOR_ID")).isEqualTo(merchant.apiKeyPrefix());
+            assertThat(event.get("TRAFFIC_ORIGIN")).isEqualTo("MERCHANT_API");
+        });
+        assertThat(events.get(1).get("REQUEST_ID")).isEqualTo("req-confirm-flow");
+        assertThat(events.get(2).get("REQUEST_ID")).isEqualTo("req-confirm-flow");
+        assertThat(events.get(3).get("REQUEST_ID")).isEqualTo("req-confirm-flow");
+        assertThat(events.get(1).get("CAUSATION_EVENT_ID")).isNull();
+        assertThat(events.get(2).get("CAUSATION_EVENT_ID")).isEqualTo(events.get(1).get("ID"));
+        assertThat(events.get(3).get("CAUSATION_EVENT_ID")).isEqualTo(events.get(2).get("ID"));
+        assertThat(eventPayload(events.get(1))).isEqualTo(
+                "{\"action\":\"ALLOW\",\"featureCatalogueVersion\":\"features_v1\","
+                        + "\"reasonCodes\":[\"NO_RULE_MATCH\"],\"riskLevel\":\"LOW\","
+                        + "\"riskScore\":500,\"rulesetVersion\":\"rules_v1\"}");
+        assertThat(eventPayload(events.get(2))).isEqualTo(
+                "{\"authorizedAmountMinor\":1200,\"currency\":\"USD\","
+                        + "\"outcome\":\"APPROVED\",\"requestedAmountMinor\":1200}");
+        assertThat(eventPayload(events.get(3))).isEqualTo(
+                "{\"attemptNumber\":1,\"outcome\":\"AUTHORIZED\","
+                        + "\"processorCode\":\"APPROVED\"}");
+        String eventRecords = events.stream()
+                .map(event -> new String((byte[]) event.get("EVENT_RECORD_BYTES"), StandardCharsets.UTF_8))
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(eventRecords).doesNotContain(
+                "4999990000000001", "buyer-a@example.com", merchant.apiKey(),
+                "confirm-attempt-a", response.get("processorAuthorizationId").asText());
+        assertThat(countRows("event_publications")).isEqualTo(4);
     }
 
     @Test
@@ -317,6 +364,21 @@ class PaymentIntentConfirmContractTests {
                 WHERE fraud_decision_id = ?
                 """, String.class, fraudDecisionId))
                 .isEqualTo("SYNTHETIC_SCENARIO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM domain_event_source_lineage lineage
+                  JOIN domain_events event
+                    ON event.merchant_id = lineage.merchant_id
+                   AND event.id = lineage.domain_event_id
+                  JOIN feature_snapshots snapshot
+                    ON snapshot.merchant_id = lineage.merchant_id
+                   AND snapshot.id = lineage.feature_snapshot_id
+                   AND snapshot.fraud_decision_id = lineage.fraud_decision_id
+                 WHERE lineage.merchant_id = ?
+                   AND lineage.fraud_decision_id = ?
+                   AND event.stream_id = ?
+                   AND event.event_type = 'fraud_decision.created'
+                """, Integer.class, merchant.id(), fraudDecisionId, paymentIntentId)).isOne();
         assertThat(jdbcTemplate.queryForList("""
                 SELECT traffic_origin
                 FROM webhook_events
@@ -651,6 +713,14 @@ class PaymentIntentConfirmContractTests {
         assertThat(countRows("authorizations")).isEqualTo(1);
         assertThat(countRows("audit_logs")).isEqualTo(4);
         assertThat(countWebhookDeliveries("payment_attempt.created")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                """, Integer.class, paymentIntentId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM domain_events
+                WHERE stream_id = ? AND event_type = 'payment_attempt.completed'
+                """, Integer.class, paymentIntentId)).isEqualTo(1);
     }
 
     @Test
@@ -1067,6 +1137,10 @@ class PaymentIntentConfirmContractTests {
 
     private int countRows(String table) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+    }
+
+    private String eventPayload(java.util.Map<String, Object> event) {
+        return new String((byte[]) event.get("PAYLOAD_BYTES"), StandardCharsets.UTF_8);
     }
 
     private int countRuleResults(UUID fraudDecisionId) {

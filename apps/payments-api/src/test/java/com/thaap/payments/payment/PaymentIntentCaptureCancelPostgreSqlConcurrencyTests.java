@@ -1,6 +1,7 @@
 package com.thaap.payments.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -137,6 +139,88 @@ class PaymentIntentCaptureCancelPostgreSqlConcurrencyTests {
         }
     }
 
+    @Test
+    void exactFraudEventSourceLineageIsTypeCheckedAndImmutable() throws Exception {
+        MerchantAccess merchant = createMerchant("event-source-lineage-merchant");
+        UUID customerId = createCustomer(merchant, "event-source-lineage@example.com");
+        UUID paymentMethodId = createPaymentMethod(merchant, customerId);
+        UUID paymentIntentId = createPaymentIntent(merchant, customerId);
+        confirmPaymentIntent(merchant, paymentIntentId, paymentMethodId);
+
+        java.util.Map<String, Object> lineage = jdbcTemplate.queryForMap("""
+                SELECT lineage.id, lineage.merchant_id, lineage.fraud_decision_id,
+                       lineage.feature_snapshot_id
+                  FROM domain_event_source_lineage lineage
+                  JOIN domain_events event
+                    ON event.merchant_id = lineage.merchant_id
+                   AND event.id = lineage.domain_event_id
+                 WHERE event.stream_id = ?
+                   AND event.event_type = 'fraud_decision.created'
+                """, paymentIntentId);
+        UUID lineageId = (UUID) lineage.get("id");
+        UUID merchantId = (UUID) lineage.get("merchant_id");
+        UUID fraudDecisionId = (UUID) lineage.get("fraud_decision_id");
+        UUID featureSnapshotId = (UUID) lineage.get("feature_snapshot_id");
+        UUID nonFraudEventId = jdbcTemplate.queryForObject("""
+                SELECT id FROM domain_events
+                WHERE merchant_id = ? AND stream_id = ?
+                  AND event_type = 'payment_intent.created'
+                """, UUID.class, merchantId, paymentIntentId);
+        UUID foreignPaymentIntentId = createPaymentIntent(
+                merchant, customerId, "event-source-lineage-foreign-payment");
+        UUID crossPaymentFraudEventId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO domain_events (
+                    id, merchant_id, stream_type, stream_id, stream_version,
+                    event_type, event_version, occurred_at, recorded_at,
+                    correlation_id, causation_event_id, request_id, trace_id,
+                    actor_type, actor_id, traffic_origin, payload_bytes,
+                    payload_sha256, event_record_bytes, event_record_sha256)
+                SELECT ?, merchant_id, stream_type, ?, 2,
+                       event_type, event_version, occurred_at, recorded_at,
+                       correlation_id, causation_event_id, request_id, trace_id,
+                       actor_type, actor_id, traffic_origin, payload_bytes,
+                       payload_sha256, event_record_bytes, event_record_sha256
+                  FROM domain_events
+                 WHERE merchant_id = ? AND stream_id = ?
+                   AND event_type = 'fraud_decision.created'
+                """, crossPaymentFraudEventId, foreignPaymentIntentId,
+                merchantId, paymentIntentId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE domain_event_source_lineage SET fraud_decision_id = fraud_decision_id
+                WHERE id = ?
+                """, lineageId)).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("domain event history is immutable");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM domain_event_source_lineage WHERE id = ?", lineageId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("domain event history is immutable");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO domain_event_source_lineage (
+                    id, merchant_id, domain_event_id, source_type,
+                    fraud_decision_id, feature_snapshot_id, created_at)
+                VALUES (?, ?, ?, 'FRAUD_DECISION', ?, ?, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, nonFraudEventId,
+                fraudDecisionId, featureSnapshotId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("event source lineage requires the exact fraud decision payment chain");
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO domain_event_source_lineage (
+                    id, merchant_id, domain_event_id, source_type,
+                    fraud_decision_id, feature_snapshot_id, created_at)
+                VALUES (?, ?, ?, 'FRAUD_DECISION', ?, ?, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), merchantId, crossPaymentFraudEventId,
+                fraudDecisionId, featureSnapshotId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining(
+                        "event source lineage requires the exact fraud decision payment chain");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM flyway_schema_history
+                WHERE version IN ('83', '84', '85') AND success = TRUE
+                """, Integer.class)).isEqualTo(3);
+    }
+
     private MerchantAccess createMerchant(String name) throws Exception {
         String response = mockMvc.perform(post("/admin/merchants")
                         .header(ADMIN_BOOTSTRAP_TOKEN, TEST_ADMIN_BOOTSTRAP_TOKEN)
@@ -189,9 +273,14 @@ class PaymentIntentCaptureCancelPostgreSqlConcurrencyTests {
     }
 
     private UUID createPaymentIntent(MerchantAccess merchant, UUID customerId) throws Exception {
+        return createPaymentIntent(merchant, customerId, "capture-cancel-race-payment-intent");
+    }
+
+    private UUID createPaymentIntent(MerchantAccess merchant, UUID customerId,
+            String idempotencyKey) throws Exception {
         String response = mockMvc.perform(post("/payment_intents")
                         .header(API_KEY, merchant.apiKey())
-                        .header(IDEMPOTENCY_KEY, "capture-cancel-race-payment-intent")
+                        .header(IDEMPOTENCY_KEY, idempotencyKey)
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {

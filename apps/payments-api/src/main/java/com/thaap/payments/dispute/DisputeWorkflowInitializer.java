@@ -1,5 +1,7 @@
 package com.thaap.payments.dispute;
 
+import com.thaap.payments.risk.RiskOperationsEventProducer;
+import com.thaap.payments.tenant.MerchantContext;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -13,12 +15,16 @@ public class DisputeWorkflowInitializer {
     public static final String DEADLINE_CATALOGUE_VERSION = "dispute_deadlines_v1";
 
     private final JdbcTemplate jdbcTemplate;
+    private final RiskOperationsEventProducer eventProducer;
 
-    public DisputeWorkflowInitializer(JdbcTemplate jdbcTemplate) {
+    public DisputeWorkflowInitializer(JdbcTemplate jdbcTemplate,
+            RiskOperationsEventProducer eventProducer) {
         this.jdbcTemplate = jdbcTemplate;
+        this.eventProducer = eventProducer;
     }
 
-    public UUID initialize(Chargeback chargeback, Instant now) {
+    public UUID initialize(Chargeback chargeback, Instant now,
+            MerchantContext context, String requestId) {
         Integer responseDays = jdbcTemplate.queryForObject("""
                 SELECT response_days FROM dispute_reason_deadline_definitions WHERE reason_code = ?
                 """, Integer.class, chargeback.getReasonCode().name());
@@ -39,6 +45,8 @@ public class DisputeWorkflowInitializer {
                 chargeback.getReasonCode().name(), DEADLINE_CATALOGUE_VERSION,
                 Timestamp.from(dueAt), Timestamp.from(canonicalNow), Timestamp.from(canonicalNow));
         insertSystemEvent(chargeback.getMerchantId(), workflowId, "WORKFLOW_CREATED", canonicalNow);
+        eventProducer.disputeWorkflowOpened(context, workflowId, canonicalNow, requestId,
+                dueAt, chargeback.getReasonCode().name(), chargeback.getTrafficOrigin());
         return workflowId;
     }
 

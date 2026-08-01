@@ -37,17 +37,20 @@ public class RefundController {
     private final IdempotencyService idempotencyService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final AuditLogService auditLogService;
+    private final PaymentDomainEventService paymentDomainEventService;
 
     public RefundController(PaymentIntentRepository paymentIntentRepository,
             RefundRepository refundRepository, FullRefundService fullRefundService,
             IdempotencyService idempotencyService,
-            WebhookDeliveryService webhookDeliveryService, AuditLogService auditLogService) {
+            WebhookDeliveryService webhookDeliveryService, AuditLogService auditLogService,
+            PaymentDomainEventService paymentDomainEventService) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.refundRepository = refundRepository;
         this.fullRefundService = fullRefundService;
         this.idempotencyService = idempotencyService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.auditLogService = auditLogService;
+        this.paymentDomainEventService = paymentDomainEventService;
     }
 
     @PostMapping
@@ -85,6 +88,8 @@ public class RefundController {
         Refund refund = result.refund();
         recordRefundAuditLog(merchantContext, requestId, startingStatus, paymentIntent,
                 result.authorization(), refund, result.ledgerResult());
+        paymentDomainEventService.refundCreated(paymentIntent, refund,
+                paymentDomainEventService.merchantActor(merchantContext), requestId, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(RefundResponse.from(refund));
     }
 

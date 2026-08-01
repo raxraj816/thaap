@@ -68,6 +68,16 @@ class ExecutableArtifactNamingCheckTests(unittest.TestCase):
 
             self.assertEqual([], NAMING_CHECK.find_violations(root))
 
+    def test_phase_governance_checker_content_is_allowed(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = pathlib.Path(temporary_directory)
+            self.write(
+                root,
+                "scripts/phase-closure-check.py",
+                "STALE_CLAIM = 'Chapter 44 is still active'\n")
+
+            self.assertEqual([], NAMING_CHECK.find_violations(root))
+
     def test_only_exact_historical_constraint_reference_is_allowed(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = pathlib.Path(temporary_directory)

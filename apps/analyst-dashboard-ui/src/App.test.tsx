@@ -449,3 +449,158 @@ test.each([[403, "denied"], [503, "dependency"]] as const)(
     expect(document.body).not.toHaveTextContent("classified-memory-key");
   },
 );
+
+test("loads generation-qualified analytics and keeps the credential in memory only", async () => {
+  const freshness = {
+    generationId: "a1000000-0000-0000-0000-000000000001",
+    generationNumber: 1,
+    sourceCutoff: "2026-07-28T08:00:00Z",
+    lastAppliedEventTime: "2026-07-28T07:59:59Z",
+    lastProcessingTime: new Date().toISOString(),
+    state: "FRESH",
+    eligibleEventCount: 1,
+    appliedEventCount: 1,
+    unavailableStreamCount: 0,
+    trafficOriginPolicy: "ALL",
+  };
+  const payment = {
+    paymentIntentId: "a2000000-0000-0000-0000-000000000002",
+    intentAmountMinor: 1250, currency: "USD", captureMethod: "AUTOMATIC",
+    trafficOrigin: "MERCHANT_API", attemptNumber: 1, attemptOutcome: "APPROVED",
+    processorCode: "APPROVED", fraudAction: "REVIEW", riskLevel: "HIGH",
+    riskScoreBasisPoints: 8700,
+    reasonCodesJson: "[\"VELOCITY\"]", rulesetVersion: "rules-v1",
+    featureCatalogueVersion: "features-v1",
+    fraudDecisionId: "a4000000-0000-0000-0000-000000000004",
+    featureSnapshotId: "a5000000-0000-0000-0000-000000000005",
+    reviewStatus: "OPEN", reviewOutcome: null,
+    capturedAmountMinor: 0, refundedAmountMinor: 0, disputedAmountMinor: 0,
+    labelValue: null, fraudType: null, labelSource: null, labelAvailableAt: null,
+    lifecycleStatus: "REQUIRES_REVIEW", coverageStatus: "COMPLETE", lastStreamVersion: 3,
+    lastDomainEventId: "a3000000-0000-0000-0000-000000000003",
+    lastEventRecordSha256: "a".repeat(64), lastEventOccurredAt: "2026-07-28T07:59:58Z",
+    lastEventRecordedAt: "2026-07-28T07:59:59Z", lastProcessedAt: freshness.lastProcessingTime,
+  };
+  const summary = { from: "2026-07-27T08:00:00Z", to: "2026-07-28T08:00:00Z",
+    freshness, nextCursor: "summary-cursor", currencies: [{ currency: "USD", paymentCount: 1, attemptCount: 1,
+      authorizationCount: 0, declineCount: 0, reviewCount: 1, confirmedFraudCount: 0,
+      chargebackCount: 0, enumerationSignalCount: 0, unlabeledCount: 1,
+      unknownOutcomeCount: 0, intentAmountMinor: 1250, authorizedAmountMinor: 0,
+      capturedAmountMinor: 0, refundedAmountMinor: 0, disputedAmountMinor: 0,
+      sourceEventCount: 3 }] };
+  const timeSeries = { from: summary.from, to: summary.to, interval: "HOUR", freshness,
+    nextCursor: "timeseries-cursor",
+    points: [{ ...summary.currencies[0], intervalStart: "2026-07-28T07:00:00Z",
+      latestSourceOccurredAt: payment.lastEventOccurredAt,
+      latestSourceRecordedAt: payment.lastEventRecordedAt,
+      lastProcessedAt: payment.lastProcessedAt }] };
+  const projectionStatus = { paymentRisk: freshness, merchantRisk: freshness,
+    nextCursor: "generation-cursor",
+    generations: [{ projectionName: "payment-risk-v1", generationId: freshness.generationId,
+      generationNumber: 1, handlerVersion: "v1", buildSource: "LIVE",
+      lifecycleStatus: "ACTIVE", createdAt: "2026-07-28T00:00:00Z",
+      reconciledAt: "2026-07-28T00:00:00Z", activatedAt: "2026-07-28T00:00:00Z",
+      retiredAt: null }] };
+  const nextPayment = { ...payment,
+    paymentIntentId: "a6000000-0000-0000-0000-000000000006",
+    intentAmountMinor: 500, currency: "EUR", riskScoreBasisPoints: 4200,
+    fraudDecisionId: "a7000000-0000-0000-0000-000000000007",
+    featureSnapshotId: "a8000000-0000-0000-0000-000000000008" };
+  const eurSummary = { ...summary.currencies[0], currency: "EUR", paymentCount: 2,
+    capturedAmountMinor: 500 };
+  const nextPoint = { ...eurSummary, intervalStart: "2026-07-28T08:00:00Z",
+    latestSourceOccurredAt: payment.lastEventOccurredAt,
+    latestSourceRecordedAt: payment.lastEventRecordedAt,
+    lastProcessedAt: payment.lastProcessedAt };
+  const nextGeneration = { ...projectionStatus.generations[0],
+    projectionName: "merchant-risk-v1",
+    generationId: "a9000000-0000-0000-0000-000000000009" };
+  const fetchMock = enqueueConnect(vi.fn())
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: [payment],
+      nextCursor: "payment-cursor",
+      freshness }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(summary), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(timeSeries), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(projectionStatus), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: payment, freshness }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: [nextPayment], nextCursor: null,
+      freshness }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...summary, currencies: [eurSummary],
+      nextCursor: null }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...timeSeries, points: [nextPoint],
+      nextCursor: null }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...projectionStatus,
+      generations: [nextGeneration], nextCursor: null }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  renderApp();
+  await user.type(screen.getByLabelText("Risk operator credential"), "analytics-memory-key");
+  await user.click(screen.getByRole("button", { name: "Open workspace" }));
+  await user.click(await screen.findByRole("button", { name: "Load analytics" }));
+
+  expect(await screen.findByText("USD 12.50")).toBeVisible();
+  expect(screen.getByText("87.00%", { exact: false })).toBeVisible();
+  expect(screen.queryByText("8700", { exact: true })).not.toBeInTheDocument();
+  expect(screen.getAllByText("FRESH").length).toBeGreaterThan(0);
+  expect(screen.getByText("payment-risk-v1")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: payment.paymentIntentId }));
+  expect(await screen.findByText("rules-v1")).toBeVisible();
+  expect(screen.getByText(payment.fraudDecisionId)).toBeVisible();
+  expect(screen.getByText(payment.featureSnapshotId)).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Load next analytics page" }));
+  expect(await screen.findByRole("button", { name: nextPayment.paymentIntentId })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Load more currencies" }));
+  await user.click(screen.getByRole("button", { name: "Load more intervals" }));
+  await user.click(screen.getByRole("button", { name: "Load more generations" }));
+  expect(await screen.findByText("merchant-risk-v1")).toBeVisible();
+  expect(screen.getAllByText("EUR")).toHaveLength(2);
+  expect(fetchMock.mock.calls[7][0]).toBe("/risk/analytics/payments?limit=50");
+  expect(fetchMock.mock.calls[8][0]).toContain(
+    "/risk/analytics/merchant/summary?originPolicy=ALL&limit=100");
+  expect(fetchMock.mock.calls[12][0]).toContain("cursor=payment-cursor");
+  expect(fetchMock.mock.calls[13][0]).toContain("cursor=summary-cursor");
+  expect(fetchMock.mock.calls[14][0]).toContain("cursor=timeseries-cursor");
+  expect(fetchMock.mock.calls[15][0]).toContain("cursor=generation-cursor");
+  expect(document.body).not.toHaveTextContent("analytics-memory-key");
+  expect(localStorage.length).toBe(0);
+  expect(sessionStorage.length).toBe(0);
+});
+
+test("withholds numeric analytics when projection coverage is partial", async () => {
+  const partial = { generationId: "b1000000-0000-0000-0000-000000000001",
+    generationNumber: 1, sourceCutoff: "2026-07-28T08:00:00Z",
+    lastAppliedEventTime: null, lastProcessingTime: null, state: "PARTIAL",
+    eligibleEventCount: 9, appliedEventCount: 0, unavailableStreamCount: 1,
+    trafficOriginPolicy: "ALL" };
+  const hiddenCurrency = { currency: "USD", paymentCount: 0, attemptCount: 0,
+    authorizationCount: 0, declineCount: 0, reviewCount: 0, confirmedFraudCount: 0,
+    chargebackCount: 0, enumerationSignalCount: 0, unlabeledCount: 0,
+    unknownOutcomeCount: 0, intentAmountMinor: 0, authorizedAmountMinor: 0,
+    capturedAmountMinor: 0, refundedAmountMinor: 0, disputedAmountMinor: 0,
+    sourceEventCount: 0 };
+  const fetchMock = enqueueConnect(vi.fn())
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], nextCursor: null,
+      freshness: partial }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ from: "2026-07-27T08:00:00Z",
+      to: "2026-07-28T08:00:00Z", currencies: [hiddenCurrency], nextCursor: null,
+      freshness: partial }),
+      { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ from: "2026-07-27T08:00:00Z",
+      to: "2026-07-28T08:00:00Z", interval: "HOUR", points: [], nextCursor: null,
+      freshness: partial }),
+      { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ generations: [], nextCursor: null,
+      paymentRisk: partial, merchantRisk: partial }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  renderApp();
+  await user.type(screen.getByLabelText("Risk operator credential"), "partial-memory-key");
+  await user.click(screen.getByRole("button", { name: "Open workspace" }));
+  await user.click(await screen.findByRole("button", { name: "Load analytics" }));
+
+  expect((await screen.findAllByText("PARTIAL")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/incomplete totals are withheld/i).length).toBeGreaterThan(0);
+  expect(screen.queryByText("USD 0.00")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 applied of 9 eligible events")).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("partial-memory-key");
+});

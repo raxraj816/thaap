@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,6 +124,37 @@ class PaymentIntentCreateContractTests {
         assertThat(delivery.get("EVENT_TYPE")).isEqualTo("payment_intent.created");
         assertThat(delivery.get("STATUS")).isEqualTo("PENDING");
         assertThat(delivery.get("ATTEMPT_COUNT")).isEqualTo(0);
+
+        var event = jdbcTemplate.queryForMap("""
+                SELECT merchant_id, stream_type, stream_id, stream_version, event_type,
+                       event_version, correlation_id, causation_event_id, request_id,
+                       actor_type, actor_id, traffic_origin, payload_bytes, event_record_bytes
+                FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                """, paymentIntentId);
+        String expectedActorId = jdbcTemplate.queryForObject("""
+                SELECT api_key_prefix FROM merchants WHERE id = ?
+                """, String.class, merchant.id());
+        assertThat(event.get("MERCHANT_ID")).isEqualTo(merchant.id());
+        assertThat(event.get("STREAM_TYPE")).isEqualTo("PAYMENT");
+        assertThat(event.get("STREAM_ID")).isEqualTo(paymentIntentId);
+        assertThat(event.get("STREAM_VERSION")).isEqualTo(1L);
+        assertThat(event.get("EVENT_TYPE")).isEqualTo("payment_intent.created");
+        assertThat(event.get("EVENT_VERSION")).isEqualTo(1);
+        assertThat(event.get("CORRELATION_ID")).isEqualTo(paymentIntentId.toString());
+        assertThat(event.get("CAUSATION_EVENT_ID")).isNull();
+        assertThat(event.get("REQUEST_ID")).asString().isNotBlank();
+        assertThat(event.get("ACTOR_TYPE")).isEqualTo("MERCHANT_API_KEY");
+        assertThat(event.get("ACTOR_ID")).isEqualTo(expectedActorId);
+        assertThat(event.get("ACTOR_ID")).isNotEqualTo(merchant.apiKey());
+        assertThat(event.get("TRAFFIC_ORIGIN")).isEqualTo("MERCHANT_API");
+        assertThat(new String((byte[]) event.get("PAYLOAD_BYTES"), StandardCharsets.UTF_8))
+                .isEqualTo("{\"amountMinor\":1200,\"captureMethod\":\"MANUAL\",\"currency\":\"USD\"}");
+        assertThat(new String((byte[]) event.get("EVENT_RECORD_BYTES"), StandardCharsets.UTF_8))
+                .doesNotContain("buyer-a@example.com", "Initial checkout authorization",
+                        "cart_123", "order_456", merchant.apiKey());
+        assertThat(countRows("domain_events")).isEqualTo(1);
+        assertThat(countRows("event_publications")).isEqualTo(1);
     }
 
     @Test
@@ -224,6 +256,11 @@ class PaymentIntentCreateContractTests {
         assertThat(countRows("payment_intents")).isEqualTo(1);
         assertThat(countRows("webhook_deliveries")).isEqualTo(1);
         assertThat(countRows("idempotency_records")).isEqualTo(1);
+        assertThat(countRows("domain_events")).isEqualTo(1);
+        assertThat(countRows("event_publications")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT MAX(stream_version) FROM domain_events
+                """, Long.class)).isEqualTo(1L);
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import jakarta.persistence.EntityManager;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -29,6 +30,7 @@ public class WebhookDeliveryClaimService {
     private final EntityManager entityManager;
     private final TransactionTemplate claimTransaction;
     private final Duration leaseDuration;
+    private final RiskOperationsEventProducer eventProducer;
 
     public WebhookDeliveryClaimService(JdbcTemplate jdbcTemplate,
             WebhookDeliveryRepository deliveryRepository,
@@ -37,7 +39,8 @@ public class WebhookDeliveryClaimService {
             WebhookEventRepository eventRepository, WebhookMetrics metrics,
             EntityManager entityManager,
             PlatformTransactionManager transactionManager,
-            @Value("${thaap.webhook.lease-duration:30s}") Duration leaseDuration) {
+            @Value("${thaap.webhook.lease-duration:30s}") Duration leaseDuration,
+            RiskOperationsEventProducer eventProducer) {
         if (leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Webhook lease duration must be positive");
         }
@@ -49,6 +52,7 @@ public class WebhookDeliveryClaimService {
         this.metrics = metrics;
         this.entityManager = entityManager;
         this.leaseDuration = leaseDuration;
+        this.eventProducer = eventProducer;
         this.claimTransaction = new TransactionTemplate(transactionManager);
         this.claimTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -109,6 +113,9 @@ public class WebhookDeliveryClaimService {
             if (endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED) {
                 attempt.failTerminally(now, false, null, WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
                 delivery.exhaust(claim.claimToken(), WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
+                eventProducer.webhookDeliveryExhausted(claim.merchantId(), claim.endpointId(), now,
+                        delivery.getDeliveryGeneration(), delivery.getAttemptCount(),
+                        WebhookDeliveryErrorCode.ENDPOINT_DISABLED.name());
                 return DispatchPreparation.disabled(claim.eventType(),
                         Duration.between(attempt.getStartedAt(), now),
                         Duration.between(delivery.getCreatedAt(), now));
@@ -118,6 +125,9 @@ public class WebhookDeliveryClaimService {
                         WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
                 delivery.exhaust(claim.claimToken(),
                         WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE);
+                eventProducer.webhookDeliveryExhausted(claim.merchantId(), claim.endpointId(), now,
+                        delivery.getDeliveryGeneration(), delivery.getAttemptCount(),
+                        WebhookDeliveryErrorCode.SIGNING_SECRET_UNAVAILABLE.name());
                 return DispatchPreparation.unavailable(claim.eventType(),
                         Duration.between(attempt.getStartedAt(), now),
                         Duration.between(delivery.getCreatedAt(), now));
@@ -189,10 +199,16 @@ public class WebhookDeliveryClaimService {
                 if (endpointDisabled) {
                     delivery.exhaust(delivery.getClaimToken(),
                             WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
+                    eventProducer.webhookDeliveryExhausted(delivery.getMerchantId(), endpoint.getId(), now,
+                            delivery.getDeliveryGeneration(), delivery.getAttemptCount(),
+                            WebhookDeliveryErrorCode.ENDPOINT_DISABLED.name());
                     continue;
                 }
                 if (attemptsExhausted) {
                     delivery.exhaust(delivery.getClaimToken(), WebhookDeliveryErrorCode.LEASE_EXPIRED);
+                    eventProducer.webhookDeliveryExhausted(delivery.getMerchantId(), endpoint.getId(), now,
+                            delivery.getDeliveryGeneration(), delivery.getAttemptCount(),
+                            WebhookDeliveryErrorCode.LEASE_EXPIRED.name());
                     continue;
                 }
                 if (endpoint.getOperationalStatus() != WebhookEndpointStatus.ACTIVE) {

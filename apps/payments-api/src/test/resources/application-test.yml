@@ -31,6 +31,27 @@ management:
 thaap:
   admin:
     bootstrap-token: test-admin-bootstrap-token
+  platform:
+    bootstrap-token: test-platform-bootstrap-token
+  event-publication:
+    enabled: false
+    topic: thaap.domain-events.v1
+    partitions: 6
+    retention: 7d
+    record-max-bytes: 65536
+    poll-batch-size: 100
+    tenant-budget: 20
+    stream-budget: 10
+    lease-duration: 30s
+    retry-limit: 10
+    retry-base-delay: 1s
+    retry-max-delay: 5m
+    poll-delay: 24h
+    backlog-failure-age: 5m
+  projection-consumer:
+    enabled: false
+  projection-rebuild:
+    worker-enabled: false
   scenario-runner:
     token: test-scenario-runner-token
   security:
@@ -87,6 +108,17 @@ thaap:
     chunk-size: 2
     maximum-cohort-days: 365
     report-freshness: 24h
+  replay-datasets:
+    worker-enabled: false
+    creation-enabled: false
+    chunk-size: 2
+    maximum-cohort-days: 365
+    maximum-population: 1000000
+    lease-duration: 60s
+    retry-limit: 10
+    recovery-batch-size: 10
+    recovery-poll-delay: 24h
+    stale-age: 5m
   disputes:
     expiry-enabled: false
     expiry-batch-size: 10

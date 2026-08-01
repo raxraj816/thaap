@@ -18,6 +18,21 @@ public interface FraudLabelRepository extends JpaRepository<FraudLabel, UUID> {
     @Query("""
             SELECT label FROM FraudLabel label
             WHERE label.merchantId = :merchantId
+              AND label.paymentIntentId = :paymentIntentId
+              AND NOT EXISTS (
+                  SELECT successor.id FROM FraudLabel successor
+                  WHERE successor.merchantId = label.merchantId
+                    AND successor.supersedesLabelId = label.id
+              )
+            ORDER BY label.availableAt DESC, label.id DESC
+            """)
+    List<FraudLabel> findCurrentForPaymentIntent(
+            @Param("merchantId") UUID merchantId,
+            @Param("paymentIntentId") UUID paymentIntentId);
+
+    @Query("""
+            SELECT label FROM FraudLabel label
+            WHERE label.merchantId = :merchantId
               AND (label.createdAt > :cursorCreatedAt
                    OR (label.createdAt = :cursorCreatedAt AND label.id > :cursorId))
             ORDER BY label.createdAt ASC, label.id ASC

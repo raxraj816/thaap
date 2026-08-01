@@ -690,10 +690,19 @@ Phase 4.5 is complete through Chapter 43R. Fresh/retained V1–V64 migrations,
 forced PostgreSQL orderings, simulation and key-lifecycle restarts, rule and
 protocol boundary families, seven public workflows, live browser verification,
 759 backend tests, 140 repository tests, 20 UI tests plus the production build,
-and all Chapter 36–43R matrix/dossier gates pass. The Phase 5 detailed plan is
-ready for founder review, but its event/outbox, Kafka, consumer, analytics, and
-rebuild implementation has not started. The permanent THAAP vision matrix now
-maps 19 challenger promises to exact current evidence and Phase 5–9 owner
+and all Chapter 36–43R matrix/dossier gates pass. Founder implementation
+authorization on 2026-07-27 confirmed the Phase 5 detailed plan's sixteen
+decisions before implementation began. Phase 5 is complete: all Chapter 44–52
+`PRE_IMPLEMENTATION` matrices are
+`FROZEN`/`VERIFIED`/all-`PASS`, and every corresponding dossier is
+`READY_TO_MERGE`/`MERGE`. V65–V85 implement canonical events, exact immutable
+event-to-decision/snapshot/payment lineage, Kafka recovery, idempotent
+projections, losslessly paginated analytics, rebuild/activation, and
+point-in-time replay datasets. The public payment-risk analytics demo and real
+Kafka/PostgreSQL proof pass.
+Phase 5 implementation status: COMPLETE
+The permanent THAAP vision matrix now
+maps 23 challenger promises to exact current evidence and Phase 5–10 owner
 slices; the readiness gate rejects vague or stale coverage. The API also does
 not claim Phase 6's unified decision/developer product, Phase 7 governed ML,
 Phase 8 network/graph/underwriting intelligence, Phase 9 hosted trust/agents,

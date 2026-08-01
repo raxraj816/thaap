@@ -64,6 +64,131 @@ export type MonitoringCohort = {
   nextCursor: string | null;
 };
 
+export type AnalyticsFreshnessState =
+  | "FRESH" | "LAGGING" | "STALE" | "EMPTY" | "PARTIAL" | "UNAVAILABLE";
+
+export type AnalyticsFreshness = {
+  generationId: string;
+  generationNumber: number;
+  sourceCutoff: string | null;
+  lastAppliedEventTime: string | null;
+  lastProcessingTime: string | null;
+  state: AnalyticsFreshnessState;
+  eligibleEventCount: number;
+  appliedEventCount: number;
+  unavailableStreamCount: number;
+  trafficOriginPolicy: "ALL" | "LIVE_ONLY" | "SYNTHETIC_ONLY";
+};
+
+export type PaymentRiskAnalytics = {
+  paymentIntentId: string;
+  intentAmountMinor: number | null;
+  currency: string | null;
+  captureMethod: string | null;
+  trafficOrigin: string | null;
+  attemptNumber: number | null;
+  attemptOutcome: string | null;
+  processorCode: string | null;
+  fraudAction: string | null;
+  riskLevel: string | null;
+  riskScoreBasisPoints: number | null;
+  reasonCodesJson: string | null;
+  rulesetVersion: string | null;
+  featureCatalogueVersion: string | null;
+  fraudDecisionId: string | null;
+  featureSnapshotId: string | null;
+  reviewStatus: string | null;
+  reviewOutcome: string | null;
+  capturedAmountMinor: number;
+  refundedAmountMinor: number;
+  disputedAmountMinor: number;
+  labelValue: string | null;
+  fraudType: string | null;
+  labelSource: string | null;
+  labelAvailableAt: string | null;
+  lifecycleStatus: string;
+  coverageStatus: "COMPLETE" | "PARTIAL";
+  lastStreamVersion: number;
+  lastDomainEventId: string;
+  lastEventRecordSha256: string;
+  lastEventOccurredAt: string;
+  lastEventRecordedAt: string;
+  lastProcessedAt: string;
+};
+
+export type PaymentRiskAnalyticsPage = {
+  data: PaymentRiskAnalytics[];
+  nextCursor: string | null;
+  freshness: AnalyticsFreshness;
+};
+
+export type PaymentRiskAnalyticsDetail = {
+  data: PaymentRiskAnalytics;
+  freshness: AnalyticsFreshness;
+};
+
+export type MerchantRiskCurrencySummary = {
+  currency: string;
+  paymentCount: number;
+  attemptCount: number;
+  authorizationCount: number;
+  declineCount: number;
+  reviewCount: number;
+  confirmedFraudCount: number;
+  chargebackCount: number;
+  enumerationSignalCount: number;
+  unlabeledCount: number;
+  unknownOutcomeCount: number;
+  intentAmountMinor: number;
+  authorizedAmountMinor: number;
+  capturedAmountMinor: number;
+  refundedAmountMinor: number;
+  disputedAmountMinor: number;
+  sourceEventCount: number;
+};
+
+export type MerchantRiskSummary = {
+  from: string;
+  to: string;
+  currencies: MerchantRiskCurrencySummary[];
+  nextCursor: string | null;
+  freshness: AnalyticsFreshness;
+};
+
+export type MerchantRiskTimeSeriesPoint = MerchantRiskCurrencySummary & {
+  intervalStart: string;
+  latestSourceOccurredAt: string;
+  latestSourceRecordedAt: string;
+  lastProcessedAt: string;
+};
+
+export type MerchantRiskTimeSeries = {
+  from: string;
+  to: string;
+  interval: "HOUR" | "DAY";
+  points: MerchantRiskTimeSeriesPoint[];
+  nextCursor: string | null;
+  freshness: AnalyticsFreshness;
+};
+
+export type ProjectionAnalyticsStatus = {
+  generations: {
+    projectionName: string;
+    generationId: string;
+    generationNumber: number;
+    handlerVersion: string;
+    buildSource: string;
+    lifecycleStatus: string;
+    createdAt: string;
+    reconciledAt: string | null;
+    activatedAt: string | null;
+    retiredAt: string | null;
+  }[];
+  nextCursor: string | null;
+  paymentRisk: AnalyticsFreshness;
+  merchantRisk: AnalyticsFreshness;
+};
+
 export type WebhookVerification = {
   id: string; endpointId: string;
   lifecycleStatus: "PENDING" | "VERIFIED" | "FAILED" | "EXPIRED";
@@ -277,6 +402,44 @@ export function getMonitoringCohort(credential: string, metricCode: string,
   });
   return request(credential,
     `/risk/monitoring/metrics/${encodeURIComponent(metricCode)}/cohort?${parameters}`);
+}
+
+export function getPaymentRiskAnalytics(credential: string, originCursor?: string):
+  Promise<PaymentRiskAnalyticsPage> {
+  const parameters = new URLSearchParams({ limit: "50" });
+  if (originCursor) parameters.set("cursor", originCursor);
+  return request(credential, `/risk/analytics/payments?${parameters}`);
+}
+
+export function getPaymentRiskAnalyticsDetail(credential: string,
+  paymentIntentId: string): Promise<PaymentRiskAnalyticsDetail> {
+  return request(credential,
+    `/risk/analytics/payments/${encodeURIComponent(paymentIntentId)}`);
+}
+
+export function getMerchantRiskAnalyticsSummary(credential: string,
+  originPolicy: AnalyticsFreshness["trafficOriginPolicy"], cursor?: string):
+  Promise<MerchantRiskSummary> {
+  const parameters = new URLSearchParams({ originPolicy, limit: "100" });
+  if (cursor) parameters.set("cursor", cursor);
+  return request(credential, `/risk/analytics/merchant/summary?${parameters}`);
+}
+
+export function getMerchantRiskAnalyticsTimeSeries(credential: string,
+  originPolicy: AnalyticsFreshness["trafficOriginPolicy"], cursor?: string):
+  Promise<MerchantRiskTimeSeries> {
+  const parameters = new URLSearchParams({
+    interval: "HOUR", originPolicy, limit: "100",
+  });
+  if (cursor) parameters.set("cursor", cursor);
+  return request(credential, `/risk/analytics/merchant/timeseries?${parameters}`);
+}
+
+export function getProjectionAnalyticsStatus(credential: string, cursor?: string):
+  Promise<ProjectionAnalyticsStatus> {
+  const parameters = new URLSearchParams({ limit: "100" });
+  if (cursor) parameters.set("cursor", cursor);
+  return request(credential, `/risk/analytics/projections?${parameters}`);
 }
 
 export function verifyWebhookEndpoint(apiKey: string, endpointId: string,

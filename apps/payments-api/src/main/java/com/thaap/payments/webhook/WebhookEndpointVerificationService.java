@@ -3,6 +3,7 @@ package com.thaap.payments.webhook;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
@@ -43,6 +44,7 @@ public class WebhookEndpointVerificationService {
     private final Clock clock;
     private final Duration challengeTtl;
     private final Duration dispatchLease;
+    private final RiskOperationsEventProducer eventProducer;
     private final TransactionTemplate transaction;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -53,7 +55,8 @@ public class WebhookEndpointVerificationService {
             AuditLogService auditLogService, WebhookOperationsMetrics metrics, Clock clock,
             PlatformTransactionManager transactionManager,
             @Value("${thaap.webhook.verification-challenge-ttl:2m}") Duration challengeTtl,
-            @Value("${thaap.webhook.lease-duration:30s}") Duration dispatchLease) {
+            @Value("${thaap.webhook.lease-duration:30s}") Duration dispatchLease,
+            RiskOperationsEventProducer eventProducer) {
         if (challengeTtl.compareTo(Duration.ofSeconds(30)) < 0
                 || challengeTtl.compareTo(Duration.ofMinutes(5)) > 0) {
             throw new IllegalArgumentException(
@@ -76,6 +79,7 @@ public class WebhookEndpointVerificationService {
         this.clock = clock;
         this.challengeTtl = challengeTtl;
         this.dispatchLease = dispatchLease;
+        this.eventProducer = eventProducer;
         this.transaction = new TransactionTemplate(transactionManager);
     }
 
@@ -316,6 +320,10 @@ public class WebhookEndpointVerificationService {
             insertEvent(context.merchantId(), prepared.id(),
                     nextSequence(context.merchantId(), prepared.id()),
                     lifecycle.name(), verified ? "VERIFIED" : resolvedFailure.name(), now);
+            if (verified) {
+                eventProducer.webhookEndpointVerified(context, prepared.endpointId(), now,
+                        requestId, prepared.id());
+            }
             auditLogService.recordMerchantApiAction(context, requestId,
                     "webhook.endpoint.verification_completed", "webhook_endpoint",
                     prepared.endpointId(), "Endpoint verification reached a terminal state",

@@ -11,7 +11,10 @@ This directory is organized to avoid conflicting plans during implementation.
 - [PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_4_5_DETAILED_IMPLEMENTATION_PLAN.md)
 - [PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md](./PHASE_5_DETAILED_IMPLEMENTATION_PLAN.md)
 
-This is the authoritative implementation source of truth. If any reference document disagrees with it, follow the master plan.
+The master plan is the authoritative cross-phase implementation source. When it
+incorporates a detailed phase plan, that incorporated plan controls the exact
+frozen contract for its phase and the two documents must agree. The Phase 5
+detailed plan is incorporated, not a non-authoritative companion reference.
 The completed Phase 3 detailed plan defines Chapters 22–25. The confirmed Phase
 4 detailed plan is incorporated by reference and defines its review/label,
 RiskContext, Redis, policy, authentication, dispute, failure, proof, and
@@ -23,9 +26,14 @@ together.
 
 Phase 4.5 is complete through Chapter 43R with all inherited closure evidence,
 759 backend tests, 140 repository tests, 20 UI tests, and the production UI
-build reconciled. The Phase 5 detailed plan is `READY FOR FOUNDER REVIEW` and
-proposes Chapters 44–52 for durable events and rebuildable analytics. Its
-sixteen decisions are not frozen and implementation has not started. The
+build reconciled. The Phase 5 detailed plan is implemented through Chapter 52
+for durable events and rebuildable analytics. Founder
+implementation authorization on 2026-07-27 confirmed all sixteen decisions as
+one product set. All Chapter 44–52 pre-implementation contracts are
+`FROZEN`/`VERIFIED`/all-`PASS`, with exact matrix/dossier links in the detailed
+plan, and all dossiers recommend `MERGE`.
+Phase 5 implementation status: COMPLETE
+The
 vision coverage matrix registers 23 product promises and rebaselines Phases
 6–10 so later work extends current product truth rather than duplicating Phase
 4.5 capabilities. The founder-confirmed destination is a hosted merchant-facing
