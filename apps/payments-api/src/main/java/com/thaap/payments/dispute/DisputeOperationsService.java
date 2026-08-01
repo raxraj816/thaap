@@ -9,6 +9,7 @@ import com.thaap.payments.risk.RiskOperatorCredential;
 import com.thaap.payments.risk.RiskOperatorCredentialRepository;
 import com.thaap.payments.risk.RiskOperatorRepository;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
@@ -36,18 +37,21 @@ public class DisputeOperationsService {
     private final DisputeOperationsMetrics metrics;
     private final RiskOperatorRepository operatorRepository;
     private final RiskOperatorCredentialRepository credentialRepository;
+    private final RiskOperationsEventProducer eventProducer;
     private final Clock clock;
 
     public DisputeOperationsService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
             AuditLogService auditLogService, DisputeOperationsMetrics metrics,
             RiskOperatorRepository operatorRepository,
-            RiskOperatorCredentialRepository credentialRepository, Clock clock) {
+            RiskOperatorCredentialRepository credentialRepository,
+            RiskOperationsEventProducer eventProducer, Clock clock) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.auditLogService = auditLogService;
         this.metrics = metrics;
         this.operatorRepository = operatorRepository;
         this.credentialRepository = credentialRepository;
+        this.eventProducer = eventProducer;
         this.clock = clock;
     }
 
@@ -158,6 +162,8 @@ public class DisputeOperationsService {
                  WHERE merchant_id = ? AND id = ?
                 """, Timestamp.from(now), Timestamp.from(now), context.merchantId(), workflow.id());
         insertOperatorEvent(context, workflow.id(), "SUBMITTED", workflow.latestEvidenceVersionId(), now);
+        eventProducer.disputeEvidenceSubmitted(context, workflow.id(), now, requestId,
+                actualVersion, workflow.latestEvidenceDigest());
         auditLogService.recordRiskOperatorAction(context, requestId, "dispute.submitted",
                 "dispute_workflow", workflow.id(), "Simulator dispute packet submitted",
                 Map.of("chargebackId", chargebackId.toString(), "status", "READY"),
@@ -211,6 +217,8 @@ public class DisputeOperationsService {
                 """, outcome.name(), outcomeId, Timestamp.from(receivedAt), Timestamp.from(receivedAt),
                 context.merchantId(), workflow.id());
         insertSystemOutcomeEvent(context.merchantId(), workflow.id(), outcomeId, outcome, receivedAt);
+        eventProducer.disputeOutcomeRecorded(context, workflow.id(), occurredAt, requestId,
+                outcome.name(), null, null, context.trafficOrigin());
         auditLogService.recordMerchantApiAction(context, requestId, "dispute.outcome_recorded",
                 "dispute_workflow", workflow.id(), "Trusted simulator dispute outcome recorded",
                 Map.of("chargebackId", chargebackId.toString(), "status", "SUBMITTED"),
@@ -252,6 +260,7 @@ public class DisputeOperationsService {
                     (id, merchant_id, dispute_workflow_id, event_type, source, occurred_at)
                 VALUES (?, ?, ?, 'EXPIRED', 'SYSTEM', ?)
                 """, UUID.randomUUID(), workflow.merchantId(), workflow.id(), Timestamp.from(now));
+        eventProducer.disputeWorkflowExpired(workflow.merchantId(), workflow.id(), now);
     }
 
     static boolean isPastDeadline(Instant now, Instant dueAt) {

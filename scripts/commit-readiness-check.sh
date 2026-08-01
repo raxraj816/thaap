@@ -127,6 +127,12 @@ if [[ "$invariant_matrix" == *"CHAPTER_43_INVARIANT_PROOF_MATRIX.md" \
   scripts/phase-closure-check.py
 fi
 
+if [[ "$invariant_matrix" == *"CHAPTER_52_INVARIANT_PROOF_MATRIX.md" ]]; then
+  echo
+  echo "Checking every inherited Phase 5 chapter closure..."
+  scripts/phase-closure-check.py --phase-5
+fi
+
 if [[ "$invariant_matrix" == *"CHAPTER_21_INVARIANT_PROOF_MATRIX.md" ]]; then
   echo
   echo "Checking five independent Chapter 21 state-machine reviews..."

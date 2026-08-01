@@ -161,6 +161,22 @@ class PaymentIntentCancelVoidContractTests {
         assertThat(authorization.get("authorizationVoidStatus").asText()).isEqualTo("RECORDED");
         assertThat(authorization.get("authorizationVoidReason").asText()).isEqualTo("MERCHANT_CANCELED");
         assertThat(authorization.get("voidedAt").asText()).isNotBlank();
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT event_type FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                ORDER BY stream_version
+                """, String.class, paymentIntentId)).containsExactly(
+                        "payment_intent.created", "fraud_decision.created",
+                        "authorization.created", "payment_attempt.completed",
+                        "authorization.voided", "payment_intent.canceled");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT causation_event_id = (
+                    SELECT id FROM domain_events
+                    WHERE stream_id = ? AND event_type = 'authorization.voided'
+                )
+                FROM domain_events
+                WHERE stream_id = ? AND event_type = 'payment_intent.canceled'
+                """, Boolean.class, paymentIntentId, paymentIntentId)).isTrue();
 
         mockMvc.perform(post("/payment_intents/{id}/capture", paymentIntentId)
                         .header(API_KEY, merchant.apiKey())

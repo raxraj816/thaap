@@ -15,6 +15,7 @@ import com.thaap.payments.paymentattempt.PaymentAttemptStatus;
 import com.thaap.payments.review.ManualReviewCase;
 import com.thaap.payments.review.ManualReviewCaseRepository;
 import com.thaap.payments.review.ReviewStage;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
@@ -38,6 +39,7 @@ public class PostAuthorizationSignalService {
     private final AuditLogService auditLogService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final PostAuthorizationSignalMetrics metrics;
+    private final RiskOperationsEventProducer eventProducer;
     private final Clock clock;
 
     public PostAuthorizationSignalService(MerchantRepository merchantRepository,
@@ -45,7 +47,8 @@ public class PostAuthorizationSignalService {
             FraudDecisionRepository fraudDecisionRepository,
             PostAuthorizationSignalRepository signalRepository,
             ManualReviewCaseRepository reviewCaseRepository, AuditLogService auditLogService,
-            WebhookDeliveryService webhookDeliveryService, PostAuthorizationSignalMetrics metrics, Clock clock) {
+            WebhookDeliveryService webhookDeliveryService, PostAuthorizationSignalMetrics metrics,
+            RiskOperationsEventProducer eventProducer, Clock clock) {
         this.merchantRepository = merchantRepository;
         this.paymentIntentRepository = paymentIntentRepository;
         this.authorizationRepository = authorizationRepository;
@@ -55,6 +58,7 @@ public class PostAuthorizationSignalService {
         this.auditLogService = auditLogService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.metrics = metrics;
+        this.eventProducer = eventProducer;
         this.clock = clock;
     }
 
@@ -125,12 +129,19 @@ public class PostAuthorizationSignalService {
                 authorization.getPaymentAttemptId(), authorization.getId(), decision.getId(),
                 request.recommendation(), request.reasonCode(), paymentIntent.getTrafficOrigin(),
                 request.evidenceOccurredAt(), request.receivedAt(), now));
+        eventProducer.postAuthorizationSignalRecorded(context, paymentIntent.getId(), now,
+                requestId, "SIMULATOR_POST_AUTHORIZATION", request.recommendation().name(),
+                java.util.List.of(request.reasonCode().name()), paymentIntent.getTrafficOrigin());
         ManualReviewCase reviewCase = null;
         if (request.recommendation() == PostAuthorizationSignalRecommendation.REVIEW) {
             reviewCase = reviewCaseRepository.findByPaymentIntentIdAndMerchantIdAndReviewStage(
                     paymentIntent.getId(), context.merchantId(), ReviewStage.POST_AUTHORIZATION).orElse(null);
             if (reviewCase == null) {
                 reviewCase = reviewCaseRepository.saveAndFlush(new ManualReviewCase(signal, decision));
+                eventProducer.manualReviewOpenedBySystem(context.merchantId(), paymentIntent.getId(),
+                        now, requestId, paymentIntent.getTrafficOrigin(), "POST_AUTHORIZATION",
+                        decision.getReasonCodes().stream()
+                                .map(Enum::name).toList());
                 webhookDeliveryService.createDeliveriesInCurrentTransaction(context.merchantId(),
                         "fraud_review.opened", reviewCase.getId(), paymentIntent.getTrafficOrigin());
             }

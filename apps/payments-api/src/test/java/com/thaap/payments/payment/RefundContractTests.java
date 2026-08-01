@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -121,6 +122,17 @@ class RefundContractTests {
         assertThat(countRows("refunds")).isEqualTo(1);
         assertThat(countLedgerEntries("REFUND")).isEqualTo(2);
         assertThat(countAuditLogs("refund.created")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM domain_events
+                WHERE stream_type = 'PAYMENT' AND stream_id = ?
+                """, Integer.class, paymentIntentId)).isEqualTo(6);
+        byte[] refundPayload = jdbcTemplate.queryForObject("""
+                SELECT payload_bytes FROM domain_events
+                WHERE stream_id = ? AND event_type = 'refund.created'
+                """, byte[].class, paymentIntentId);
+        assertThat(new String(refundPayload, StandardCharsets.UTF_8)).isEqualTo(
+                "{\"amountMinor\":5100,\"currency\":\"USD\","
+                        + "\"reasonCode\":\"MERCHANT_REQUESTED\"}");
     }
 
     @Test

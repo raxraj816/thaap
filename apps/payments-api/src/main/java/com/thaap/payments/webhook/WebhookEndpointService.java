@@ -1,6 +1,7 @@
 package com.thaap.payments.webhook;
 
 import com.thaap.payments.audit.AuditLogService;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +49,7 @@ public class WebhookEndpointService {
     private final TransactionTemplate creationTransaction;
     private final TransactionTemplate reservationTransaction;
     private final Duration secretRotationGrace;
+    private final RiskOperationsEventProducer eventProducer;
 
     public WebhookEndpointService(WebhookEndpointRepository endpointRepository,
             WebhookEndpointCreationRecordRepository creationRecordRepository,
@@ -57,7 +59,8 @@ public class WebhookEndpointService {
             WebhookSecretCipher secretCipher, AuditLogService auditLogService,
             WebhookMetrics metrics, Clock clock, SensitiveValueHasher sensitiveValueHasher,
             PlatformTransactionManager transactionManager,
-            @Value("${thaap.webhook.secret-rotation-grace:15m}") Duration secretRotationGrace) {
+            @Value("${thaap.webhook.secret-rotation-grace:15m}") Duration secretRotationGrace,
+            RiskOperationsEventProducer eventProducer) {
         if (secretRotationGrace.isZero() || secretRotationGrace.isNegative()) {
             throw new IllegalArgumentException("Webhook secret rotation grace must be positive");
         }
@@ -75,6 +78,7 @@ public class WebhookEndpointService {
         this.reservationTransaction = new TransactionTemplate(transactionManager);
         this.reservationTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.secretRotationGrace = secretRotationGrace;
+        this.eventProducer = eventProducer;
     }
 
     public EndpointSecretResult create(MerchantContext merchantContext, String idempotencyKey,
@@ -376,6 +380,8 @@ public class WebhookEndpointService {
                 rawSecret, merchantContext.merchantId(), endpointId);
         endpoint.rotateSecret(rawSecret, encryptedSecret, rotatedAt,
                 rotatedAt.plus(secretRotationGrace));
+        eventProducer.webhookEndpointSecretRotated(merchantContext, endpointId, rotatedAt,
+                requestId, endpoint.getSigningSecretGeneration());
         Set<String> enabledEvents = subscriptionStore.findWireValues(merchantContext.merchantId(), endpointId);
 
         Map<String, Object> before = new LinkedHashMap<>();
@@ -393,20 +399,35 @@ public class WebhookEndpointService {
         WebhookEndpointStatus beforeStatus = endpoint.getOperationalStatus();
         Set<String> enabledEvents = subscriptionStore.findWireValues(
                 merchantContext.merchantId(), endpointId);
+        if (beforeStatus == WebhookEndpointStatus.DISABLED) {
+            return new EndpointStateResult(endpoint, enabledEvents);
+        }
+        Instant disabledAt = clock.instant();
         endpoint.disable();
         endpointRepository.flush();
+        eventProducer.webhookEndpointDisabled(merchantContext, endpointId, disabledAt,
+                requestId, "MERCHANT_DISABLED");
+        List<WebhookDeliveryStatus> queuedStatuses = List.of(
+                WebhookDeliveryStatus.PENDING, WebhookDeliveryStatus.RETRY_SCHEDULED);
+        List<WebhookDelivery> queuedDeliveries = deliveryRepository.findQueuedForEndpointForUpdate(
+                merchantContext.merchantId(), endpointId, queuedStatuses);
         List<DisableMetricObservation> disabledDeliveries = new ArrayList<>();
         int queuedDeliveriesExhausted = 0;
         for (WebhookEventType eventType : WebhookEventType.values()) {
             int eventTypeExhausted = deliveryRepository.exhaustQueuedForDisabledEndpointByEventType(
                     merchantContext.merchantId(), endpointId, eventType.wireValue(),
-                    List.of(WebhookDeliveryStatus.PENDING, WebhookDeliveryStatus.RETRY_SCHEDULED),
+                    queuedStatuses,
                     WebhookDeliveryStatus.EXHAUSTED, WebhookDeliveryErrorCode.ENDPOINT_DISABLED);
             queuedDeliveriesExhausted += eventTypeExhausted;
             if (eventTypeExhausted > 0) {
                 disabledDeliveries.add(new DisableMetricObservation(
                         eventType.wireValue(), eventTypeExhausted));
             }
+        }
+        for (WebhookDelivery delivery : queuedDeliveries) {
+            eventProducer.webhookDeliveryExhausted(merchantContext.merchantId(), endpointId,
+                    disabledAt, delivery.getDeliveryGeneration(), delivery.getAttemptCount(),
+                    WebhookDeliveryErrorCode.ENDPOINT_DISABLED.name());
         }
 
         auditLogService.recordMerchantApiAction(merchantContext, requestId, "webhook_endpoint.disabled",

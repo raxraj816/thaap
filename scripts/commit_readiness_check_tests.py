@@ -68,6 +68,50 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.assertTrue(python_marker.is_file())
             self.assertTrue(vision_marker.is_file())
 
+    def test_chapter_52_runs_phase_5_aggregate_closure(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = pathlib.Path(temporary_directory)
+            self.create_required_files(root)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            phase_marker = root / "phase-5-ran"
+            self.write_executable(fake_bin / "git", "#!/usr/bin/env bash\nexit 0\n")
+            self.write_executable(fake_bin / "rg", "#!/usr/bin/env bash\nexit 1\n")
+            for checker in (
+                    "technical-debt-check.py",
+                    "vision-coverage-check.py",
+                    "escaped-review-check.py",
+                    "executable-artifact-naming-check.py",
+                    "invariant-proof-check.py",
+                    "chapter-closure-check.py",
+                    "learning-day-check.sh"):
+                self.write_executable(
+                    root / "scripts" / checker,
+                    "#!/usr/bin/env bash\nexit 0\n")
+            self.write_executable(
+                root / "scripts" / "phase-closure-check.py",
+                "#!/usr/bin/env bash\n"
+                "[[ \"$#\" -eq 1 && \"$1\" == \"--phase-5\" ]] || exit 7\n"
+                f"touch '{phase_marker}'\n")
+
+            environment = os.environ.copy()
+            environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
+            result = subprocess.run(
+                [
+                    str(SCRIPT_PATH),
+                    "2026-07-27",
+                    "--invariant-matrix=docs/reviews/CHAPTER_52_INVARIANT_PROOF_MATRIX.md",
+                    "--closure-dossier=docs/reviews/CHAPTER_52_CLOSURE_DOSSIER.md",
+                ],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertTrue(phase_marker.is_file())
+
     def create_required_files(self, root: pathlib.Path):
         for relative_path in (
                 "README.md",

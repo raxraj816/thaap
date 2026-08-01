@@ -1,6 +1,7 @@
 package com.thaap.payments.audit;
 
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.platform.PlatformOperatorContext;
 import com.thaap.payments.risk.RiskOperatorContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,6 +44,36 @@ public class AuditLogService {
         try {
             auditLogRepository.save(new AuditLog(operatorContext.merchantId(), AuditActorType.RISK_OPERATOR,
                     operatorContext.operatorCode(), action, aggregateType, aggregateId, requestId, null, reason,
+                    AuditSanitizer.sanitize(before), AuditSanitizer.sanitize(after)));
+            registerCompletionCounters();
+        } catch (RuntimeException exception) {
+            auditLogsFailedCounter.increment();
+            throw exception;
+        }
+    }
+
+    public void recordPlatformOperatorAction(PlatformOperatorContext operatorContext,
+            String requestId, String action, String aggregateType, UUID aggregateId,
+            String reason, Map<String, Object> before, Map<String, Object> after) {
+        recordPlatformAction(AuditActorType.PLATFORM_OPERATOR,
+                operatorContext.operatorCode(), requestId, action, aggregateType,
+                aggregateId, reason, before, after);
+    }
+
+    public void recordPlatformBootstrapAction(String requestId, String action,
+            String aggregateType, UUID aggregateId, String reason,
+            Map<String, Object> before, Map<String, Object> after) {
+        recordPlatformAction(AuditActorType.PLATFORM_BOOTSTRAP,
+                "platform-bootstrap", requestId, action, aggregateType,
+                aggregateId, reason, before, after);
+    }
+
+    private void recordPlatformAction(AuditActorType actorType, String actorId,
+            String requestId, String action, String aggregateType, UUID aggregateId,
+            String reason, Map<String, Object> before, Map<String, Object> after) {
+        try {
+            auditLogRepository.save(new AuditLog(null, actorType, actorId, action,
+                    aggregateType, aggregateId, requestId, null, reason,
                     AuditSanitizer.sanitize(before), AuditSanitizer.sanitize(after)));
             registerCompletionCounters();
         } catch (RuntimeException exception) {

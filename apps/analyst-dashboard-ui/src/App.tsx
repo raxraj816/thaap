@@ -18,6 +18,12 @@ import {
   WebhookVerification,
   MonitoringSummary,
   MonitoringCohort,
+  AnalyticsFreshness,
+  PaymentRiskAnalyticsPage,
+  PaymentRiskAnalyticsDetail,
+  MerchantRiskSummary,
+  MerchantRiskTimeSeries,
+  ProjectionAnalyticsStatus,
   OperatorSession,
   createNote,
   createSimulation,
@@ -46,6 +52,11 @@ import {
   getOperatorSession,
   getMonitoringSummary,
   getMonitoringCohort,
+  getPaymentRiskAnalytics,
+  getPaymentRiskAnalyticsDetail,
+  getMerchantRiskAnalyticsSummary,
+  getMerchantRiskAnalyticsTimeSeries,
+  getProjectionAnalyticsStatus,
   verifyWebhookEndpoint,
 } from "./api";
 
@@ -82,6 +93,15 @@ export function App() {
   const [monitoring, setMonitoring] = useState<MonitoringSummary | null>(null);
   const [monitoringCohort, setMonitoringCohort] = useState<MonitoringCohort | null>(null);
   const [monitoringIncludesSynthetic, setMonitoringIncludesSynthetic] = useState(false);
+  const [analyticsPayments, setAnalyticsPayments] = useState<PaymentRiskAnalyticsPage | null>(null);
+  const [analyticsPaymentDetail, setAnalyticsPaymentDetail] =
+    useState<PaymentRiskAnalyticsDetail | null>(null);
+  const [analyticsSummary, setAnalyticsSummary] = useState<MerchantRiskSummary | null>(null);
+  const [analyticsTimeSeries, setAnalyticsTimeSeries] = useState<MerchantRiskTimeSeries | null>(null);
+  const [analyticsProjectionStatus, setAnalyticsProjectionStatus] =
+    useState<ProjectionAnalyticsStatus | null>(null);
+  const [analyticsOriginPolicy, setAnalyticsOriginPolicy] =
+    useState<AnalyticsFreshness["trafficOriginPolicy"]>("ALL");
   const [developerApiKey, setDeveloperApiKey] = useState("");
   const [scenarioRunnerToken, setScenarioRunnerToken] = useState("");
   const [scenarioSeed, setScenarioSeed] = useState("merchant-quickstart");
@@ -246,6 +266,65 @@ export function App() {
     if (!monitoring) return;
     await run(async () => setMonitoringCohort(await getMonitoringCohort(
       credential, metricCode, monitoring)));
+  }
+
+  async function loadAnalytics(originPolicy = analyticsOriginPolicy) {
+    await run(async () => {
+      const [payments, summary, timeSeries, projectionStatus] = await Promise.all([
+        getPaymentRiskAnalytics(credential),
+        getMerchantRiskAnalyticsSummary(credential, originPolicy),
+        getMerchantRiskAnalyticsTimeSeries(credential, originPolicy),
+        getProjectionAnalyticsStatus(credential),
+      ]);
+      setAnalyticsPayments(payments);
+      setAnalyticsSummary(summary);
+      setAnalyticsTimeSeries(timeSeries);
+      setAnalyticsProjectionStatus(projectionStatus);
+      setAnalyticsPaymentDetail(null);
+    });
+  }
+
+  async function loadMoreAnalytics(cursor: string) {
+    await run(async () => {
+      const next = await getPaymentRiskAnalytics(credential, cursor);
+      setAnalyticsPayments((current) => current === null ? next : {
+        ...next, data: [...current.data, ...next.data],
+      });
+    });
+  }
+
+  async function loadMoreAnalyticsSummary(cursor: string) {
+    await run(async () => {
+      const next = await getMerchantRiskAnalyticsSummary(
+        credential, analyticsOriginPolicy, cursor);
+      setAnalyticsSummary((current) => current === null ? next : {
+        ...next, currencies: [...current.currencies, ...next.currencies],
+      });
+    });
+  }
+
+  async function loadMoreAnalyticsTimeSeries(cursor: string) {
+    await run(async () => {
+      const next = await getMerchantRiskAnalyticsTimeSeries(
+        credential, analyticsOriginPolicy, cursor);
+      setAnalyticsTimeSeries((current) => current === null ? next : {
+        ...next, points: [...current.points, ...next.points],
+      });
+    });
+  }
+
+  async function loadMoreProjectionHistory(cursor: string) {
+    await run(async () => {
+      const next = await getProjectionAnalyticsStatus(credential, cursor);
+      setAnalyticsProjectionStatus((current) => current === null ? next : {
+        ...next, generations: [...current.generations, ...next.generations],
+      });
+    });
+  }
+
+  async function openAnalyticsPayment(paymentIntentId: string) {
+    await run(async () => setAnalyticsPaymentDetail(
+      await getPaymentRiskAnalyticsDetail(credential, paymentIntentId)));
   }
 
   async function refreshQueue(cursor?: string) {
@@ -445,6 +524,12 @@ export function App() {
     setOperatorSession(null);
     setMonitoring(null);
     setMonitoringCohort(null);
+    setAnalyticsPayments(null);
+    setAnalyticsPaymentDetail(null);
+    setAnalyticsSummary(null);
+    setAnalyticsTimeSeries(null);
+    setAnalyticsProjectionStatus(null);
+    setAnalyticsOriginPolicy("ALL");
     setSliceFailures({});
     queryClient.clear();
     setNotice({ kind: "success", message: "Workspace credential cleared from memory." });
@@ -685,6 +770,149 @@ export function App() {
             </div>}
           </section>
 
+          <section className="card analytics-panel" aria-labelledby="analytics-heading">
+            <div className="section-heading">
+              <div><span className="section-index">05 / ANALYTICS</span>
+                <h2 id="analytics-heading">Event-derived risk analytics</h2></div>
+              <p>Generation-qualified read models · UTC intervals · explicit coverage</p>
+            </div>
+            <div className="analytics-actions">
+              <label htmlFor="analytics-origin">Traffic origin</label>
+              <select id="analytics-origin" value={analyticsOriginPolicy}
+                onChange={(event) => {
+                  const policy = event.target.value as AnalyticsFreshness["trafficOriginPolicy"];
+                  setAnalyticsOriginPolicy(policy);
+                  void loadAnalytics(policy);
+                }}>
+                <option value="ALL">All trusted origins</option>
+                <option value="LIVE_ONLY">Merchant API only</option>
+                <option value="SYNTHETIC_ONLY">Synthetic scenarios only</option>
+              </select>
+              <button className="secondary" disabled={busy}
+                onClick={() => void loadAnalytics()}>Load analytics</button>
+            </div>
+            {!analyticsPayments && <p className="muted" role="status">
+              Load the bounded analytics view when payment-risk investigation is needed.
+            </p>}
+            {analyticsPayments && <>
+              <FreshnessBanner label="Payment-risk projection"
+                freshness={analyticsPayments.freshness} />
+              {isNumericAnalyticsState(analyticsPayments.freshness)
+                && analyticsPayments.data.length === 0
+                && <p className="muted">No payment rows match this bounded view.</p>}
+              {isNumericAnalyticsState(analyticsPayments.freshness)
+                && analyticsPayments.data.length > 0 && <div className="table-wrap">
+                  <table><thead><tr><th>Payment</th><th>Decision</th><th>Risk</th>
+                    <th>Outcome</th><th>Money</th><th>Coverage</th></tr></thead>
+                    <tbody>{analyticsPayments.data.map((payment) => <tr
+                      key={payment.paymentIntentId}>
+                      <td><button className="row-link"
+                        onClick={() => void openAnalyticsPayment(payment.paymentIntentId)}>
+                        {payment.paymentIntentId}</button><small>
+                          {payment.trafficOrigin?.replaceAll("_", " ") ?? "Origin unavailable"}
+                        </small></td>
+                      <td>{payment.fraudAction?.replaceAll("_", " ") ?? "Not decided"}</td>
+                      <td>{payment.riskLevel ?? "Not scored"}
+                        {payment.riskScoreBasisPoints === null ? ""
+                          : ` · ${formatRiskScoreBasisPoints(payment.riskScoreBasisPoints)}`}</td>
+                      <td>{payment.attemptOutcome?.replaceAll("_", " ")
+                        ?? payment.lifecycleStatus.replaceAll("_", " ")}</td>
+                      <td>{payment.intentAmountMinor === null || payment.currency === null
+                        ? "Not available" : formatMinor(payment.intentAmountMinor, payment.currency)}</td>
+                      <td><span className={`pill ${payment.coverageStatus === "COMPLETE" ? "ok" : "danger"}`}>
+                        {payment.coverageStatus}</span></td>
+                    </tr>)}</tbody></table>
+                </div>}
+              {analyticsPayments.nextCursor && isNumericAnalyticsState(analyticsPayments.freshness)
+                && <button className="secondary load-more" disabled={busy}
+                  onClick={() => void loadMoreAnalytics(analyticsPayments.nextCursor!)}>
+                  Load next analytics page</button>}
+            </>}
+
+            {analyticsPaymentDetail && <article className="analytics-detail" aria-live="polite">
+              <div><h3>Payment explanation</h3>
+                <button className="quiet" onClick={() => setAnalyticsPaymentDetail(null)}>
+                  Close detail</button></div>
+              <FreshnessBanner label="Payment detail"
+                freshness={analyticsPaymentDetail.freshness} />
+              {isNumericAnalyticsState(analyticsPaymentDetail.freshness) && <dl>
+                <dt>Payment</dt><dd>{analyticsPaymentDetail.data.paymentIntentId}</dd>
+                <dt>Decision</dt><dd>{analyticsPaymentDetail.data.fraudAction ?? "Not decided"}</dd>
+                <dt>Reasons</dt><dd>{analyticsPaymentDetail.data.reasonCodesJson ?? "Not available"}</dd>
+                <dt>Ruleset</dt><dd>{analyticsPaymentDetail.data.rulesetVersion ?? "Not available"}</dd>
+                <dt>Fraud decision</dt><dd>{analyticsPaymentDetail.data.fraudDecisionId
+                  ?? "Exact lineage unavailable"}</dd>
+                <dt>Feature snapshot</dt><dd>{analyticsPaymentDetail.data.featureSnapshotId
+                  ?? "Exact lineage unavailable"}</dd>
+                <dt>Review</dt><dd>{analyticsPaymentDetail.data.reviewStatus ?? "Not opened"}</dd>
+                <dt>Label</dt><dd>{analyticsPaymentDetail.data.labelValue ?? "Unlabelled"}</dd>
+                <dt>Source position</dt><dd>v{analyticsPaymentDetail.data.lastStreamVersion}
+                  {` · ${new Date(analyticsPaymentDetail.data.lastEventRecordedAt).toISOString()}`}</dd>
+              </dl>}
+            </article>}
+
+            {analyticsSummary && <div className="analytics-grid">
+              <article className="analytics-card">
+                <h3>Merchant summary</h3>
+                <FreshnessBanner label="Merchant-risk projection"
+                  freshness={analyticsSummary.freshness} />
+                {isNumericAnalyticsState(analyticsSummary.freshness)
+                  && analyticsSummary.currencies.length > 0 && <div className="table-wrap">
+                    <table><thead><tr><th>Currency</th><th>Payments</th><th>Declines</th>
+                      <th>Reviews</th><th>Fraud</th><th>Captured</th></tr></thead>
+                      <tbody>{analyticsSummary.currencies.map((summary) => <tr key={summary.currency}>
+                        <td>{summary.currency}</td><td>{summary.paymentCount}</td>
+                        <td>{summary.declineCount}</td><td>{summary.reviewCount}</td>
+                        <td>{summary.confirmedFraudCount}</td>
+                        <td>{formatMinor(summary.capturedAmountMinor, summary.currency)}</td>
+                      </tr>)}</tbody></table>
+                  </div>}
+                {analyticsSummary.nextCursor && isNumericAnalyticsState(analyticsSummary.freshness)
+                  && <button className="secondary load-more" disabled={busy}
+                    onClick={() => void loadMoreAnalyticsSummary(analyticsSummary.nextCursor!)}>
+                    Load more currencies</button>}
+              </article>
+              <article className="analytics-card">
+                <h3>Hourly trend</h3>
+                {analyticsTimeSeries && <FreshnessBanner label="Time series"
+                  freshness={analyticsTimeSeries.freshness} />}
+                {analyticsTimeSeries && isNumericAnalyticsState(analyticsTimeSeries.freshness)
+                  && analyticsTimeSeries.points.length > 0 && <div className="table-wrap">
+                    <table><thead><tr><th>UTC interval</th><th>Currency</th>
+                      <th>Attempts</th><th>Declines</th><th>Unknown</th></tr></thead>
+                      <tbody>{analyticsTimeSeries.points.map((point) => <tr
+                        key={`${point.intervalStart}-${point.currency}`}>
+                        <td>{new Date(point.intervalStart).toISOString()}</td>
+                        <td>{point.currency}</td><td>{point.attemptCount}</td>
+                        <td>{point.declineCount}</td><td>{point.unknownOutcomeCount}</td>
+                      </tr>)}</tbody></table>
+                  </div>}
+                {analyticsTimeSeries?.nextCursor
+                  && isNumericAnalyticsState(analyticsTimeSeries.freshness)
+                  && <button className="secondary load-more" disabled={busy}
+                    onClick={() => void loadMoreAnalyticsTimeSeries(
+                      analyticsTimeSeries.nextCursor!)}>Load more intervals</button>}
+              </article>
+            </div>}
+
+            {analyticsProjectionStatus && <article className="projection-history">
+              <h3>Projection generation history</h3>
+              <div className="table-wrap"><table><thead><tr><th>Projection</th>
+                <th>Generation</th><th>Source</th><th>Status</th><th>Activated</th></tr></thead>
+                <tbody>{analyticsProjectionStatus.generations.map((generation) => <tr
+                  key={generation.generationId}>
+                  <td>{generation.projectionName}</td><td>{generation.generationNumber}</td>
+                  <td>{generation.buildSource}</td><td>{generation.lifecycleStatus}</td>
+                  <td>{generation.activatedAt
+                    ? new Date(generation.activatedAt).toISOString() : "Not activated"}</td>
+                </tr>)}</tbody></table></div>
+              {analyticsProjectionStatus.nextCursor
+                && <button className="secondary load-more" disabled={busy}
+                  onClick={() => void loadMoreProjectionHistory(
+                    analyticsProjectionStatus.nextCursor!)}>Load more generations</button>}
+            </article>}
+          </section>
+
           <aside className="card detail-panel" aria-labelledby="detail-heading">
             <span className="section-index">03 / CASE</span>
             {!selected ? <div className="empty-state"><h2 id="detail-heading">
@@ -840,6 +1068,45 @@ export function App() {
       )}
     </div>
   );
+}
+
+function isNumericAnalyticsState(freshness: AnalyticsFreshness): boolean {
+  return freshness.state === "FRESH" || freshness.state === "LAGGING";
+}
+
+function FreshnessBanner({ label, freshness }: {
+  label: string; freshness: AnalyticsFreshness;
+}) {
+  const stateCopy: Record<AnalyticsFreshness["state"], string> = {
+    FRESH: "Complete through the latest checkpoint.",
+    LAGGING: "Complete, but processing is more than 60 seconds behind.",
+    STALE: "Complete checkpoint evidence is older than five minutes; totals are withheld.",
+    EMPTY: "No eligible events exist at the declared source cutoff; no numeric zero is inferred.",
+    PARTIAL: "Held, quarantined, or uncovered input exists; incomplete totals are withheld.",
+    UNAVAILABLE: "Projection or checkpoint truth cannot be established; retry safely.",
+  };
+  return <div className={`freshness-banner freshness-${freshness.state.toLowerCase()}`}
+    role={isNumericAnalyticsState(freshness) ? "status" : "alert"}>
+    <div><strong>{label}</strong><span className={`pill ${freshness.state === "FRESH" ? "ok" : "danger"}`}>
+      {freshness.state}</span></div>
+    <p>{stateCopy[freshness.state]}</p>
+    <p className="muted">Generation {freshness.generationNumber} · origin {freshness.trafficOriginPolicy}
+      {freshness.sourceCutoff ? ` · cutoff ${new Date(freshness.sourceCutoff).toISOString()}` : " · no source cutoff"}
+      {freshness.lastProcessingTime
+        ? ` · processed ${new Date(freshness.lastProcessingTime).toISOString()}`
+        : " · no processing checkpoint"}</p>
+    {isNumericAnalyticsState(freshness) && <p className="freshness-counts">
+      {freshness.appliedEventCount} applied of {freshness.eligibleEventCount} eligible events
+    </p>}
+  </div>;
+}
+
+function formatMinor(amountMinor: number, currency: string): string {
+  return `${currency} ${(amountMinor / 100).toFixed(2)}`;
+}
+
+function formatRiskScoreBasisPoints(riskScoreBasisPoints: number): string {
+  return `${(riskScoreBasisPoints / 100).toFixed(2)}%`;
 }
 
 function workspaceSliceLabel(slice: WorkspaceSlice): string {

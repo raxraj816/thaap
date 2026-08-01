@@ -28,7 +28,7 @@ public class AuditLog {
     @Id
     private UUID id;
 
-    @Column(name = "merchant_id", nullable = false)
+    @Column(name = "merchant_id")
     private UUID merchantId;
 
     @Enumerated(EnumType.STRING)

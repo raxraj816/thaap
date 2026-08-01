@@ -1248,3 +1248,156 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Client failure inventories must include mixed dependency outcomes, not only all-success and all-failure partitions.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-07-27
+
+## ER-0074
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 49
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 live PostgreSQL analytics demo after Chapter 49 verification
+- Invariant: Every frozen analytics route executes on PostgreSQL with explicit timestamp result and parameter types, including freshness, ranges, and opaque cursor continuation.
+- Finding: Merchant summary returned HTTP 500 because Spring JDBC could neither infer `Instant` query-parameter types nor map `timestamptz` scalar results directly to `Instant`; the H2 contracts and PostgreSQL `EXPLAIN` proof did not execute the public query path.
+- Why prior review missed it: Production-dialect proof stopped at the range query plan and consumer postconditions, while endpoint behavior was exercised only against H2 and mocked browser responses.
+- Resolution evidence: `RiskAnalyticsService` now binds range/cursor instants as `Timestamp` and maps freshness scalars through `JdbcTime`. `ProjectionConsumerKafkaPostgreSqlTests.PostgreSqlRangeQueryUsesTenantGenerationIntervalIndex` executes summary, time series, freshness, and second-page cursor paths on PostgreSQL 16.14; the live public demo passed the same summary/time-series routes.
+- Process correction: Every JDBC-backed public analytics route must execute at least one value-bearing and one continuation/range partition on the production database; a query plan alone cannot certify driver conversion boundaries.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0075
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 49
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 live full-stream projection and shadow-rebuild demo after Chapters 49–50 verification
+- Invariant: Canonical fraud-score units and bounds are identical across producer, event schema, live projection, shadow rebuild, migration constraints, and analyst output.
+- Finding: The producer intentionally emitted `riskScore=500` basis points for a 5% score, but V70 restricted projection scores to `0..100`; live consumption quarantined the decision and a shadow rebuild failed before its first chunk.
+- Why prior review missed it: Projection and rebuild fixtures used only intent-created events or synthetic scores within 100, so no real confirm-flow fraud decision crossed the migration constraint during production-database proof. The demo initially accepted stream version 1 instead of requiring the complete five-event stream.
+- Resolution evidence: Forward migration V82 aligns the projection constraint to the canonical `0..10000` basis-point domain. `basisPointRiskScoreRebuildsWithoutWeakeningProjectionBounds` passes on H2 and PostgreSQL with 500 accepted, 10001 rejected, full shadow build, and reconciliation; the public demo now waits for stream version 5 and passed with 10/10 applied events.
+- Process correction: Numeric representation reviews must state unit, scale, valid partitions, and constraint bounds end to end; rebuild fixtures must include a production-shaped confirm stream rather than only the first event.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0076
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 52
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 public demo execution after integrated closure documentation
+- Invariant: The advertised public demo uses the shipped API/database contracts and fails unless every durable event-to-dataset hop is present.
+- Finding: The client expected replay fields `id`/`COMPLETED` instead of `datasetId`/`SUCCEEDED`, joined publication attempts through a nonexistent column, queried inbox status `COMPLETED` instead of `APPLIED`, and asserted only reconciliation/dataset counts, allowing a zero inbox count to appear in a nominal pass.
+- Why prior review missed it: Five safety tests covered loopback, subprocess, mutation, and broker restoration boundaries but never ran the client against the real API and schema before the dossier recommended merge.
+- Resolution evidence: The client now validates `datasetId`, waits for `SUCCEEDED`, uses the tenant-qualified attempt-to-event join, requires durable tuple `10|>=10|10|5|1`, and has seven unit tests. The fresh V1→V82 live run passed Kafka outage/restart, FRESH analytics, rebuild/reconcile/activate/rollback, dataset success, unchanged source fingerprint, and exact durable evidence `10|10|10|5|1`.
+- Process correction: A public-demo completion claim requires one fresh live execution before matrix verification, plus contract tests for response identifiers, lifecycle values, schema joins, and every asserted tuple field.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0077
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 49
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end analyst-output review after Chapter 49 verification
+- Invariant: A fraud score has one canonical basis-point representation in storage and APIs and is rendered to a human as a percentage with an explicit unit.
+- Finding: The analytics API correctly returned basis points, but the analyst cockpit rendered the raw integer, so a score of `8700` appeared as `8700` instead of `87.00%`.
+- Why prior review missed it: The score-unit family stopped at producer, migration, projection, and response JSON; browser contracts asserted presence without asserting the human-visible conversion and label.
+- Resolution evidence: The cockpit now renders `riskScoreBasisPoints / 100` with two decimal places and a percent sign. `App.test.tsx` proves `8700` renders as `87.00%`, while the API type keeps the basis-point name and the 22-test UI suite and production build pass.
+- Process correction: Every numeric representation review must close both machine and human boundaries with unit-bearing names, conversion rules, and exact rendered-value assertions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0078
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 51
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end replay-lineage review after Chapters 49 and 51 verification
+- Invariant: Every projected and replayed fraud result is traceable to the exact canonical event, fraud decision, feature snapshot, payment attempt, and payment stream; timestamps are not identities.
+- Finding: Fraud events carried decision and snapshot identifiers only inside payload bytes, projections did not retain them, and replay membership joined decisions by equal timestamps. Two decisions at the same database timestamp could select the wrong lineage, while a copied event could be linked to a decision from another payment stream.
+- Why prior review missed it: Fixtures happened to use distinct timestamps and same-payment lineage, so count/digest reconciliation looked correct without an exact relational identity or hostile timestamp-collision/cross-payment partition.
+- Resolution evidence: V83 adds immutable `domain_event_source_lineage`, exact projection identifiers, and tenant-composite foreign keys; V84 enforces event type and immutability on PostgreSQL; V85 binds the event stream through the decision's payment attempt to the exact feature snapshot. Publication writes the source link in the source transaction, projection and replay use the link, analytics expose the identifiers, and H2/PostgreSQL tests reject missing, mutated, non-fraud, and cross-payment links. `OfflineReplayDatasetIntegrationTests` proves two same-time decisions include only the exact linked identity.
+- Process correction: Event/replay traceability reviews must model timestamp collision and same-tenant cross-resource substitution; identity claims require immutable relational keys and production-database constraints, never equality of occurrence times.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0079
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 48
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end hostile event-payload review after Chapter 48 verification
+- Invariant: Canonical event validation rejects every semantic numeric, timestamp, and identifier value outside the consumer and persistence domains before a projection handler can narrow or parse it.
+- Finding: Schema validation accepted generic JSON integers and strings, while projection code used narrowing `intValue()` and direct timestamp/UUID parsing. Oversized numbers could wrap and malformed semantic values could escape the intended poison-event quarantine boundary.
+- Why prior review missed it: The schema family checked JSON shape and required fields but did not enumerate integer-width, non-negative, risk-score, microsecond-timestamp, and canonical-UUID partitions at the representation boundary.
+- Resolution evidence: `DomainEventFieldType`, the event catalogue, and `CanonicalEventCodec` now enforce safe integer widths, positive attempt numbers, `0..10000` basis points, exact database-microsecond instants, and canonical UUIDs. Projection parsing fails safely, missing exact lineage quarantines, and `CanonicalEventCodecTests.rejectsEverySemanticNumberTimestampAndIdentityBoundaryPartition` plus projection quarantine contracts pass.
+- Process correction: Canonical protocol reviews must freeze semantic value domains separately from JSON token types and prove below/min/exact/max/above, malformed, precision, and canonical-representation partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0080
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 49
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end analytics collection review after Chapter 49 verification
+- Invariant: Every bounded analytics collection is losslessly continuable with an opaque tenant- and query-bound cursor; neither API nor UI silently discards rows.
+- Finding: Payment search was paginated, but merchant summary, time series, and projection-generation history used fixed limits without continuation; the cockpit also sliced time-series results to the last 12 points.
+- Why prior review missed it: Cursor proof covered the named payment-search route and a PostgreSQL second page, but did not inventory every collection or the UI's post-fetch truncation.
+- Resolution evidence: Summary, time-series, and projection-status routes now use keyset pagination with signed cursors, `limit + 1`, and stable order tuples; cursor context binds tenant, route, range, interval, policy, and generations. The cockpit exposes load-more actions and no longer slices points. Analytics contracts traverse every page without gaps/duplicates and the UI test verifies all four continuation requests.
+- Process correction: API closure must enumerate every response collection and every client-side transformation; a maximum page size is not a bounded/lossless contract unless continuation and terminal-page behavior are proven.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0081
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 49
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end analytics range review after Chapter 49 verification
+- Invariant: Hourly and daily analytics ranges are UTC-aligned half-open intervals, explicit future bounds fail, and omitted defaults remain valid at every instant.
+- Finding: Arbitrary `from`/`to` instants were accepted, producing partial buckets that looked complete; after adding alignment, a naive default `to=now` would itself be unaligned or future-rejected.
+- Why prior review missed it: Tests covered range size and SQL execution but did not partition alignment, half-open boundaries, explicit versus server-default time, or the interval rollover edge.
+- Resolution evidence: Range validation requires UTC hour/day boundaries, rejects explicit future `to`, enforces positive intervals of at most 90 days, and creates an omitted `to` at the next server-owned interval boundary. `ProjectionConsumerAnalyticsContractTests.analyticsRangesAndEveryCollectionCursorAreClosedAndLossless` proves unaligned/future rejection and valid default/hour/day boundaries.
+- Process correction: Time-range reviews must freeze zone, granularity, inclusivity, alignment, explicit/default ownership, rollover, and future-clock policy as separate partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01
+
+## ER-0082
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 52
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-08-01
+- Escaped gate: Phase 5 end-to-end source-of-truth review after integrated closure
+- Invariant: The Phase 5 closure gate must reject completion when any mandatory architecture or product source still describes the phase as incomplete or contradicts the implemented ownership boundary.
+- Finding: The integrated gate checked selected READMEs/plans but omitted the data/events architecture source, which still described Phase 5 as future work while other sources declared completion.
+- Why prior review missed it: Governance proof verified artifact presence and a narrow stale-claim list instead of treating architecture as a mandatory completion source with case-insensitive contradiction checks.
+- Resolution evidence: `phase-closure-check.py` now requires the data/events architecture document and rejects stale claims case-insensitively; its test suite deletes and corrupts that source to prove fail-closed behavior. The architecture now records completed Phase 5 ownership, exact source lineage, and current event names.
+- Process correction: A completion gate must enumerate all normative source-of-truth documents and test omission plus case/wording variants of stale status, not rely on a hand-checked subset.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-01

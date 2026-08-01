@@ -2,6 +2,7 @@ package com.thaap.payments.riskpolicy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
+import com.thaap.payments.event.DomainEventType;
 import com.thaap.payments.fraud.FeatureCatalogue;
 import com.thaap.payments.fraud.FeatureDefinition;
 import com.thaap.payments.fraud.FeatureDefinitionRepository;
@@ -10,6 +11,7 @@ import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.payment.PaymentIntentController;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -46,16 +48,19 @@ public class MerchantRiskPolicyManagementService {
     private final MerchantRiskPolicyEvaluator evaluator;
     private final MerchantRiskPolicyMetrics metrics;
     private final AuditLogService auditLogService;
+    private final RiskOperationsEventProducer eventProducer;
     private final Clock clock;
 
     public MerchantRiskPolicyManagementService(JdbcTemplate jdbcTemplate,
             FeatureDefinitionRepository featureDefinitionRepository, MerchantRiskPolicyEvaluator evaluator,
-            MerchantRiskPolicyMetrics metrics, AuditLogService auditLogService, Clock clock) {
+            MerchantRiskPolicyMetrics metrics, AuditLogService auditLogService,
+            RiskOperationsEventProducer eventProducer, Clock clock) {
         this.jdbcTemplate = jdbcTemplate;
         this.featureDefinitionRepository = featureDefinitionRepository;
         this.evaluator = evaluator;
         this.metrics = metrics;
         this.auditLogService = auditLogService;
+        this.eventProducer = eventProducer;
         this.clock = clock;
     }
 
@@ -101,6 +106,7 @@ public class MerchantRiskPolicyManagementService {
         lockManager(context);
         ProfileView profile = requireProfile(context.merchantId(), profileId);
         MerchantRiskLifecycleState current = profile.state();
+        Instant now = clock.instant();
         String event;
         if (target == MerchantRiskLifecycleState.PENDING_APPROVAL
                 && current == MerchantRiskLifecycleState.DRAFT) {
@@ -114,7 +120,7 @@ public class MerchantRiskPolicyManagementService {
             event = "APPROVED";
         } else if (target == MerchantRiskLifecycleState.ACTIVE
                 && current == MerchantRiskLifecycleState.APPROVED) {
-            retireActiveProfile(context, profileId);
+            retireActiveProfile(context, profileId, now, requestId);
             event = "ACTIVATED";
         } else if (target == MerchantRiskLifecycleState.RETIRED
                 && current == MerchantRiskLifecycleState.ACTIVE) {
@@ -122,8 +128,16 @@ public class MerchantRiskPolicyManagementService {
         } else {
             throw conflict("Risk-profile lifecycle transition is invalid");
         }
-        Instant now = clock.instant();
         insertProfileEvent(context, profileId, event, now);
+        if ("ACTIVATED".equals(event)) {
+            eventProducer.riskControlChanged(context, profileId,
+                    DomainEventType.MERCHANT_RISK_PROFILE_ACTIVATED, now, requestId,
+                    profile.versionNumber(), "ACTIVE", profile.reasonCode().name());
+        } else if ("RETIRED".equals(event)) {
+            eventProducer.riskControlChanged(context, profileId,
+                    DomainEventType.MERCHANT_RISK_PROFILE_ROLLED_BACK, now, requestId,
+                    profile.versionNumber(), "RETIRED", profile.reasonCode().name());
+        }
         auditLogService.recordRiskOperatorAction(context, requestId,
                 "merchant_risk_profile." + event.toLowerCase(), "MerchantRiskProfile", profileId,
                 profile.reasonCode().name(), Map.of("state", current.name()), Map.of("state", target.name()));
@@ -226,6 +240,7 @@ public class MerchantRiskPolicyManagementService {
         lockManager(context);
         PolicyView policy = requirePolicy(context.merchantId(), policyId);
         MerchantRiskLifecycleState current = policy.state();
+        Instant now = clock.instant();
         String event;
         if (target == MerchantRiskLifecycleState.PENDING_APPROVAL
                 && current == MerchantRiskLifecycleState.DRAFT) {
@@ -242,7 +257,7 @@ public class MerchantRiskPolicyManagementService {
             event = "APPROVED";
         } else if (target == MerchantRiskLifecycleState.ACTIVE
                 && current == MerchantRiskLifecycleState.APPROVED) {
-            retireActivePolicy(context, policyId);
+            retireActivePolicy(context, policyId, now, requestId);
             event = "ACTIVATED";
         } else if (target == MerchantRiskLifecycleState.RETIRED
                 && current == MerchantRiskLifecycleState.ACTIVE) {
@@ -250,8 +265,16 @@ public class MerchantRiskPolicyManagementService {
         } else {
             throw conflict("Risk-policy lifecycle transition is invalid");
         }
-        Instant now = clock.instant();
         insertPolicyEvent(context, policyId, event, now);
+        if ("ACTIVATED".equals(event)) {
+            eventProducer.riskControlChanged(context, policyId,
+                    DomainEventType.RISK_POLICY_ACTIVATED, now, requestId,
+                    policy.versionNumber(), "ACTIVE", "MERCHANT_RISK_CHANGE");
+        } else if ("RETIRED".equals(event)) {
+            eventProducer.riskControlChanged(context, policyId,
+                    DomainEventType.RISK_POLICY_ROLLED_BACK, now, requestId,
+                    policy.versionNumber(), "RETIRED", "MERCHANT_RISK_CHANGE");
+        }
         auditLogService.recordRiskOperatorAction(context, requestId,
                 "merchant_risk_policy." + event.toLowerCase(), "MerchantRiskPolicy", policyId,
                 "MERCHANT_RISK_CHANGE", Map.of("state", current.name()), Map.of("state", target.name()));
@@ -328,25 +351,37 @@ public class MerchantRiskPolicyManagementService {
         }
     }
 
-    private void retireActiveProfile(RiskOperatorContext context, UUID targetId) {
+    private void retireActiveProfile(RiskOperatorContext context, UUID targetId,
+            Instant now, String requestId) {
         List<UUID> active = activeIds("merchant_risk_profile_versions", "merchant_risk_profile_events",
                 "profile_version_id", context.merchantId());
         if (active.size() > 1) {
             throw conflict("Merchant risk profile configuration is ambiguous");
         }
         if (!active.isEmpty() && !active.getFirst().equals(targetId)) {
-            insertProfileEvent(context, active.getFirst(), "RETIRED", clock.instant());
+            UUID retiredId = active.getFirst();
+            ProfileView retired = requireProfile(context.merchantId(), retiredId);
+            insertProfileEvent(context, retiredId, "RETIRED", now);
+            eventProducer.riskControlChanged(context, retiredId,
+                    DomainEventType.MERCHANT_RISK_PROFILE_ROLLED_BACK, now, requestId,
+                    retired.versionNumber(), "RETIRED", "SUPERSEDED_BY_ACTIVATION");
         }
     }
 
-    private void retireActivePolicy(RiskOperatorContext context, UUID targetId) {
+    private void retireActivePolicy(RiskOperatorContext context, UUID targetId,
+            Instant now, String requestId) {
         List<UUID> active = activeIds("merchant_risk_policy_versions", "merchant_risk_policy_events",
                 "policy_version_id", context.merchantId());
         if (active.size() > 1) {
             throw conflict("Merchant risk policy configuration is ambiguous");
         }
         if (!active.isEmpty() && !active.getFirst().equals(targetId)) {
-            insertPolicyEvent(context, active.getFirst(), "RETIRED", clock.instant());
+            UUID retiredId = active.getFirst();
+            PolicyView retired = requirePolicy(context.merchantId(), retiredId);
+            insertPolicyEvent(context, retiredId, "RETIRED", now);
+            eventProducer.riskControlChanged(context, retiredId,
+                    DomainEventType.RISK_POLICY_ROLLED_BACK, now, requestId,
+                    retired.versionNumber(), "RETIRED", "SUPERSEDED_BY_ACTIVATION");
         }
     }
 

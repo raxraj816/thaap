@@ -3,12 +3,14 @@ package com.thaap.payments.controls;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
+import com.thaap.payments.event.DomainEventType;
 import com.thaap.payments.fraud.FeatureCatalogue;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.simulation.RiskSimulationActivationGate;
@@ -45,11 +47,13 @@ public class GovernedControlService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final GovernedControlMetrics metrics;
+    private final RiskOperationsEventProducer eventProducer;
 
     public GovernedControlService(JdbcTemplate jdbcTemplate, AuthoredRuleCodec ruleCodec,
             RiskSimulationActivationGate activationGate, PaymentMethodRepository paymentMethodRepository,
             SensitiveValueHasher sensitiveValueHasher, AuditLogService auditLogService,
-            ObjectMapper objectMapper, Clock clock, GovernedControlMetrics metrics) {
+            ObjectMapper objectMapper, Clock clock, GovernedControlMetrics metrics,
+            RiskOperationsEventProducer eventProducer) {
         this.jdbcTemplate = jdbcTemplate;
         this.ruleCodec = ruleCodec;
         this.activationGate = activationGate;
@@ -59,6 +63,7 @@ public class GovernedControlService {
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.metrics = metrics;
+        this.eventProducer = eventProducer;
     }
 
     @Transactional(readOnly = true)
@@ -122,13 +127,13 @@ public class GovernedControlService {
         } else if (current.lifecycleStatus() == ControlLifecycleStatus.APPROVED
                 && target == ControlLifecycleStatus.ACTIVE) {
             requireGate(context, RiskSimulationCandidateType.AUTHORED_RULE, id, simulationRunId);
-            retireActiveRules(context, current.ruleCode(), id, now);
+            retireActiveRules(context, current.ruleCode(), id, now, requestId);
             event = "ACTIVATED";
             activateRule(context, id, simulationRunId, now);
         } else if (current.lifecycleStatus() == ControlLifecycleStatus.RETIRED
                 && target == ControlLifecycleStatus.ACTIVE) {
             requireGate(context, RiskSimulationCandidateType.AUTHORED_RULE, id, simulationRunId);
-            retireActiveRules(context, current.ruleCode(), id, now);
+            retireActiveRules(context, current.ruleCode(), id, now, requestId);
             event = "ROLLBACK_ACTIVATED";
             activateRule(context, id, simulationRunId, now);
         } else if (current.lifecycleStatus() == ControlLifecycleStatus.ACTIVE
@@ -143,6 +148,16 @@ public class GovernedControlService {
             throw conflict("Authored rule lifecycle transition is invalid");
         }
         insertRuleEvent(context, id, event, simulationRunId, now);
+        if ("ACTIVATED".equals(event)) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.AUTHORED_RULE_ACTIVATED,
+                    now, requestId, current.versionNumber(), "ACTIVE", null);
+        } else if ("ROLLBACK_ACTIVATED".equals(event)) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.AUTHORED_RULE_ROLLED_BACK,
+                    now, requestId, current.versionNumber(), "ACTIVE", "ROLLBACK_ACTIVATED");
+        } else if ("RETIRED".equals(event)) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.AUTHORED_RULE_DISABLED,
+                    now, requestId, current.versionNumber(), "RETIRED", "OPERATOR_DISABLED");
+        }
         metrics.recordLifecycle("RULE", event);
         audit(context, requestId, "authored_rule." + event.toLowerCase(), id, current.ruleCode(), target.name());
         return requireRule(context.merchantId(), id, false);
@@ -238,7 +253,7 @@ public class GovernedControlService {
                 throw conflict("Expired safety exception cannot activate");
             }
             requireGate(context, RiskSimulationCandidateType.SAFETY_EXCEPTION, id, simulationRunId);
-            retireActiveExceptions(context, current.exceptionCode(), id, now);
+            retireActiveExceptions(context, current.exceptionCode(), id, now, requestId);
             event = "ACTIVATED";
             jdbcTemplate.update("""
                     UPDATE risk_safety_exception_versions
@@ -258,6 +273,16 @@ public class GovernedControlService {
             throw conflict("Safety exception lifecycle transition is invalid");
         }
         insertExceptionEvent(context, id, event, simulationRunId, now);
+        if ("ACTIVATED".equals(event)) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.SAFETY_EXCEPTION_ACTIVATED,
+                    now, requestId, current.versionNumber(), "ACTIVE", current.reasonCode());
+        } else if ("RETIRED".equals(event) && !now.isBefore(current.expiresAt())) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.SAFETY_EXCEPTION_EXPIRED,
+                    now, requestId, current.versionNumber(), "RETIRED", "VALIDITY_EXPIRED");
+        } else if ("RETIRED".equals(event)) {
+            eventProducer.riskControlChanged(context, id, DomainEventType.SAFETY_EXCEPTION_DISABLED,
+                    now, requestId, current.versionNumber(), "RETIRED", "OPERATOR_DISABLED");
+        }
         metrics.recordLifecycle("EXCEPTION", event);
         audit(context, requestId, "risk_safety_exception." + event.toLowerCase(), id,
                 current.exceptionCode(), target.name());
@@ -293,7 +318,8 @@ public class GovernedControlService {
                 """, Timestamp.from(now), runId, context.merchantId(), id);
     }
 
-    private void retireActiveRules(RiskOperatorContext context, String code, UUID target, Instant now) {
+    private void retireActiveRules(RiskOperatorContext context, String code, UUID target,
+            Instant now, String requestId) {
         List<UUID> active = jdbcTemplate.query("""
                 SELECT id FROM authored_rule_versions
                  WHERE merchant_id = ? AND rule_code = ? AND lifecycle_status = 'ACTIVE' AND id <> ?
@@ -306,10 +332,14 @@ public class GovernedControlService {
                            projection_version = projection_version + 1 WHERE merchant_id = ? AND id = ?
                     """, Timestamp.from(now), context.merchantId(), id);
             insertRuleEvent(context, id, "RETIRED", null, now);
+            RuleView retired = requireRule(context.merchantId(), id, false);
+            eventProducer.riskControlChanged(context, id, DomainEventType.AUTHORED_RULE_DISABLED,
+                    now, requestId, retired.versionNumber(), "RETIRED", "SUPERSEDED_BY_ACTIVATION");
         }
     }
 
-    private void retireActiveExceptions(RiskOperatorContext context, String code, UUID target, Instant now) {
+    private void retireActiveExceptions(RiskOperatorContext context, String code, UUID target,
+            Instant now, String requestId) {
         List<UUID> active = jdbcTemplate.query("""
                 SELECT id FROM risk_safety_exception_versions
                  WHERE merchant_id = ? AND exception_code = ? AND lifecycle_status = 'ACTIVE' AND id <> ?
@@ -322,6 +352,9 @@ public class GovernedControlService {
                            projection_version = projection_version + 1 WHERE merchant_id = ? AND id = ?
                     """, Timestamp.from(now), context.merchantId(), id);
             insertExceptionEvent(context, id, "RETIRED", null, now);
+            ExceptionView retired = requireException(context.merchantId(), id, false);
+            eventProducer.riskControlChanged(context, id, DomainEventType.SAFETY_EXCEPTION_DISABLED,
+                    now, requestId, retired.versionNumber(), "RETIRED", "SUPERSEDED_BY_ACTIVATION");
         }
     }
 

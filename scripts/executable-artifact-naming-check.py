@@ -24,6 +24,8 @@ GOVERNANCE_CONTENT_EXCLUSIONS = {
     Path("scripts/executable_artifact_naming_check_tests.py"),
     Path("scripts/invariant-proof-check.py"),
     Path("scripts/invariant_proof_check_tests.py"),
+    Path("scripts/phase-closure-check.py"),
+    Path("scripts/phase_closure_check_tests.py"),
     Path("scripts/slice-review-check.py"),
     Path("scripts/technical_debt_check_tests.py"),
 }

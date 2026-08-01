@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.processor.SimulatorProcessorCatalog;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
@@ -37,13 +38,14 @@ public class DeveloperScenarioService {
     private final SimulatorProcessorCatalog processorCatalog;
     private final AuditLogService auditLogService;
     private final DeveloperScenarioMetrics metrics;
+    private final RiskOperationsEventProducer eventProducer;
     private final Clock clock;
     private final Duration leaseDuration;
     private final boolean creationEnabled;
 
     public DeveloperScenarioService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
             SimulatorProcessorCatalog processorCatalog, AuditLogService auditLogService,
-            DeveloperScenarioMetrics metrics, Clock clock,
+            DeveloperScenarioMetrics metrics, RiskOperationsEventProducer eventProducer, Clock clock,
             @Value("${thaap.developer-scenarios.lease-duration:45s}") Duration leaseDuration,
             @Value("${thaap.developer-scenarios.creation-enabled:true}") boolean creationEnabled) {
         if (leaseDuration.compareTo(Duration.ofSeconds(5)) < 0
@@ -55,6 +57,7 @@ public class DeveloperScenarioService {
         this.processorCatalog = processorCatalog;
         this.auditLogService = auditLogService;
         this.metrics = metrics;
+        this.eventProducer = eventProducer;
         this.clock = clock;
         this.leaseDuration = leaseDuration;
         this.creationEnabled = creationEnabled;
@@ -126,6 +129,8 @@ public class DeveloperScenarioService {
                         payment.amount(), payment.expectedOutcomeCode(), "PAYMENT_ATTEMPT", now);
         }
         insertEvent(context.merchantId(), runId, "RUN_CREATED", null, 0L, "CREATED", now);
+        eventProducer.developerScenarioCreated(context, runId, now, requestId,
+                scenarioType.name());
         auditLogService.recordMerchantApiAction(context, requestId, "developer_scenario.created",
                 "developer_scenario_run", runId, "Deterministic trusted scenario created",
                 null, Map.of("scenarioType", scenarioType.name(),
@@ -231,6 +236,8 @@ public class DeveloperScenarioService {
         if (succeeded) {
             insertEvent(context.merchantId(), runId, "RUN_SUCCEEDED", null,
                     leaseEpoch, "VERIFIED", now);
+            eventProducer.developerScenarioCompleted(context, runId, now, requestId,
+                    "VERIFIED");
         }
         auditLogService.recordMerchantApiAction(context, requestId, "developer_scenario.step_completed",
                 "developer_scenario_run", runId, "Scenario resource verified before progress advanced",
@@ -264,6 +271,8 @@ public class DeveloperScenarioService {
                 context.merchantId(), runId);
         insertEvent(context.merchantId(), runId, "RUN_FAILED", null,
                 leaseEpoch, failureCode.name(), now);
+        eventProducer.developerScenarioFailed(context, runId, now, requestId,
+                failureCode.name());
         auditLogService.recordMerchantApiAction(context, requestId, "developer_scenario.failed",
                 "developer_scenario_run", runId, "Scenario runner recorded a closed failure code",
                 Map.of("status", run.lifecycleStatus().name()),

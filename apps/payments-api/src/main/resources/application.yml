@@ -33,6 +33,32 @@ spring:
       enabled: false
     jdbc:
       initialize-schema: never
+  kafka:
+    bootstrap-servers: ${THAAP_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    admin:
+      fail-fast: false
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+        max.block.ms: 10000
+        max.request.size: 69632
+    consumer:
+      group-id: payment-risk-projection-v1
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      properties:
+        max.partition.fetch.bytes: 69632
+        fetch.max.bytes: 417792
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 6
 
 server:
   port: ${THAAP_PAYMENTS_API_PORT:8080}
@@ -58,7 +84,7 @@ management:
       show-details: never
       group:
         readiness:
-          include: readinessState,db,velocityRedis,merchantRiskPolicy,merchantRiskMonitoring,analystWorkspace,riskSimulation,governedControl,disputeOperations,developerScenarios,webhookOperations
+          include: readinessState,db,velocityRedis,merchantRiskPolicy,merchantRiskMonitoring,analystWorkspace,riskSimulation,governedControl,disputeOperations,developerScenarios,webhookOperations,eventPublication,paymentRiskProjection,projectionRebuild,offlineReplayDataset
   health:
     db:
       enabled: true
@@ -77,6 +103,30 @@ info:
 thaap:
   admin:
     bootstrap-token: ${THAAP_ADMIN_BOOTSTRAP_TOKEN:}
+  platform:
+    bootstrap-token: ${THAAP_PLATFORM_BOOTSTRAP_TOKEN:}
+  event-publication:
+    enabled: ${THAAP_EVENT_PUBLICATION_ENABLED:true}
+    topic: thaap.domain-events.v1
+    partitions: 6
+    retention: 7d
+    record-max-bytes: 65536
+    poll-batch-size: 100
+    tenant-budget: 20
+    stream-budget: 10
+    lease-duration: 30s
+    retry-limit: 10
+    retry-base-delay: 1s
+    retry-max-delay: 5m
+    poll-delay: 1s
+    backlog-failure-age: 5m
+  projection-consumer:
+    enabled: ${THAAP_PROJECTION_CONSUMER_ENABLED:true}
+  projection-rebuild:
+    worker-enabled: ${THAAP_PROJECTION_REBUILD_WORKER_ENABLED:true}
+    chunk-size: 100
+    lease-duration: 60s
+    poll-delay: ${THAAP_PROJECTION_REBUILD_POLL_DELAY:5s}
   scenario-runner:
     token: ${THAAP_SCENARIO_RUNNER_TOKEN:}
   security:
@@ -148,6 +198,17 @@ thaap:
     gate:
       minimum-eligible-population: ${THAAP_SIMULATION_GATE_MINIMUM_ELIGIBLE_POPULATION:100}
       minimum-label-coverage-percent: ${THAAP_SIMULATION_GATE_MINIMUM_LABEL_COVERAGE_PERCENT:50}
+  replay-datasets:
+    worker-enabled: ${THAAP_REPLAY_DATASET_WORKER_ENABLED:true}
+    creation-enabled: ${THAAP_REPLAY_DATASET_CREATION_ENABLED:true}
+    chunk-size: ${THAAP_REPLAY_DATASET_CHUNK_SIZE:100}
+    maximum-cohort-days: ${THAAP_REPLAY_DATASET_MAXIMUM_COHORT_DAYS:365}
+    maximum-population: ${THAAP_REPLAY_DATASET_MAXIMUM_POPULATION:1000000}
+    lease-duration: ${THAAP_REPLAY_DATASET_LEASE_DURATION:60s}
+    retry-limit: ${THAAP_REPLAY_DATASET_RETRY_LIMIT:10}
+    recovery-batch-size: ${THAAP_REPLAY_DATASET_RECOVERY_BATCH_SIZE:10}
+    recovery-poll-delay: ${THAAP_REPLAY_DATASET_RECOVERY_POLL_DELAY:5s}
+    stale-age: ${THAAP_REPLAY_DATASET_STALE_AGE:5m}
   disputes:
     expiry-enabled: ${THAAP_DISPUTE_EXPIRY_ENABLED:true}
     expiry-batch-size: ${THAAP_DISPUTE_EXPIRY_BATCH_SIZE:50}

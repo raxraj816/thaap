@@ -4,6 +4,8 @@ import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authentication.AuthenticationChallengeService;
 import com.thaap.payments.authentication.AuthenticationChallengeSource;
 import com.thaap.payments.authentication.AuthenticationNextAction;
+import com.thaap.payments.event.DomainEventActor;
+import com.thaap.payments.event.DomainEventWriteResult;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -14,6 +16,7 @@ import com.thaap.payments.payment.FullRefundService;
 import com.thaap.payments.payment.PaymentIntent;
 import com.thaap.payments.payment.PaymentIntentRepository;
 import com.thaap.payments.payment.PaymentIntentStatus;
+import com.thaap.payments.payment.PaymentDomainEventService;
 import com.thaap.payments.payment.Refund;
 import com.thaap.payments.payment.RefundReasonCode;
 import com.thaap.payments.payment.RefundRepository;
@@ -32,6 +35,7 @@ import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRepository;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import java.time.Clock;
 import java.time.Instant;
@@ -66,6 +70,8 @@ public class ReviewOperationsService {
     private final FullRefundService fullRefundService;
     private final PostAuthorizationSignalRepository postAuthorizationSignalRepository;
     private final ReviewRefundActionRepository reviewRefundActionRepository;
+    private final PaymentDomainEventService paymentDomainEventService;
+    private final RiskOperationsEventProducer riskOperationsEventProducer;
 
     public ReviewOperationsService(RiskOperatorRepository operatorRepository,
             ManualReviewCaseRepository reviewCaseRepository,
@@ -80,7 +86,9 @@ public class ReviewOperationsService {
             AuthenticationChallengeService authenticationChallengeService,
             RefundRepository refundRepository, FullRefundService fullRefundService,
             PostAuthorizationSignalRepository postAuthorizationSignalRepository,
-            ReviewRefundActionRepository reviewRefundActionRepository) {
+            ReviewRefundActionRepository reviewRefundActionRepository,
+            PaymentDomainEventService paymentDomainEventService,
+            RiskOperationsEventProducer riskOperationsEventProducer) {
         this.operatorRepository = operatorRepository;
         this.reviewCaseRepository = reviewCaseRepository;
         this.assignmentEventRepository = assignmentEventRepository;
@@ -102,6 +110,8 @@ public class ReviewOperationsService {
         this.fullRefundService = fullRefundService;
         this.postAuthorizationSignalRepository = postAuthorizationSignalRepository;
         this.reviewRefundActionRepository = reviewRefundActionRepository;
+        this.paymentDomainEventService = paymentDomainEventService;
+        this.riskOperationsEventProducer = riskOperationsEventProducer;
     }
 
     public ManualReviewCase assign(RiskOperatorContext context, UUID reviewCaseId,
@@ -127,6 +137,10 @@ public class ReviewOperationsService {
         if (transition != null) {
             assignmentEventRepository.save(new ReviewAssignmentEvent(context.merchantId(), reviewCaseId,
                     transition, actor.getId(), clock.instant()));
+            riskOperationsEventProducer.manualReviewAssigned(context,
+                    reviewCase.getPaymentIntentId(), reviewCase.getUpdatedAt(), requestId,
+                    transition.assignmentVersion(), transition.toOperatorId(),
+                    reviewCase.getTrafficOrigin());
             auditLogService.recordRiskOperatorAction(context, requestId, "review.assigned",
                     "manual_review_case", reviewCaseId, "Review assignment changed", null,
                     reviewState(reviewCase));
@@ -185,6 +199,7 @@ public class ReviewOperationsService {
             ReviewResolutionOutcome outcome, ReviewClassification classification, FraudType fraudType,
             ReviewResolutionReasonCode reasonCode, Instant evidenceOccurredAt, String requestId) {
         RiskOperator actor = requireMutableActor(context);
+        DomainEventActor paymentEventActor = paymentDomainEventService.riskOperatorActor(context);
         requireRole(actor, RiskOperatorRole.ANALYST, RiskOperatorRole.RISK_MANAGER);
         ManualReviewCaseRepository.PaymentLineage candidate = reviewCaseRepository
                 .findPaymentLineageByIdAndMerchantId(reviewCaseId, context.merchantId())
@@ -255,6 +270,15 @@ public class ReviewOperationsService {
             label = fraudLabelRepository.save(new FraudLabel(reviewCase, resolution,
                     actor.getId(), labelEvidenceOccurredAt, now));
         }
+        riskOperationsEventProducer.manualReviewResolved(context, paymentIntent.getId(), now,
+                requestId, outcome.name(), fraudType == null ? null : fraudType.name(),
+                reviewCase.getTrafficOrigin());
+        if (label != null) {
+            riskOperationsEventProducer.fraudLabelRecorded(context, paymentIntent.getId(), now,
+                    requestId, label.getLabelValue().name(), label.getSource(), label.getAvailableAt(),
+                    label.getFraudType() == null ? null : label.getFraudType().name(),
+                    label.getTrafficOrigin());
+        }
         Authorization authorization = null;
         Refund refund = null;
         ReviewRefundAction refundAction = null;
@@ -283,6 +307,13 @@ public class ReviewOperationsService {
                     processorResult.threeDsResult(), processorResult.simulatorOutcomeCode()));
             authorizationRepository.flush();
             applyProcessorResult(paymentIntent, paymentAttempt, authorization);
+            DomainEventWriteResult authorizationEvent = null;
+            if (authorization.getStatus() == AuthorizationStatus.APPROVED) {
+                authorizationEvent = paymentDomainEventService.authorizationCreated(paymentIntent,
+                        paymentAttempt, authorization, authorization.getCreatedAt(), paymentEventActor,
+                        requestId, null);
+            }
+            DomainEventWriteResult challengeEvent = null;
             if (authorization.getStatus() == AuthorizationStatus.REQUIRES_ACTION) {
                 AuthenticationChallengeService.CreatedChallenge createdChallenge =
                         authenticationChallengeService.create(
@@ -290,14 +321,25 @@ public class ReviewOperationsService {
                                 resolution.getFraudDecisionId(), authorization.getId(),
                                 AuthenticationChallengeSource.PROCESSOR, reviewCase.getTrafficOrigin());
                 nextAction = createdChallenge.nextAction();
+                challengeEvent = paymentDomainEventService.authenticationChallengeCreated(
+                        paymentIntent, createdChallenge.challenge(), paymentEventActor, requestId, null);
             }
+            UUID attemptCause = challengeEvent != null ? challengeEvent.eventId()
+                    : authorizationEvent == null ? null : authorizationEvent.eventId();
+            paymentDomainEventService.paymentAttemptCompleted(paymentIntent, paymentAttempt,
+                    authorization, paymentEventActor, requestId, attemptCause);
             if (authorization.getStatus() == AuthorizationStatus.APPROVED
                     && paymentIntent.getCaptureMethod() == CaptureMethod.AUTOMATIC) {
-                captureApprovedReviewPayment(context, requestId, paymentIntent, authorization);
+                captureApprovedReviewPayment(context, requestId, paymentIntent, authorization,
+                        paymentEventActor, authorizationEvent == null ? null : authorizationEvent.eventId());
             }
         } else if (reviewCase.getReviewStage() == ReviewStage.PRE_AUTHORIZATION) {
             paymentAttempt.cancelFromReview();
             paymentIntent.cancel();
+            DomainEventWriteResult attemptEvent = paymentDomainEventService.paymentAttemptCompleted(
+                    paymentIntent, paymentAttempt, null, paymentEventActor, requestId, null);
+            paymentDomainEventService.paymentIntentCanceled(paymentIntent, reasonCode.name(),
+                    paymentEventActor, requestId, attemptEvent.eventId());
         } else if (outcome == ReviewResolutionOutcome.REFUND
                 || outcome == ReviewResolutionOutcome.REFUND_AND_REPORT_FRAUD) {
             resolutionRepository.flush();
@@ -309,6 +351,10 @@ public class ReviewOperationsService {
             refund = refundResult.refund();
             refundAction = reviewRefundActionRepository.saveAndFlush(new ReviewRefundAction(
                     resolution, refund, refundReason, refundResult.reused(), now));
+            if (!refundResult.reused()) {
+                paymentDomainEventService.refundCreated(paymentIntent, refund,
+                        paymentEventActor, requestId, null);
+            }
         }
         reviewCase.resolve(now);
         auditLogService.recordRiskOperatorAction(context, requestId, "review.resolved",
@@ -487,7 +533,8 @@ public class ReviewOperationsService {
     }
 
     private void captureApprovedReviewPayment(RiskOperatorContext context, String requestId,
-            PaymentIntent paymentIntent, Authorization authorization) {
+            PaymentIntent paymentIntent, Authorization authorization, DomainEventActor eventActor,
+            UUID causationEventId) {
         LedgerService.CaptureLedgerResult ledgerResult = ledgerService.recordCapture(
                 context.merchantId(), paymentIntent.getId(), authorization.getAuthorizedAmount(),
                 authorization.getCurrency());
@@ -503,6 +550,8 @@ public class ReviewOperationsService {
                         "transactionGroupId", ledgerResult.transactionGroupId().toString(),
                         "ledgerEntryIds", ledgerResult.entries().stream()
                                 .map(LedgerEntry::getId).map(UUID::toString).toList()));
+        paymentDomainEventService.captureCreated(paymentIntent, authorization,
+                paymentIntent.getUpdatedAt(), eventActor, requestId, causationEventId);
     }
 
     private Map<String, Object> resolutionState(ReviewResolution resolution, FraudLabel label, Refund refund,

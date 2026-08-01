@@ -17,12 +17,14 @@ class HealthEndpointTests {
     private HealthEndpoint healthEndpoint;
 
     @Test
-    void healthEndpointReportsUp() {
-        assertThat(healthEndpoint.health().getStatus()).isEqualTo(Status.UP);
+    void aggregateHealthFailsClosedWhenRequiredEventPipelineIsDisabled() {
+        assertThat(healthEndpoint.health().getStatus()).isEqualTo(Status.DOWN);
+        assertThat(healthEndpoint.healthForPath("eventPublication").getStatus())
+                .isEqualTo(Status.DOWN);
     }
 
     @Test
-    void livenessAndReadinessContributorsReportUp() {
+    void processProbeContributorsRemainUp() {
         assertThat(healthEndpoint.healthForPath("livenessState").getStatus()).isEqualTo(Status.UP);
         assertThat(healthEndpoint.healthForPath("readinessState").getStatus()).isEqualTo(Status.UP);
     }

@@ -7,6 +7,38 @@ import org.springframework.stereotype.Component;
 public class DatabaseCleaner {
 
     private static final String[] TABLES = {
+            "replay_dataset_compatibility_evidence",
+            "replay_dataset_item_evidence",
+            "replay_dataset_chunk_results",
+            "replay_dataset_chunks",
+            "replay_dataset_results",
+            "replay_dataset_manifests",
+            "projection_reconciliations",
+            "projection_rebuild_events",
+            "projection_rebuilds",
+            "projection_cutoff_stream_positions",
+            "projection_cutoff_manifests",
+            "projection_bootstrap_facts",
+            "projection_bootstrap_manifests",
+            "merchant_payment_cohort_states",
+            "merchant_risk_aggregates",
+            "payment_risk_projections",
+            "consumer_transport_quarantine",
+            "consumer_quarantine",
+            "consumer_inbox",
+            "projection_checkpoints",
+            "projection_stream_positions",
+            "projection_generations",
+            "projection_definitions",
+            "event_publication_attempts",
+            "event_publications",
+            "domain_event_source_lineage",
+            "domain_events",
+            "event_stream_heads",
+            "platform_data_operation_requests",
+            "platform_operator_requests",
+            "platform_operator_credentials",
+            "platform_operators",
             "developer_scenario_events",
             "developer_scenario_steps",
             "developer_scenario_runs",
@@ -104,6 +136,36 @@ public class DatabaseCleaner {
         if (h2) {
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY FALSE");
             try {
+                for (String table : new String[] {
+                        "replay_dataset_compatibility_evidence", "replay_dataset_item_evidence",
+                        "replay_dataset_chunk_results", "replay_dataset_chunks",
+                        "replay_dataset_results", "replay_dataset_manifests",
+                        "projection_reconciliations", "projection_rebuild_events",
+                        "projection_rebuilds", "projection_cutoff_stream_positions",
+                        "projection_cutoff_manifests", "projection_bootstrap_facts",
+                        "projection_bootstrap_manifests", "merchant_payment_cohort_states",
+                        "merchant_risk_aggregates", "payment_risk_projections",
+                        "consumer_transport_quarantine", "consumer_quarantine", "consumer_inbox",
+                        "projection_checkpoints", "projection_stream_positions",
+                        "projection_generations", "projection_definitions"}) {
+                    jdbcTemplate.execute("TRUNCATE TABLE " + table);
+                }
+                jdbcTemplate.update("""
+                        UPDATE platform_operator_bootstrap_state
+                        SET bootstrap_completed = FALSE,
+                            first_admin_id = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE singleton_id = 1
+                        """);
+                jdbcTemplate.execute("TRUNCATE TABLE event_publication_attempts");
+                jdbcTemplate.execute("TRUNCATE TABLE event_publications");
+                jdbcTemplate.execute("TRUNCATE TABLE domain_event_source_lineage");
+                jdbcTemplate.execute("TRUNCATE TABLE domain_events");
+                jdbcTemplate.execute("TRUNCATE TABLE event_stream_heads");
+                jdbcTemplate.execute("TRUNCATE TABLE platform_data_operation_requests");
+                jdbcTemplate.execute("TRUNCATE TABLE platform_operator_requests");
+                jdbcTemplate.execute("TRUNCATE TABLE platform_operator_credentials");
+                jdbcTemplate.execute("TRUNCATE TABLE platform_operators");
                 jdbcTemplate.update("""
                         UPDATE webhook_endpoints
                            SET verification_status = 'NOT_REQUESTED',
@@ -167,7 +229,22 @@ public class DatabaseCleaner {
                 jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE");
             }
         } else {
-            jdbcTemplate.execute("TRUNCATE TABLE developer_scenario_events, developer_scenario_steps, "
+            jdbcTemplate.execute("TRUNCATE TABLE replay_dataset_compatibility_evidence, "
+                    + "replay_dataset_item_evidence, replay_dataset_chunk_results, "
+                    + "replay_dataset_chunks, replay_dataset_results, replay_dataset_manifests, "
+                    + "projection_reconciliations, projection_rebuild_events, projection_rebuilds, "
+                    + "projection_cutoff_stream_positions, projection_cutoff_manifests, "
+                    + "projection_bootstrap_facts, projection_bootstrap_manifests, "
+                    + "merchant_payment_cohort_states, merchant_risk_aggregates, "
+                    + "payment_risk_projections, consumer_transport_quarantine, consumer_quarantine, "
+                    + "consumer_inbox, projection_checkpoints, projection_stream_positions, "
+                    + "projection_generations, projection_definitions, "
+                    + "event_publication_attempts, event_publications, "
+                    + "domain_event_source_lineage, "
+                    + "domain_events, event_stream_heads, platform_data_operation_requests, "
+                    + "platform_operator_requests, platform_operator_credentials, "
+                    + "platform_operator_bootstrap_state, platform_operators, "
+                    + "developer_scenario_events, developer_scenario_steps, "
                     + "developer_scenario_runs, dispute_workflow_events, dispute_outcomes, "
                     + "dispute_evidence_versions, dispute_workflows, "
                     + "authored_rule_evaluations, risk_safety_exception_events, "
@@ -203,12 +280,79 @@ public class DatabaseCleaner {
                 }
                 jdbcTemplate.update("DELETE FROM " + table);
             }
+            jdbcTemplate.update("""
+                    UPDATE platform_operator_bootstrap_state
+                    SET bootstrap_completed = FALSE,
+                        first_admin_id = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE singleton_id = 1
+                    """);
+        } else {
+            jdbcTemplate.update("""
+                    INSERT INTO platform_operator_bootstrap_state (
+                        singleton_id, bootstrap_completed, first_admin_id, updated_at)
+                    VALUES (1, FALSE, NULL, CURRENT_TIMESTAMP)
+                    ON CONFLICT (singleton_id) DO NOTHING
+                    """);
         }
+        seedProjectionDefinitions(h2);
         jdbcTemplate.update("""
                 UPDATE webhook_dispatch_cursor
                 SET last_merchant_id = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE singleton_id = 1
                 """);
+    }
+
+    private void seedProjectionDefinitions(boolean h2) {
+        jdbcTemplate.update("""
+                INSERT INTO projection_definitions (
+                    id, projection_name, handler_version, lifecycle_status,
+                    active_generation_id, created_at, updated_at)
+                VALUES
+                    ('00000000-0000-0000-0000-000000000901', 'payment-risk-v1',
+                     'v1', 'ENABLED', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                    ('00000000-0000-0000-0000-000000000902', 'merchant-risk-v1',
+                     'v1', 'ENABLED', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO projection_generations (
+                    id, projection_definition_id, generation_number, handler_version,
+                    build_source, lifecycle_status, source_cutoff_digest, created_at,
+                    reconciled_at, activated_at, retired_at)
+                VALUES
+                    ('00000000-0000-0000-0000-000000000911',
+                     '00000000-0000-0000-0000-000000000901', 1, 'v1', 'LIVE',
+                     'ACTIVE', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                     CURRENT_TIMESTAMP, NULL),
+                    ('00000000-0000-0000-0000-000000000912',
+                     '00000000-0000-0000-0000-000000000902', 1, 'v1', 'LIVE',
+                     'ACTIVE', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                     CURRENT_TIMESTAMP, NULL)
+                """);
+        if (!h2) {
+            jdbcTemplate.execute("""
+                    ALTER TABLE projection_definitions
+                    DISABLE TRIGGER trg_projection_definitions_require_reconciliation
+                    """);
+        }
+        try {
+            jdbcTemplate.update("""
+                    UPDATE projection_definitions
+                    SET active_generation_id = CASE projection_name
+                        WHEN 'payment-risk-v1'
+                            THEN CAST('00000000-0000-0000-0000-000000000911' AS UUID)
+                        ELSE CAST('00000000-0000-0000-0000-000000000912' AS UUID)
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                    """);
+        } finally {
+            if (!h2) {
+                jdbcTemplate.execute("""
+                        ALTER TABLE projection_definitions
+                        ENABLE TRIGGER trg_projection_definitions_require_reconciliation
+                        """);
+            }
+        }
     }
 }

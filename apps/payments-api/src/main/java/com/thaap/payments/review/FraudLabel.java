@@ -67,6 +67,10 @@ public class FraudLabel {
     }
 
     public FraudLabel(Chargeback chargeback) {
+        this(chargeback, null);
+    }
+
+    public FraudLabel(Chargeback chargeback, UUID supersedesLabelId) {
         this.id = UUID.randomUUID();
         this.merchantId = chargeback.getMerchantId();
         this.paymentIntentId = chargeback.getPaymentIntentId();
@@ -80,6 +84,7 @@ public class FraudLabel {
         this.evidenceOccurredAt = chargeback.getEvidenceOccurredAt();
         this.availableAt = chargeback.getAvailableAt();
         this.sourceChargebackId = chargeback.getId();
+        this.supersedesLabelId = supersedesLabelId;
         this.reasonCode = ReviewResolutionReasonCode.CHARGEBACK_FRAUD_CONFIRMED;
         this.createdAt = chargeback.getAvailableAt();
     }
@@ -100,5 +105,6 @@ public class FraudLabel {
     public UUID getSourceChargebackId() { return sourceChargebackId; }
     public UUID getSourcePostAuthorizationSignalId() { return sourcePostAuthorizationSignalId; }
     public String getSource() { return source; }
+    public UUID getSupersedesLabelId() { return supersedesLabelId; }
     public Instant getCreatedAt() { return createdAt; }
 }

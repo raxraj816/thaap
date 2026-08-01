@@ -7,6 +7,7 @@ import com.thaap.payments.risk.RiskOperatorCredential;
 import com.thaap.payments.risk.RiskOperatorCredentialRepository;
 import com.thaap.payments.risk.RiskOperatorRepository;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.tenant.MerchantContext;
 import java.sql.Timestamp;
@@ -33,12 +34,14 @@ public class WebhookOperationsService {
     private final RiskOperatorRepository operatorRepository;
     private final RiskOperatorCredentialRepository credentialRepository;
     private final Clock clock;
+    private final RiskOperationsEventProducer eventProducer;
 
     public WebhookOperationsService(WebhookDeliveryRepository deliveryRepository,
             WebhookEndpointRepository endpointRepository, JdbcTemplate jdbcTemplate,
             AuditLogService auditLogService, WebhookOperationsMetrics metrics,
             RiskOperatorRepository operatorRepository,
-            RiskOperatorCredentialRepository credentialRepository, Clock clock) {
+            RiskOperatorCredentialRepository credentialRepository, Clock clock,
+            RiskOperationsEventProducer eventProducer) {
         this.deliveryRepository = deliveryRepository;
         this.endpointRepository = endpointRepository;
         this.jdbcTemplate = jdbcTemplate;
@@ -47,6 +50,7 @@ public class WebhookOperationsService {
         this.operatorRepository = operatorRepository;
         this.credentialRepository = credentialRepository;
         this.clock = clock;
+        this.eventProducer = eventProducer;
     }
 
     @Transactional(readOnly = true)
@@ -69,17 +73,23 @@ public class WebhookOperationsService {
     @Transactional
     public RedeliveryView redeliver(MerchantContext context, UUID deliveryId,
             WebhookRedeliveryReason reason, String requestId) {
-        return redeliver(context.merchantId(), deliveryId, reason, "MERCHANT_API", null,
+        RedeliveryView view = redeliver(context.merchantId(), deliveryId, reason, "MERCHANT_API", null,
                 "MERCHANT", requestId, () -> auditMerchant(context, deliveryId, requestId));
+        eventProducer.webhookRedeliveryRequested(context, view.endpointId(), view.createdAt(),
+                requestId, view.requestedGeneration(), reason.name());
+        return view;
     }
 
     @Transactional
     public RedeliveryView redeliver(RiskOperatorContext context, UUID deliveryId,
             WebhookRedeliveryReason reason, String requestId) {
         RiskOperator actor = liveManagerForUpdate(context);
-        return redeliver(context.merchantId(), deliveryId, reason, "RISK_OPERATOR",
+        RedeliveryView view = redeliver(context.merchantId(), deliveryId, reason, "RISK_OPERATOR",
                 actor.getId(), actor.getRole().name(), requestId,
                 () -> auditOperator(context, deliveryId, requestId));
+        eventProducer.webhookRedeliveryRequested(context, view.endpointId(), view.createdAt(),
+                requestId, view.requestedGeneration(), reason.name());
+        return view;
     }
 
     @Transactional

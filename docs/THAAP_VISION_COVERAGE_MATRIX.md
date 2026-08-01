@@ -3,7 +3,7 @@
 - Status: ACTIVE
 - Last reviewed: 2026-07-27
 - Product destination: FOUNDER CONFIRMED 2026-07-27
-- Phase 5 implementation-decision freeze: PENDING FOUNDER CONFIRMATION
+- Phase 5 implementation-decision freeze: FOUNDER CONFIRMED 2026-07-27
 - Canonical vision: `docs/VISION.md`
 - Implementation source: `docs/IMPLEMENTATION_MASTER_PLAN.md`
 - Validation: `scripts/vision-coverage-check.py`
@@ -255,17 +255,19 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 
 ## VP-017: Durable Event, Analytics, And Replay Lineage
 
-- Status: PLANNED_OWNER_ASSIGNED
+- Status: PROVEN_CURRENT_SCOPE
 - Vision promise: Committed payment/risk facts become publishable, consumable, freshness-aware, rebuildable analytics and point-in-time datasets without changing source truth.
-- Current evidence: Phase 4.5 supplies durable source facts and the Phase 5 detailed plan freezes the proposed event/outbox, Kafka, inbox, projection, rebuild, and dataset boundaries; implementation has not started.
-- Remaining gap: Chapters 44–52 require founder confirmation, frozen matrices, migrations, code, real Kafka/PostgreSQL proof, product analytics, and integrated closure.
+- Current evidence: Phase 4.5 supplies durable source facts; V65–V85 now implement the Phase 5 event/outbox, exact event-to-decision/snapshot/payment lineage, Kafka, inbox, projection, losslessly paginated analytics, rebuild, and dataset boundaries. Every Chapter 44–52 matrix and dossier passes, real Kafka/PostgreSQL and product/browser evidence pass, and the public demo proves source non-interference.
+- Remaining gap: None inside the frozen Phase 5 promise. Later scale, hosted multi-merchant, ML training/serving, and network capabilities retain their assigned owner phases.
 - Owner phase: Phase 5
 - Owner slice: Durable Events And Rebuildable Analytics
 - Primary DRI: Data Platform
-- Trigger: Begin Chapter 44 only after the Phase 5 decisions and this vision matrix are founder-confirmed.
+- Trigger: Satisfied; Chapters 44–52 are complete under their frozen `PRE_IMPLEMENTATION` contracts.
 - Done evidence: Every Chapter 44–52 matrix/dossier passes, in-scope mutations emit atomically, consumers restart safely, analytics expose freshness/coverage, rebuild activation reconciles, and the public source-to-rebuild demo passes.
 - Merchant / analyst demo: Create a risky payment, observe its projection, survive broker/consumer restart and duplicate delivery, rebuild a shadow generation, activate it, and prove source payment/fraud/ledger counts unchanged.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-08-01
+
+Phase 5 implementation status: COMPLETE
 
 ## VP-018: Honest Production-Shaped Simulator Boundary
 
@@ -355,7 +357,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 
 | Phase | Product outcome | Vision coverage |
 |---|---|---|
-| Phase 5 | Durable events, freshness-aware analytics, rebuild, and offline dataset lineage | VP-017 plus prerequisites for VP-002, VP-003, VP-004, VP-005, VP-008, VP-009, VP-012, VP-014, VP-016 |
+| Phase 5 | Durable events, freshness-aware analytics, rebuild, and offline dataset lineage | VP-017 plus prerequisites for VP-002, VP-003, VP-004, VP-005, VP-008, VP-009, VP-012, VP-014, VP-016, VP-020, VP-021, VP-022, VP-023 |
 | Phase 6 | Unified decision/analyst workspace and developer contract | VP-004, VP-005, VP-016 |
 | Phase 7 | Governed ML baseline, serving, release governance, and drift | VP-002, VP-007, VP-008 |
 | Phase 8 | Network/graph intelligence, merchant exposure, advanced identity, post-authorization, and disputes | VP-003, VP-006, VP-009, VP-012, VP-013, VP-014, VP-015 |

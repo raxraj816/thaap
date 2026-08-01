@@ -73,7 +73,7 @@ in environment memory and are never printed.
 
 ## Local Infrastructure
 
-Start PostgreSQL and Redis:
+Start PostgreSQL, Redis, and the six-partition Phase 5 Kafka broker:
 
 ```bash
 scripts/local-infra-up.sh
@@ -104,6 +104,27 @@ Run the Spring Boot API from the repository root:
 ```bash
 scripts/payments-api-run.sh
 ```
+
+## Phase 5 Payment-Risk Analytics Proof
+
+Start local infrastructure and `payments-api`, then run the loopback-only public
+journey with fresh local bootstrap tokens:
+
+```bash
+export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
+export THAAP_PLATFORM_BOOTSTRAP_TOKEN=change-me-local-platform-bootstrap-token
+python3 scripts/demo-payment-risk-analytics.py
+```
+
+The client creates and confirms a merchant payment while Kafka is stopped,
+proves publication/projection convergence after restart, repeats a broker
+restart, reads payment and merchant analytics, rebuilds/reconciles/activates and
+rolls back a shadow generation, creates a point-in-time replay dataset, and
+proves the source payment/fraud/authorization/ledger/event fingerprint is
+unchanged by rebuild and replay. It accepts loopback HTTP only, rejects
+redirects and ambient proxies, keeps credentials in memory, never edits Kafka
+offsets, and uses only allowlisted broker start/stop commands plus bounded
+read-only PostgreSQL reconciliation.
 
 Run the Chapter 13 create-to-confirm demo against a running local API:
 

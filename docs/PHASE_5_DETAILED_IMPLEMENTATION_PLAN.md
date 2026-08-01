@@ -1,9 +1,9 @@
 # Phase 5 Detailed Implementation Plan
 
 - Phase: Phase 5 — Durable Events And Rebuildable Analytics
-- Status: READY FOR FOUNDER REVIEW
+- Status: COMPLETE — CHAPTERS 44–52 VERIFIED; MERGE RECOMMENDED
 - Entry gate: SATISFIED by Phase 4.5 / Chapter 43R closure
-- Promise freeze: PENDING FOUNDER CONFIRMATION
+- Promise freeze: CONFIRMED 2026-07-27
 - Merchant-facing product destination: FOUNDER CONFIRMED 2026-07-27
 - Primary deployables: `apps/payments-api`, local Kafka, and
   `apps/analyst-dashboard-ui`
@@ -11,12 +11,7 @@
 - Technical DRIs: Data Platform, Payments Core, and Risk Platform
 - Data/ML DRI: ML Architecture
 - Operations DRI: Security/Platform
-- Current implementation chapter: NOT STARTED
-- First planned implementation chapter: Chapter 44
-- First planned proof artifact:
-  `docs/reviews/CHAPTER_44_INVARIANT_PROOF_MATRIX.md`
-- First planned closure artifact:
-  `docs/reviews/CHAPTER_44_CLOSURE_DOSSIER.md`
+- Current implementation chapter: CHAPTER 52 — INTEGRATED CLOSURE COMPLETE
 - Concept foundation:
   `docs/learning/concepts/TRANSACTIONAL_OUTBOX_AND_REBUILDABLE_PROJECTIONS.md`
 - Vision coverage: `VP-017` directly; prerequisites for `VP-002`, `VP-003`,
@@ -24,11 +19,29 @@
   `VP-020`, `VP-021`, `VP-022`, and `VP-023`
 
 This plan converts the Phase 5 roadmap into an executable product sequence.
-The decisions in Section 22 are proposed for founder confirmation as one
-coherent event and analytics contract. They are not implementation
-authorization yet. After confirmation, Chapter 44 must freeze its
-pre-implementation matrix and failure inventory before any production code or
-migration changes.
+Founder implementation authorization on 2026-07-27 confirmed the sixteen
+Section 22 decisions as one coherent product set before Phase 5 production
+code, migrations, runtime configuration, product fixtures, UI, or demo changes.
+Chapters 44–52 have `FROZEN`/`VERIFIED`/all-`PASS` `PRE_IMPLEMENTATION` proof
+contracts and `READY_TO_MERGE`/`MERGE` dossiers. V65–V85, real
+Kafka/PostgreSQL proof, UI/browser proof, governance gates, and the public
+source-to-analytics-to-rebuild-to-dataset journey pass.
+
+Phase 5 implementation status: COMPLETE
+
+Canonical proof-scaffold cross-links:
+
+| Chapter | Frozen invariant matrix | In-progress closure dossier |
+|---|---|---|
+| 44 | [`CHAPTER_44_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_44_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_44_CLOSURE_DOSSIER.md`](reviews/CHAPTER_44_CLOSURE_DOSSIER.md) |
+| 45 | [`CHAPTER_45_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_45_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_45_CLOSURE_DOSSIER.md`](reviews/CHAPTER_45_CLOSURE_DOSSIER.md) |
+| 46 | [`CHAPTER_46_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_46_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_46_CLOSURE_DOSSIER.md`](reviews/CHAPTER_46_CLOSURE_DOSSIER.md) |
+| 47 | [`CHAPTER_47_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_47_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_47_CLOSURE_DOSSIER.md`](reviews/CHAPTER_47_CLOSURE_DOSSIER.md) |
+| 48 | [`CHAPTER_48_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_48_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_48_CLOSURE_DOSSIER.md`](reviews/CHAPTER_48_CLOSURE_DOSSIER.md) |
+| 49 | [`CHAPTER_49_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_49_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_49_CLOSURE_DOSSIER.md`](reviews/CHAPTER_49_CLOSURE_DOSSIER.md) |
+| 50 | [`CHAPTER_50_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_50_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_50_CLOSURE_DOSSIER.md`](reviews/CHAPTER_50_CLOSURE_DOSSIER.md) |
+| 51 | [`CHAPTER_51_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_51_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_51_CLOSURE_DOSSIER.md`](reviews/CHAPTER_51_CLOSURE_DOSSIER.md) |
+| 52 | [`CHAPTER_52_INVARIANT_PROOF_MATRIX.md`](reviews/CHAPTER_52_INVARIANT_PROOF_MATRIX.md) | [`CHAPTER_52_CLOSURE_DOSSIER.md`](reviews/CHAPTER_52_CLOSURE_DOSSIER.md) |
 
 ## 1. Outcome
 
@@ -108,11 +121,11 @@ Phase 5 therefore reuses rather than replaces three existing truths:
 3. Phase 4.5 historical simulation remains the governed counterfactual control
    evaluator until a later plan explicitly migrates it.
 
-## 3. Proposed Phase Promises
+## 3. Founder-Confirmed Phase Promises
 
-These promises become frozen only after founder confirmation. A later chapter
-may refine internals but may not weaken an observable promise without reopening
-its active matrix before code changes.
+Founder implementation authorization on 2026-07-27 froze these promises as one
+product set. A later chapter may refine internals but may not weaken an
+observable promise without reopening its active matrix before code changes.
 
 ### 3.1 Merchant and analyst promises
 
@@ -162,6 +175,9 @@ its active matrix before code changes.
   and exact payload digest.
 - Event IDs, stream versions, occurrence times, and canonical payload bytes are
   stable across publication retry, application restart, and projection replay.
+- The exact complete event-record bytes and their SHA-256 are persisted once;
+  publication retry sends those bytes without reconstructing the envelope.
+  `payloadSha256` independently binds the nested canonical payload.
 - Payloads are built from an allowlisted schema. Raw PAN, CVV, API keys,
   credentials, signing material, note plaintext, IP, email, phone, address,
   raw device/session identifiers, idempotency material, exception text, and
@@ -214,9 +230,12 @@ its active matrix before code changes.
 
 ### 3.6 Replay and analytics promises
 
-- Rebuild reads immutable stored events up to an explicit cutoff and writes a
-  new projection generation. It does not republish domain events to Kafka by
-  default.
+- Rebuild reads immutable stored events through an immutable cutoff manifest
+  containing each included `(merchantId, streamType, streamId,
+  maxStreamVersion)` and the exact bootstrap-fact manifest digest, then writes a
+  new projection generation. A global database sequence, event timestamp,
+  Kafka offset, or wall clock never defines membership. Rebuild does not
+  republish domain events to Kafka by default.
 - A rebuild is restart-safe, leased, bounded, cancelable, and fenced against a
   stale worker. Stable job identity prevents duplicate active rebuilds for the
   same projection/version/cutoff.
@@ -225,9 +244,10 @@ its active matrix before code changes.
   before activation.
 - Live catch-up after the rebuild cutoff is explicit. Activation is permitted
   only when the shadow generation reaches the required source watermark.
-- Offline replay datasets bind tenant, event cutoff, label-availability cutoff,
-  projection/evaluator version, feature catalogue, traffic-origin policy,
-  query digest, and output digest.
+- Offline replay datasets bind tenant, the immutable per-stream cutoff manifest
+  and digest, bootstrap-fact digest, label-availability cutoff,
+  projection/evaluator version, feature catalogue, traffic-origin policy, query
+  digest, and output digest.
 - The existing governed historical simulation remains authoritative for Phase
   4.5 activation gates. Phase 5 may feed it stable event-derived cohorts only
   after equivalence with its source-table contract is proven.
@@ -295,10 +315,13 @@ Phase 5 separates tenant risk users from platform data operators:
   their merchant's authorized analytics and freshness state. They cannot retry
   publications, dispose quarantines, control consumers, or activate projection
   generations.
-- A new persistent local-only `PlatformOperator` has one closed role:
-  `DATA_OPERATOR` may inspect safe global/component health and execute bounded
-  retry, quarantine-recovery, rebuild, activation, and rollback operations;
-  `PLATFORM_ADMIN` may additionally issue or disable platform operators.
+- A new persistent local-only `PlatformOperator` has exactly one role from the
+  closed role set `{DATA_OPERATOR, PLATFORM_ADMIN}`. `DATA_OPERATOR` may inspect
+  safe global/component health and execute bounded retry, quarantine-recovery,
+  rebuild, activation, and rollback operations. `PLATFORM_ADMIN` may issue or
+  disable platform operators, but does not implicitly receive data-plane
+  recovery authority; an administrator needs a distinct `DATA_OPERATOR`
+  identity for those operations.
 - The admin bootstrap token may create the first `PLATFORM_ADMIN`, but it is not
   an operator identity and cannot perform data-plane recovery or appear as a
   fictional human actor.
@@ -355,11 +378,17 @@ The immutable event record contains:
 - `trafficOrigin`: server-assigned origin when the source is traffic-derived
 - `payloadJson`: canonical versioned JSON object
 - `payloadSha256`: digest of the exact canonical UTF-8 bytes
+- `eventRecordBytes`: exact RFC 8785/JCS-compatible UTF-8 bytes for the complete
+  envelope plus payload, excluding the separately stored record digest
+- `eventRecordSha256`: digest of the exact complete event-record bytes
 
-Envelope fields are authenticated by persistence and validated again at the
-consumer boundary. The payload never duplicates merchant or stream identity as
-an independently trusted value. If a versioned schema includes those fields
-for usability, exact agreement with the envelope is mandatory.
+The payload digest protects the nested payload boundary; the full-record digest
+protects every envelope field plus that payload. The full-record digest is
+stored beside rather than inside the hashed bytes to avoid a self-referential
+representation. Envelope fields are authenticated by persistence and validated
+again at the consumer boundary. The payload never duplicates merchant or stream
+identity as an independently trusted value. If a versioned schema includes
+those fields for usability, exact agreement with the envelope is mandatory.
 
 ### 5.3 Stream roots and ordering
 
@@ -367,7 +396,9 @@ Initial stream roots are domain-owned rather than chapter-owned:
 
 - `PAYMENT`: one PaymentIntent root, including attempt, decision,
   authorization, capture, refund, chargeback, and related label facts
-- `REVIEW`: one ManualReviewCase root for assignment and resolution facts
+- Manual-review lifecycle facts deliberately share the owning `PAYMENT`
+  (PaymentIntent) stream in V1, so review and label operations cannot overtake
+  payment lifecycle facts. `REVIEW` is not a separately allocatable V1 stream.
 - `RISK_CONTROL`: one policy, authored rule, exception, or profile lifecycle
 - `RISK_INCIDENT`: one card-testing or merchant-risk incident
 - `DISPUTE`: one dispute workflow
@@ -383,31 +414,47 @@ There is no global business order. A database surrogate sequence may support
 bounded polling but must not be described as commit order because concurrent
 transactions can allocate sequence values and commit in a different order.
 
-### 5.4 Initial event catalogue
+### 5.4 Frozen initial event catalogue and ownership
 
-The initial catalogue is closed and reviewed per chapter. Candidate families
-are:
+The following table is the exhaustive V1 catalogue. Every listed event begins
+at `eventVersion=1`, has one producer owner, and uses the indicated domain stream
+root. Chapter 44 owns the schema registration and codec; Chapters 45 and 46 own
+the only production producer mappings. Adding an event or changing ownership
+reopens the affected matrices before code changes.
 
-- payment: intent created/canceled, attempt completed, authorization created,
-  capture created, refund created, chargeback created
-- fraud: decision created, review opened/assigned/resolved, label recorded or
-  superseded, post-authorization signal recorded, incident opened/resolved
-- controls: policy/rule/exception activated, rolled back, expired, or disabled
-- disputes: workflow opened, evidence version submitted, outcome recorded,
-  workflow expired
-- webhook operations: endpoint verified/disabled/rotated, delivery exhausted,
-  manual redelivery requested/succeeded
-- developer scenarios: run created/completed/failed
+| Stream root | Event types | Authoritative committed fact | Producer owner |
+|---|---|---|---|
+| `PAYMENT` | `payment_intent.created`, `payment_intent.canceled` | PaymentIntent creation or cancellation | Chapter 45 |
+| `PAYMENT` | `payment_attempt.completed` | terminal or authentication-required PaymentAttempt result | Chapter 45 |
+| `PAYMENT` | `fraud_decision.created` | immutable decision plus feature/control lineage | Chapter 45 |
+| `PAYMENT` | `authorization.created`, `authorization.voided` | approved authorization or its committed void | Chapter 45 |
+| `PAYMENT` | `capture.created`, `refund.created`, `chargeback.created` | committed source row plus balanced money evidence | Chapter 45 |
+| `PAYMENT` | `authentication_challenge.created`, `authentication_challenge.completed` | immutable challenge or terminal authentication result | Chapter 45 |
+| `PAYMENT` | `manual_review.opened`, `manual_review.assigned`, `manual_review.resolved` | ManualReviewCase lifecycle | Chapter 46 |
+| `PAYMENT` | `fraud_label.recorded`, `fraud_label.superseded` | immutable label availability and supersession | Chapter 46 only |
+| `RISK_INCIDENT` | `risk_incident.opened`, `risk_incident.resolved` | risk-incident lifecycle | Chapter 46 |
+| `RISK_CONTROL` | `merchant_risk_profile.activated`, `merchant_risk_profile.rolled_back`, `risk_policy.activated`, `risk_policy.rolled_back` | governed profile/policy lifecycle | Chapter 46 |
+| `RISK_CONTROL` | `authored_rule.activated`, `authored_rule.rolled_back`, `authored_rule.disabled`, `safety_exception.activated`, `safety_exception.expired`, `safety_exception.disabled` | dual-controlled rule/exception lifecycle | Chapter 46 |
+| `DISPUTE` | `dispute_workflow.opened`, `dispute_evidence.submitted`, `dispute_outcome.recorded`, `dispute_workflow.expired` | dispute workflow, evidence, and outcome | Chapter 46 |
+| `WEBHOOK_ENDPOINT` | `webhook_endpoint.verified`, `webhook_endpoint.disabled`, `webhook_endpoint.secret_rotated`, `webhook_delivery.exhausted`, `webhook_redelivery.requested`, `webhook_redelivery.succeeded` | endpoint and exceptional delivery/redelivery lifecycle | Chapter 46 |
+| `PAYMENT` | `post_authorization_signal.recorded` | immutable post-authorization signal | Chapter 46 |
+| `DEVELOPER_SCENARIO` | `developer_scenario.created`, `developer_scenario.completed`, `developer_scenario.failed` | trusted scenario lifecycle | Chapter 46 |
 
-Names and payload fields become executable schema artefacts in Chapter 44.
-Events are emitted only for committed facts with a demonstrated consumer or
-lineage purpose. State-change noise is not a product event catalogue.
+`payment_attempt.created`, `review.closed`, `fraud_label.created`,
+`merchant_risk_policy.updated`, `dispute_evidence_packet.created`, and routine
+`webhook.delivery_succeeded`/`webhook.delivery_failed` are not V1 canonical
+domain-event names. Routine transport success/failure remains operational
+evidence unless the exhaustive table explicitly names a semantic fact. Events
+are emitted only for committed facts with a demonstrated consumer or lineage
+purpose; state-change noise is not a product event catalogue.
 
 ### 5.5 Evolution and compatibility
 
-- Canonical JSON uses stable UTF-8 encoding, lexicographically sorted object
-  keys, no insignificant whitespace, closed number representations, UTC
-  timestamps at PostgreSQL microsecond precision, and explicit null policy.
+- Canonical JSON uses RFC 8785/JCS-compatible UTF-8 bytes, its I-JSON input
+  restrictions, deterministic property sorting, no insignificant whitespace,
+  closed number representations, UTC timestamps at PostgreSQL microsecond
+  precision, and explicit null policy. Jackson builds and validates allowlisted
+  trees; the RFC-listed Java JCS implementation canonicalizes their bytes.
 - Additive optional fields may retain the same version only after producer,
   stored fixture, and tolerant-consumer proof.
 - Removing, renaming, changing type, changing units, changing timestamp
@@ -423,7 +470,8 @@ Planned domain-named tables:
 
 - `platform_operators` and `platform_operator_credentials`: durable local-only
   data-operations identity, role, lifecycle, and reveal-once credential truth
-- `domain_events`: immutable envelope, payload, digest, and stream position
+- `domain_events`: immutable envelope, canonical payload bytes and digest,
+  exact full event-record bytes and digest, and stream position
 - `event_stream_heads`: tenant-qualified next-version coordination only where
   an authoritative aggregate projection version is unavailable
 - `event_publications`: mutable claim, lease, retry, acknowledgement, and
@@ -437,10 +485,17 @@ Planned domain-named tables:
 - `projection_checkpoints`: tenant/generation/partition or stream watermark
 - `projection_stream_positions`: last applied version for each tenant-qualified
   stream in one projection generation
+- `projection_cutoff_manifests` and `projection_cutoff_stream_positions`:
+  immutable rebuild membership and digest over each included `(merchant, stream
+  type, stream ID, maximum stream version)` plus the bootstrap manifest digest
 - `projection_bootstrap_facts`: immutable, safe, digest-bound seed input for
   pre-Phase-5 source rows, with explicit source-snapshot provenance and cutoff;
   never presented as a historical domain event
 - `projection_rebuilds`: leased restart-safe rebuild identity and progress
+- `projection_rebuild_events`: append-only rebuild lifecycle, lease, recovery,
+  reconciliation, activation, cancellation, and rollback evidence
+- `projection_reconciliations`: immutable expected/actual count, stream,
+  content-digest, and business-invariant results
 - payment-risk and merchant-risk projection tables keyed by merchant and
   generation
 - replay dataset manifests and aggregate result tables; no row-level sensitive
@@ -449,11 +504,14 @@ Planned domain-named tables:
 Required database invariants include:
 
 - tenant-qualified composite foreign keys for every merchant-owned relation
-- immutable event identity, envelope, payload, digest, and stream position
+- immutable event identity, envelope, payload bytes/digest, full record
+  bytes/digest, and stream position
 - unique event ID and unique stream version
 - legal publication, attempt, inbox, quarantine, generation, and rebuild state
   machines
 - append-only publication attempts and rebuild events
+- immutable cutoff manifests and stream positions; a global sequence, event
+  timestamp, Kafka offset, or wall clock cannot define rebuild membership
 - exactly one active generation per projection definition
 - a generation cannot activate until complete reconciliation evidence exists
 - an inbox completion cannot exist without the matching projection generation
@@ -496,16 +554,19 @@ short transaction: claim next publishable event with lease/token
   -> append attempt evidence and mark published/retry/blocked
 ```
 
-`FOR UPDATE SKIP LOCKED` bounds contention. Claiming enforces per-stream order:
-later versions do not pass an unpublished earlier version. Tenant/stream
-round-robin or budgets prevent one large stream from starving unrelated work.
-Lease expiry recovers abandoned work; an old token cannot finalize a new claim.
+`FOR UPDATE SKIP LOCKED` bounds contention. One poll claims at most 100
+publications, at most 20 for one tenant, and at most 10 for one stream. Claiming
+enforces per-stream order: later versions do not pass an unpublished earlier
+version. The frozen budgets prevent one large stream from starving unrelated
+work. A 30-second lease recovers abandoned work; an old fencing token cannot
+finalize a new claim.
 
 ### 7.3 Consumption
 
 ```text
-Kafka record received
-  -> validate topic, key, envelope, schema, digest, and tenant agreement
+Kafka record received by payment-risk-projection-v1
+  -> enforce 64 KiB limit and validate topic, key, envelope, schema,
+     payload digest, full-record digest, and tenant agreement
   -> begin PostgreSQL transaction
   -> reserve/lock consumer + event inbox identity
   -> completed inbox: no-op exact duplicate
@@ -513,7 +574,7 @@ Kafka record received
   -> apply deterministic projection mutation
   -> update checkpoint + complete inbox
   -> commit
-  -> acknowledge Kafka offset
+  -> manually acknowledge Kafka offset
 ```
 
 Projection code never owns a lock required by payment or fraud mutation code.
@@ -523,7 +584,7 @@ mutated by the consumer.
 ### 7.4 Rebuild and activation
 
 ```text
-actor starts idempotent rebuild at explicit event cutoff
+actor freezes per-stream/bootstrap cutoff manifest and starts idempotent rebuild
   -> lease one shadow generation
   -> consume immutable events in bounded chunks
   -> checkpoint each committed chunk
@@ -540,11 +601,13 @@ Cancellation stops future chunks and retains safe evidence. It does not delete
 the active generation. Rollback switches to a retained previously reconciled
 generation; it does not mutate source events.
 
-A surrogate event sequence is not treated as commit order during activation.
-The activation transaction compares the shadow generation's tenant-qualified
-stream positions with every domain event visible in one consistent PostgreSQL
-snapshot. Events that commit after that snapshot are normal new work for the
-new active generation.
+A surrogate event sequence, timestamp, wall clock, or Kafka offset is not
+treated as commit order or cutoff membership. The rebuild input is the frozen
+per-stream maximum-version manifest plus bootstrap digest. The activation
+transaction compares the shadow generation's tenant-qualified stream positions
+with every domain event visible in one consistent PostgreSQL snapshot. Events
+that commit after that snapshot are normal new work for the new active
+generation.
 
 ### 7.5 Global lock order
 
@@ -569,10 +632,11 @@ PostgreSQL interleavings, not simultaneous starts.
 
 ### 8.1 Topology
 
-Phase 5 uses one local/internal topic, provisionally `thaap.domain-events.v1`,
-with multiple partitions. The record key is a canonical tenant-qualified
-stream key. Headers may repeat safe routing fields but are never independently
-trusted over the canonical stored envelope.
+Phase 5 uses one local/internal topic, `thaap.domain-events.v1`, with exactly six
+partitions and seven-day retention. The maximum complete canonical event record
+is 64 KiB. The record key is a canonical tenant-qualified stream key. Headers
+may repeat safe routing fields or the full-record SHA-256 but are never trusted
+over recomputation and the canonical stored source metadata.
 
 The partition count is fixed for this topic version. Increasing it in place can
 remap a stream key and admit cross-partition reordering. Scaling partitions
@@ -585,11 +649,12 @@ scope without an accepted ADR and complete boundary table.
 
 ### 8.2 Producer behavior
 
-- Kafka idempotent producer mode is enabled where supported, but it is treated
+- Kafka idempotent producer mode is enabled, but it is treated
   as duplicate reduction, not end-to-end exactly-once proof.
-- `acks=all` and bounded delivery/request timeouts are explicit.
-- Producer serialization sends the exact stored canonical event bytes; retry
-  never reconstructs from current domain state.
+- `acks=all`, a 10-second request timeout, and a 30-second delivery timeout are
+  mandatory.
+- Producer serialization sends the exact stored full event-record bytes; retry
+  never reconstructs the envelope or payload from current domain state.
 - Broker/topic authentication and transport configuration are environment
   owned and fail safe without logging credentials.
 - Topic absence, authorization failure, serialization defect, timeout,
@@ -603,9 +668,10 @@ the Phase 5 rebuild authority. Broker retention is configured long enough for
 normal consumer recovery, while projection rebuild remains possible after
 Kafka records expire.
 
-No event is automatically discarded after a retry ceiling. Repeated producer
-failure moves the publication projection to `BLOCKED`, preserves the immutable
-event, alerts operators, and requires audited retry after the cause is fixed.
+No event is automatically discarded after a retry ceiling. An unsuccessful or
+unknown send receives at most 10 capped-exponential-backoff retries and then
+moves to `BLOCKED`, preserving the immutable event, alerting operators, and
+requiring audited retry after the cause is fixed.
 
 Phase 5 retains immutable domain events and bootstrap facts in PostgreSQL for
 rebuild. Automatic deletion is prohibited until a later archive/retention
@@ -621,20 +687,25 @@ chunking, restart metadata, and bounded rebuild job execution. THAAP adds
 domain-specific leases, fencing, stream order, reconciliation, and
 authorization around those mature components.
 
-Chapter 44 must create an ADR for the application-owned event/outbox envelope
-and publication state, including the alternative analysis for CDC and direct
-publication. Canonical JSON and schema validation must use maintained
-components selected through the ADR; a hand-written canonicalizer or serializer
-requires a separate accepted ADR and full representation-boundary table.
+Accepted `ADR-0011` governs the application-owned event/outbox envelope,
+publication state, CDC/direct-publication alternatives, strict Jackson tree
+construction, and the external RFC 8785/JCS canonicalizer. A handwritten
+canonicalizer or serializer is prohibited unless the ADR and Chapter 44 matrix
+reopen and a replacement receives its own accepted decision and complete
+representation-boundary table.
 
 ## 9. Consumer, Inbox, And Quarantine Contract
 
-Each consumer has a versioned name tied to one projection responsibility. A
-generic handler that switches across unrelated products is rejected.
+The first consumer group and durable consumer name is
+`payment-risk-projection-v1`, tied only to the payment-risk projection
+responsibility. It uses manual acknowledgement after the PostgreSQL transaction
+commits. A generic handler that switches across unrelated products is rejected.
 
 Inbox identity is `(consumer_name, event_id)`. The persisted record retains the
-event digest and supported handler version so an event ID reused with different
-bytes is a security/integrity failure, not a duplicate.
+complete-record SHA-256 and supported handler version. Consumers recompute the
+SHA-256 over the complete canonical record and independently verify the nested
+payload digest; an event ID reused with any different envelope or payload byte
+is a security/integrity failure, not a duplicate.
 
 Quarantine reasons are closed, for example:
 
@@ -668,7 +739,8 @@ approved break-glass process. Editing event bytes in place is forbidden.
 
 ### 10.1 Payment-risk projection
 
-The first read model is one tenant-qualified payment-attempt/lifecycle fact
+The first read model and generation identifier is `payment-risk-v1`. It is one
+tenant-qualified payment-attempt/lifecycle fact
 that can explain:
 
 - intent amount, currency, capture method, and server-assigned origin
@@ -686,6 +758,7 @@ credentials, or unrestricted metadata.
 
 ### 10.2 Merchant-risk aggregate projection
 
+The merchant projection and generation identifier is `merchant-risk-v1`.
 Bounded hourly/daily aggregates support authorization, decline, review,
 confirmed-fraud, chargeback, enumeration, volume, and amount trends. Every row
 binds:
@@ -704,11 +777,21 @@ the same and where it is a separately named aggregate.
 
 ### 10.3 Read/API behavior
 
-Read APIs are bounded, tenant-scoped, cursor-paginated, and role-filtered. Every
-response includes a freshness block. The cockpit displays loading, empty,
-partial, stale, dependency-unavailable, permission-denied, and retry-safe
-states. It does not persist credentials or projection payloads in browser
-storage.
+Read APIs are bounded, tenant-scoped, opaque-cursor-paginated with a maximum
+page size of 100, and role-filtered. Every response includes source cutoff,
+generation, last applied event time, last processing time, traffic-origin
+policy, coverage, and one freshness state:
+
+- `FRESH`: complete data whose processing-checkpoint age is at most 60 seconds
+- `LAGGING`: complete data older than 60 seconds and at most five minutes
+- `STALE`: complete data older than five minutes
+- `EMPTY`: no eligible events exist at the declared source cutoff
+- `PARTIAL`: known held/quarantined streams or bootstrap/coverage gaps exist
+- `UNAVAILABLE`: projection/checkpoint truth cannot be established
+
+The cockpit displays these states plus permission-denied and retry-safe failure.
+It never renders `EMPTY`, `PARTIAL`, `STALE`, or `UNAVAILABLE` as a numeric zero
+and does not persist credentials or projection payloads in browser storage.
 
 ## 11. Replay And Rebuild Contract
 
@@ -752,14 +835,34 @@ actions create audit records. Automated retries do not impersonate an actor.
 
 ## 13. API And Product Surface
 
-Proposed public/local endpoints are capability-named and versioned under the
-appropriate tenant-risk or platform-operator boundary:
+The frozen Phase 5 endpoints are capability-named under the appropriate
+tenant-risk or local platform-operator boundary:
 
-- payment-risk analytics search/detail with explicit freshness
-- merchant-risk time-series/summary with origin and coverage filters
-- projection status and generation history
-- data-operator rebuild start/status/cancel/activate/rollback
-- data-operator bounded blocked-publication and quarantine summaries/recovery
+| Capability | Frozen endpoint contract |
+|---|---|
+| Payment-risk search | `GET /risk/analytics/payments` |
+| Payment-risk detail | `GET /risk/analytics/payments/{id}` |
+| Merchant-risk summary | `GET /risk/analytics/merchant/summary` |
+| Merchant-risk time series | `GET /risk/analytics/merchant/timeseries` |
+| Projection status/history | `GET /risk/analytics/projections` |
+| Start rebuild | `POST /internal/data/projections/{name}/rebuilds` |
+| Rebuild status | `GET /internal/data/projections/{name}/rebuilds/{rebuildId}` |
+| Cancel rebuild | `POST /internal/data/projections/{name}/rebuilds/{rebuildId}/cancel` |
+| Reconcile rebuild | `POST /internal/data/projections/{name}/rebuilds/{rebuildId}/reconcile` |
+| Activate rebuild | `POST /internal/data/projections/{name}/rebuilds/{rebuildId}/activate` |
+| Roll back projection | `POST /internal/data/projections/{name}/rollback` |
+| Create/replay offline dataset | `POST /risk/replay-datasets` |
+| Read offline dataset | `GET /risk/replay-datasets/{id}` |
+
+The Chapter 44 platform-operator bootstrap/credential contract and Chapter
+47–48 blocked-publication/quarantine recovery remain local/internal bounded
+capabilities. Chapter 44's frozen matrix fixes
+`POST /internal/platform/operators/bootstrap`,
+`GET /internal/platform/operators/me`,
+`POST /internal/platform/operators`, and
+`POST /internal/platform/operators/{operatorId}/disable` as loopback-only
+routes. Chapter 47–48 recovery paths must likewise be frozen by their active
+matrices before implementation and are not widened by this table.
 
 Raw event payload download, arbitrary topic access, arbitrary SQL, event-byte
 editing, offset manipulation, and merchant-operator cross-tenant administration
@@ -837,8 +940,11 @@ event deletion is not a routine recovery action.
 - Chapter 44 installs event infrastructure without emitting retroactive events
   for historical rows. Existing history is not silently backfilled as if events
   had committed with old transactions.
-- Integration chapters emit events only after their migrations and code are
-  deployed together under explicit producer enablement.
+- Chapters 45 and 46 are schema-neutral producer integrations under V65/V66.
+  If either requires new schema, its matrix reopens before a new
+  capability-named forward migration is allocated. Producers emit only after
+  their code, catalogue, and compatible consumer/schema readiness are deployed
+  under explicit enablement.
 - A separately named bootstrap rebuild may seed an initial projection from
   authoritative V64 source tables at an explicit cutoff. It first writes
   immutable safe `projection_bootstrap_facts` plus a manifest and digest under
@@ -856,12 +962,38 @@ Every migration chapter proves fresh PostgreSQL installation and a realistic
 retained upgrade. H2 is regression context, not proof of PostgreSQL JSON,
 locking, trigger, index, or migration claims.
 
+The forward-only Phase 5 migration allocation is frozen as follows; no version
+may be reused or reassigned:
+
+| Version | Owner | Capability-named migration responsibility |
+|---|---|---|
+| V65 | Chapter 44 | platform operators/credentials plus `domain_events`, `event_stream_heads`, and `event_publications` foundation |
+| V66 | Chapter 44 | immutable event bytes/digests, stream/history guards, legal state constraints, and bounded indexes |
+| V67 | Chapter 47 | `event_publication_attempts` plus lease, retry, unknown, blocked, and recovery-state protection |
+| V68 | Chapter 48 | `consumer_inbox` and payload-free `consumer_quarantine` |
+| V69 | Chapter 48 | `projection_definitions`, `projection_generations`, `projection_checkpoints`, and `projection_stream_positions` |
+| V70 | Chapter 49 | generation-qualified `payment_risk_projections` and its tenant/query indexes |
+| V71 | Chapter 49 | generation-qualified `merchant_risk_aggregates` and UTC interval/query indexes |
+| V72 | Chapter 50 | `projection_bootstrap_facts`, `projection_cutoff_manifests`, and `projection_cutoff_stream_positions` |
+| V73 | Chapter 50 | `projection_rebuilds`, `projection_rebuild_events`, and `projection_reconciliations` with activation/rollback guards |
+| V74 | Chapter 51 | `replay_dataset_manifests` and `replay_dataset_results` plus restart/checkpoint protection |
+| V75 | Chapter 50 | activation/rollback lifecycle, generation compatibility, and append-only rebuild-history hardening |
+| V76 | Chapter 51 | replay dataset cutoff/generation binding, immutable lineage, and compatibility hardening |
+| V77 | Chapter 49 | analytics lineage constraints and PostgreSQL range-query indexes |
+| V78 | Chapter 49 | projection-definition ownership and active-generation consistency |
+| V79 | Chapter 48 | payload-free unlinked transport quarantine and recovery evidence |
+| V80 | Chapter 50 | immutable source bootstrap facts for pre-event payment truth without fabricated events |
+| V81 | Chapter 50 | bounded catch-up cycle evidence, append-only history, and monotonic progress guards |
+| V82 | Chapter 49 | align payment-projection fraud-score constraints with the canonical basis-point representation |
+| V83 | Chapters 49/51 | add exact event-to-fraud-decision/feature-snapshot lineage and expose it through payment projections |
+| V84 | Chapters 44/51 | enforce fraud-event source-lineage type and immutability on PostgreSQL |
+| V85 | Chapters 44/51 | bind fraud-event source lineage through the exact payment attempt to the event's payment stream |
+
 ## 17. Chapter Execution Plan
 
 ### Chapter 44 — Canonical Event Contract And Atomic Outbox Foundation
 
-- Status: PLANNED; begins only after founder confirmation and a frozen
-  pre-implementation matrix
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Data Platform
 - Supporting DRIs: Payments Core, Risk Platform, Security/Platform
 - Dependency: Phase 4.5 / Chapter 43R complete; satisfied
@@ -879,15 +1011,16 @@ rollback proof; privacy sink scans; matrix/dossier ready to merge.
 
 ### Chapter 45 — Payment And Money Event Integration
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Payments Core
 - Supporting DRIs: Data Platform and Risk Platform
 - Dependency: Chapter 44 merge-ready
 
 Integrate intent, attempt/decision, authorization, capture, cancel/void, refund,
-chargeback, ledger-linked label, and payment authentication facts using the
-single PaymentIntent stream. Preserve existing transaction and idempotency lock
-orders. No event consumer may create payment or ledger state.
+chargeback, ledger-linked money outcomes, and payment authentication facts
+using the single PaymentIntent stream. Chapter 46 owns analyst/risk-operation
+label producers on that same payment stream. Preserve existing transaction and
+idempotency lock orders. No event consumer may create payment or ledger state.
 
 Exit evidence: every action/replay/rollback partition has exact event count and
 payload lineage; forced confirm/capture/refund/chargeback orderings; balanced
@@ -895,10 +1028,10 @@ ledger non-interference; retained public payment lifecycle demo.
 
 ### Chapter 46 — Fraud And Risk-Operations Event Integration
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Risk Platform
 - Supporting DRIs: Risk Operations, Data Platform, and Payments Core
-- Dependency: Chapter 44 merge-ready; Chapter 45 event conventions stable
+- Dependency: Chapter 44 merge-ready
 
 Integrate review, label, incident, merchant-profile/policy, authored-rule,
 safety-exception, dispute, webhook-operation, post-authorization signal, and
@@ -911,7 +1044,7 @@ separation, and public risk-operations reconciliation.
 
 ### Chapter 47 — Kafka Publication And Recovery
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Data Platform
 - Supporting DRIs: Security/Platform and Payments Core
 - Dependency: Chapters 44–46 event producers merge-ready
@@ -919,7 +1052,11 @@ separation, and public risk-operations reconciliation.
 Add local Kafka, mature producer configuration, tenant-qualified stream keys,
 leased bounded publishing, append-only attempt evidence, retry/unknown/blocked
 classification, fairness, readiness, metrics, and the first DATA_OPERATOR-
-authenticated recovery surface.
+authenticated recovery surface. The frozen transport is
+`thaap.domain-events.v1`, six partitions, seven-day retention, 64 KiB event
+maximum, `acks=all` plus idempotence, 10-second request and 30-second delivery
+timeouts, batch/tenant/stream budgets 100/20/10, 30-second leases, and at most 10
+capped-backoff retries before `BLOCKED`.
 
 Exit evidence: real Kafka acknowledgement; broker outage/recovery; ack-before-
 database-finalization duplicate; lease takeover and stale finalizer; noisy-
@@ -927,14 +1064,17 @@ stream fairness; exact stored bytes across retry; safe operational demo.
 
 ### Chapter 48 — Idempotent Consumer And Projection Substrate
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Data Platform
 - Supporting DRIs: Risk Platform and Security/Platform
 - Dependency: Chapter 47 merge-ready
 
 Add the durable inbox, versioned consumer identity, schema/digest/record-key
 validation, checkpoint, quarantine, per-stream ordering, and generation-aware
-projection handler framework using Spring Kafka.
+projection handler framework using Spring Kafka. The frozen group/durable name
+is `payment-risk-projection-v1`, acknowledgement is manual after PostgreSQL
+commit, and deduplication binds `(consumer_name,event_id)` to the complete-record
+SHA-256.
 
 Exit evidence: duplicate/concurrent duplicate, crash on both sides of database
 commit, offset acknowledgement failure, rebalance, poison/dependency
@@ -943,7 +1083,7 @@ progress on real Kafka/PostgreSQL.
 
 ### Chapter 49 — Payment-Risk And Merchant-Risk Analytics
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Risk Platform
 - Supporting DRIs: Data Platform, Fraud/Risk Product, and Product Design
 - Dependency: Chapter 48 merge-ready
@@ -960,7 +1100,7 @@ demo.
 
 ### Chapter 50 — Projection Rebuild, Reconciliation, And Activation
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Data Platform
 - Supporting DRIs: Risk Platform, Security/Platform, and Risk Operations
 - Dependency: Chapter 49 merge-ready
@@ -969,7 +1109,9 @@ Add leased, restart-safe shadow generations; bounded replay; live catch-up;
 count/stream/digest/business reconciliation; atomic activation; cancellation;
 and retained-generation rollback. Reuse Spring Batch for durable job/chunk
 execution and add only the domain-specific generation, lease, authorization,
-and activation fencing it does not provide.
+and activation fencing it does not provide. Freeze 100-input chunks, a
+60-second rebuild lease, immutable per-stream/bootstrap cutoff manifests, and
+append-only `projection_rebuild_events`.
 
 Exit evidence: crash/resume, stale-worker fencing, live-write cutoff race,
 partial generation non-visibility, reconciliation mismatch rejection,
@@ -977,7 +1119,7 @@ activate/rollback forced orderings, and exact source-state non-interference.
 
 ### Chapter 51 — Offline Replay Dataset And Simulation Compatibility
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: ML Architecture
 - Supporting DRIs: Data Platform and Risk Platform
 - Dependency: Chapters 49–50 merge-ready
@@ -994,7 +1136,7 @@ simulation contract for the approved overlap.
 
 ### Chapter 52 — Integrated Phase 5 Closure
 
-- Status: PLANNED
+- Status: COMPLETE — matrix verified and dossier recommends merge
 - Primary DRI: Founding Staff Engineering
 - Supporting DRIs: all Phase 5 product and technical owners
 - Dependency: Chapters 44–51 merge-ready
@@ -1016,20 +1158,21 @@ requires no source reading or hidden configuration.
 ```text
 Phase 4.5 / Chapter 43R
   -> Chapter 44 event contract + atomic outbox
-       -> Chapter 45 payment/money producers
-       -> Chapter 46 fraud/risk producers + audit reconciliation
-            -> Chapter 47 Kafka publication
-                 -> Chapter 48 inbox + projection substrate
-                      -> Chapter 49 analytics projections
-                           -> Chapter 50 rebuild + activation
-                                -> Chapter 51 offline replay dataset
-                                     -> Chapter 52 integrated closure
+       -> Chapter 45 payment/money producers -------------------+
+       -> Chapter 46 fraud/risk producers + audit reconciliation+
+                                                                |
+                          both merge-ready -> Chapter 47 Kafka publication
+                            -> Chapter 48 inbox + projection substrate
+                              -> Chapter 49 analytics projections
+                                -> Chapter 50 rebuild + activation
+                                  -> Chapter 51 offline replay dataset
+                                    -> Chapter 52 integrated closure
 ```
 
 Chapter 45 and Chapter 46 may be developed as independent producer families
-after Chapter 44 conventions freeze, but Kafka publication begins only when
-both families agree on the canonical contract. This prevents the transport from
-hardening a partial event taxonomy.
+after Chapter 44 is merge-ready; neither depends on the other's implementation.
+Kafka publication begins only when both producer families are merge-ready. This
+prevents the transport from hardening a partial event taxonomy.
 
 ## 19. Proof Strategy
 
@@ -1037,17 +1180,22 @@ Every chapter requires:
 
 - a `PRE_IMPLEMENTATION` invariant matrix covering all eight required lenses
 - a closure dossier with exact enforcement boundaries and fresh proof
-- H2 regression where useful plus real PostgreSQL proof for migrations,
-  constraints, JSON, triggers, and forced interleavings
-- real Kafka proof for acknowledgement, duplicate, ordering, rebalance,
-  retention/configuration, and consumer restart claims
-- canonical-byte golden fixtures and property/table-driven schema partitions
+- H2 regression where useful plus real PostgreSQL proof for each migration,
+  constraint, JSON, trigger, or forced-interleaving claim the chapter owns
+- real Kafka proof only for acknowledgement, duplicate, ordering, rebalance,
+  retention/configuration, or consumer-restart claims owned from Chapter 47
+  onward; earlier chapters prove explicit non-impact and handoff instead
+- canonical-byte golden fixtures and property/table-driven schema partitions in
+  chapters that create, transport, validate, or replay the event protocol
 - an accepted custom-infrastructure ADR and complete event/protocol boundary
   table before the application-owned outbox contract is implemented
 - two-tenant authorization and disclosure proof
 - prohibited-data canaries across database, Kafka, logs, metrics, audit, API,
   UI, fixtures, and reports
-- public API/client demo plus durable PostgreSQL/Kafka reconciliation
+- a capability-appropriate executable demo and durable reconciliation: Chapter
+  44 uses its test-owned infrastructure probe and makes no public product-event
+  claim; public source workflows begin with Chapter 45; Kafka reconciliation
+  begins with Chapter 47
 - a traceability pass followed by a temporally separate hostile failure pass
 - technical-debt, escaped-review, executable-naming, learning, and readiness
   gates
@@ -1055,6 +1203,8 @@ Every chapter requires:
 Mock producer/consumer tests may prove local control flow. They cannot certify
 Kafka acknowledgement, partition ordering, rebalance, consumer offset, or
 restart behavior. H2 cannot certify PostgreSQL stream locks or migrations.
+No chapter is required or permitted to claim a downstream boundary before its
+owner chapter; its matrix instead records the non-impact and explicit handoff.
 
 ## 20. Phase Completion Gate
 
@@ -1106,10 +1256,10 @@ fast and purpose-shaped; it is dangerous when nobody can say how current or
 complete it is. Generation, cutoff, coverage, checkpoint, and rebuild evidence
 turn a convenient table into a defensible product surface.
 
-## 22. Proposed Founder Decisions
+## 22. Founder-Confirmed Decisions
 
-Founder confirmation is required before Chapter 44 implementation. The proposed
-decisions are:
+Founder implementation authorization on 2026-07-27 confirmed the following
+decisions as one coherent product set before Phase 5 implementation began:
 
 1. Phase 5 optimizes for a trustworthy internal event/data backbone and one
    useful payment-risk analytics loop, not external Kafka access or warehouse

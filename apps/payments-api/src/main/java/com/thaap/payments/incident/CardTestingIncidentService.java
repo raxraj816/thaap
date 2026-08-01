@@ -5,6 +5,7 @@ import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRepository;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import java.time.Clock;
@@ -35,6 +36,7 @@ public class CardTestingIncidentService {
     private final AuditLogService auditLogService;
     private final WebhookDeliveryService webhookDeliveryService;
     private final CardTestingIncidentMetrics metrics;
+    private final RiskOperationsEventProducer eventProducer;
     private final Clock clock;
 
     public CardTestingIncidentService(
@@ -47,7 +49,8 @@ public class CardTestingIncidentService {
             IncidentEvidenceLinkRepository evidenceRepository,
             CardTestingIncidentResolutionRepository resolutionRepository,
             RiskOperatorRepository operatorRepository, AuditLogService auditLogService,
-            WebhookDeliveryService webhookDeliveryService, CardTestingIncidentMetrics metrics, Clock clock) {
+            WebhookDeliveryService webhookDeliveryService, CardTestingIncidentMetrics metrics,
+            RiskOperationsEventProducer eventProducer, Clock clock) {
         if (detectionWindow.isNegative() || detectionWindow.isZero()
                 || detectionWindow.compareTo(Duration.ofHours(24)) > 0
                 || minimumAttempts < 2 || minimumDeclines < 1 || minimumDistinctCards < 2
@@ -67,6 +70,7 @@ public class CardTestingIncidentService {
         this.auditLogService = auditLogService;
         this.webhookDeliveryService = webhookDeliveryService;
         this.metrics = metrics;
+        this.eventProducer = eventProducer;
         this.clock = clock;
     }
 
@@ -117,6 +121,8 @@ public class CardTestingIncidentService {
         incident.applyAggregate(durableAggregate, now);
         incidentRepository.flush();
         if (created) {
+            eventProducer.riskIncidentOpened(context, incident.getId(), now, requestId,
+                    "HIGH", incident.getAttemptCount());
             auditLogService.recordMerchantApiAction(context, requestId, "card_testing_incident.opened",
                     "card_testing_incident", incident.getId(),
                     "Suspected card-testing pattern derived from persisted THAAP control evidence",
@@ -156,6 +162,8 @@ public class CardTestingIncidentService {
         CardTestingIncidentResolution resolution = resolutionRepository.saveAndFlush(
                 new CardTestingIncidentResolution(incident, actor, mitigationCode, now));
         incidentRepository.flush();
+        eventProducer.riskIncidentResolved(context, incident.getId(), now, requestId,
+                mitigationCode.name());
         auditLogService.recordRiskOperatorAction(context, requestId, "card_testing_incident.resolved",
                 "card_testing_incident", incident.getId(),
                 "Suspected card-testing incident resolved with closed mitigation code",

@@ -529,7 +529,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now();
+        Instant claimedAt = Instant.now().minusSeconds(10);
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(claim, claimedAt)).isTrue();
 
@@ -619,7 +619,8 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = Instant.now().minusSeconds(60)
+                .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(claim, claimedAt.plusSeconds(1))).isTrue();
@@ -653,7 +654,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimAt = Instant.now();
+        Instant claimAt = Instant.now().minusSeconds(300);
         double unknownBefore = meterRegistry.counter("thaap.webhook.attempts",
                 "event.type", "refund.created", "outcome", "OUTCOME_UNKNOWN").count();
         double exhaustedBefore = meterRegistry.counter("thaap.webhook.delivery.terminal",
@@ -709,14 +710,18 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant dueAt = Instant.now().plusSeconds(10);
+        Instant dueAt = Instant.now();
 
         for (int attempt = 1; attempt <= WebhookRetryPolicy.MAX_ATTEMPTS; attempt++) {
             assertThat(executor.processDueDeliveries(dueAt, 1)).isEqualTo(1);
             WebhookDelivery current = deliveryRepository.findById(delivery.getId()).orElseThrow();
             if (attempt < WebhookRetryPolicy.MAX_ATTEMPTS) {
                 assertThat(current.getStatus()).isEqualTo(WebhookDeliveryStatus.RETRY_SCHEDULED);
-                dueAt = current.getNextAttemptAt();
+                Instant fastForwardedDueAt = Instant.now().minusSeconds(1);
+                jdbcTemplate.update(
+                        "UPDATE webhook_deliveries SET next_attempt_at = ? WHERE id = ?",
+                        java.sql.Timestamp.from(fastForwardedDueAt), delivery.getId());
+                dueAt = Instant.now();
             }
         }
 

@@ -20,6 +20,7 @@ import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.payment.PaymentIntentRepository;
 import com.thaap.payments.payment.RefundRepository;
 import com.thaap.payments.review.FraudLabelRepository;
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
 import com.thaap.payments.webhook.WebhookDeliveryService;
@@ -87,7 +88,9 @@ class ChargebackServiceDeadlineTests {
                 mock(DisputeOffsetAllocationRepository.class), evidenceRepository,
                 mock(FraudLabelRepository.class), mock(LedgerService.class), mock(AuditLogService.class),
                 mock(WebhookDeliveryService.class), mock(ChargebackMetrics.class),
-                mock(DisputeWorkflowInitializer.class), clock);
+                mock(DisputeWorkflowInitializer.class), clock,
+                mock(com.thaap.payments.payment.PaymentDomainEventService.class),
+                mock(RiskOperationsEventProducer.class));
         return new Fixture(service, new MerchantContext(merchantId, "deadline", "sk_test"),
                 chargeback, evidenceRepository);
     }

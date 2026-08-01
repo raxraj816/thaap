@@ -1,5 +1,6 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.risk.RiskOperationsEventProducer;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -14,15 +15,18 @@ public class WebhookDeliveryFinalizationService {
     private final WebhookEndpointRepository endpointRepository;
     private final WebhookRetryPolicy retryPolicy;
     private final TransactionTemplate finalizationTransaction;
+    private final RiskOperationsEventProducer eventProducer;
 
     public WebhookDeliveryFinalizationService(WebhookDeliveryRepository deliveryRepository,
             WebhookDeliveryAttemptRepository attemptRepository,
             WebhookEndpointRepository endpointRepository, WebhookRetryPolicy retryPolicy,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            RiskOperationsEventProducer eventProducer) {
         this.deliveryRepository = deliveryRepository;
         this.attemptRepository = attemptRepository;
         this.endpointRepository = endpointRepository;
         this.retryPolicy = retryPolicy;
+        this.eventProducer = eventProducer;
         this.finalizationTransaction = new TransactionTemplate(transactionManager);
         this.finalizationTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -36,6 +40,10 @@ public class WebhookDeliveryFinalizationService {
             }
             state.attempt().succeed(completedAt, responseStatus);
             state.delivery().succeed(claim.claimToken(), completedAt);
+            if (claim.redeliveryRequestId() != null) {
+                eventProducer.webhookRedeliverySucceeded(claim.merchantId(), claim.endpointId(),
+                        completedAt, claim.deliveryGeneration());
+            }
             return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
     }
@@ -76,6 +84,11 @@ public class WebhookDeliveryFinalizationService {
                         completedAt.plus(retryPolicy.delayBeforeNextAttempt(
                                 claim.generationAttemptNumber())), errorCode);
             }
+            if (state.delivery().getStatus() == WebhookDeliveryStatus.EXHAUSTED) {
+                eventProducer.webhookDeliveryExhausted(claim.merchantId(), claim.endpointId(),
+                        completedAt, state.delivery().getDeliveryGeneration(),
+                        state.delivery().getAttemptCount(), errorCode.name());
+            }
             return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
     }
@@ -96,6 +109,9 @@ public class WebhookDeliveryFinalizationService {
             }
             state.attempt().failTerminally(completedAt, requestSent, responseStatus, errorCode);
             state.delivery().exhaust(claim.claimToken(), errorCode);
+            eventProducer.webhookDeliveryExhausted(claim.merchantId(), claim.endpointId(),
+                    completedAt, state.delivery().getDeliveryGeneration(),
+                    state.delivery().getAttemptCount(), errorCode.name());
             return WebhookDeliveryFinalizationResult.finalized(state.delivery(), state.attempt());
         });
     }
