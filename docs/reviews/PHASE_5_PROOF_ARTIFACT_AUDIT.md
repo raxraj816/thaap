@@ -163,9 +163,25 @@ cross-cutting rows are `GAP` and carry `TD-0008`.
 | | Rows |
 |---|---|
 | COVERED — reconciled to the suite that holds them | 36 |
-| GAP — no assertion exists, registered as `TD-0007` | 17 |
-| GAP — no assertion exists, registered as `TD-0008` | 6 |
+| GAP — no assertion existed, registered as `TD-0007` | 17 |
+| GAP — no assertion existed, registered as `TD-0008` | 6 |
 | **Total unresolved references found** | **59** |
+
+### Payment progress (2026-08-07)
+
+| | Rows |
+|---|---|
+| GAP rows since proven and returned to `PASS` | 6 |
+| GAP rows with new partial proof, still `PARTIAL` | 1 |
+| GAP rows still wholly unproven | 16 |
+
+Proven: `C44-OBS-001`, `C46-OBS-001`, `C50-OBS-001`, `C51-OBS-001`, `C46-SEC-001`,
+`C50-SEC-001`. Partially proven: `C51-CON-001`. Three production changes were required
+along the way, because the honest fix for a promise production does not keep is
+production rather than a weaker assertion: `ProjectionRebuildMetrics.lease` and
+`.jobDuration`, a `recovered` flag on `ProjectionRebuildLease` so lease recovery is
+carried rather than inferred from the fencing epoch, and a new
+`DomainEventWriterMetrics`, since the event-foundation writer emitted no signal at all.
 
 ## What this does and does not mean
 

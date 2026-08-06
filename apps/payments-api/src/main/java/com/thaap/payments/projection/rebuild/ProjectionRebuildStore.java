@@ -241,7 +241,7 @@ public class ProjectionRebuildStore {
         return new ProjectionRebuildLease(rebuildId, prior.projectionDefinitionId(),
                 prior.projectionGenerationId(), prior.cutoffManifestId(), prior.projectionName(),
                 prior.handlerVersion(), workerId, token, epoch, prior.processedInputCount(),
-                prior.expectedInputCount(), prior.lastCheckpointKey(), expiry);
+                prior.expectedInputCount(), prior.lastCheckpointKey(), expiry, expired);
     }
 
     private ProjectionRebuildLease mapLease(java.sql.ResultSet resultSet)
@@ -252,7 +252,9 @@ public class ProjectionRebuildStore {
                 resultSet.getString(6), resultSet.getString(7),
                 resultSet.getObject(8, UUID.class), resultSet.getLong(9),
                 resultSet.getLong(10), resultSet.getLong(11), resultSet.getString(12),
-                com.thaap.payments.persistence.JdbcTime.instant(resultSet, 13));
+                com.thaap.payments.persistence.JdbcTime.instant(resultSet, 13),
+                // Reading an existing lease is not a claim, so it never reports recovery.
+                false);
     }
 
     private Instant now() {

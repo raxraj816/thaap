@@ -35,6 +35,13 @@ REQUIRED_ENTRY_FIELDS = {
     "Adversarial evidence",
     "Status",
 }
+# `PASS` means the invariant is held and proven. `PARTIAL` means it is held on the
+# ordinary path and its adversarial proof is unbuilt — the state a matrix previously had
+# no way to express, which is why rows sat at `PASS` naming suites nobody had written
+# (`ER-0099`). A `PARTIAL` row must name the debt that owns the missing proof, and a
+# phase cannot close while one exists: honest at chapter closure, blocking at phase
+# closure.
+ALLOWED_ENTRY_STATUSES = {"PASS", "PARTIAL"}
 REQUIRED_LENSES = {
     "PAYMENT_FRAUD",
     "TENANT_ISOLATION",
@@ -53,6 +60,7 @@ CHAPTER_COORDINATE = re.compile(r"\bChapter\s+(\d+)([A-Z]?)\b", re.IGNORECASE)
 # the artifact exists, because that is how a reader uses the field: they run it.
 ARTIFACT_REFERENCE = re.compile(r"`([^`]+)`")
 DEBT_REFERENCE = re.compile(r"\bTD-\d{4}\b")
+REJECT_PARTIAL_FLAG = "--reject-partial"
 CLASS_ARTIFACT = re.compile(r"^[A-Z][A-Za-z0-9]*(?:Tests|Test)$")
 FILE_ARTIFACT = re.compile(r"^[A-Za-z0-9_./-]+\.(?:py|sh|ts|tsx|java|kt)$")
 SOURCE_SUFFIXES = (".java", ".kt", ".ts", ".tsx", ".py", ".sh")
@@ -123,7 +131,8 @@ def validate_matrix(
         path: pathlib.Path,
         text: str,
         artifacts: set[str] | None = None,
-        root: pathlib.Path = ROOT) -> list[str]:
+        root: pathlib.Path = ROOT,
+        reject_partial: bool = False) -> list[str]:
     errors: list[str] = []
     if artifacts is None:
         artifacts = repository_artifacts(root)
@@ -187,8 +196,21 @@ def validate_matrix(
             covered_lenses.add(lens)
             if lens not in REQUIRED_LENSES:
                 errors.append(f"{path}: {entry_id} uses unknown lens '{lens}'")
-        if entry.get("Status") != "PASS":
-            errors.append(f"{path}: {entry_id} Status must be PASS")
+        status = entry.get("Status")
+        if status not in ALLOWED_ENTRY_STATUSES:
+            errors.append(
+                f"{path}: {entry_id} Status must be one of "
+                f"{', '.join(sorted(ALLOWED_ENTRY_STATUSES))}")
+        elif status == "PARTIAL":
+            debt = DEBT_REFERENCE.search(entry_text)
+            if not debt:
+                errors.append(
+                    f"{path}: {entry_id} is PARTIAL and must cite the TD-NNNN that owns "
+                    "the unbuilt proof")
+            elif reject_partial:
+                errors.append(
+                    f"{path}: {entry_id} is PARTIAL ({debt.group(0)}); a phase cannot "
+                    "close on partial proof")
         if PLACEHOLDER.search(entry_text):
             errors.append(f"{path}: {entry_id} contains an unresolved placeholder")
         for artifact in unresolved_artifacts(entry.get("Proof", ""), root, artifacts):
@@ -202,12 +224,14 @@ def validate_matrix(
 
 
 def matrix_paths(arguments: list[str]) -> list[pathlib.Path]:
-    if arguments:
-        return [pathlib.Path(argument).resolve() for argument in arguments]
+    paths = [argument for argument in arguments if argument != REJECT_PARTIAL_FLAG]
+    if paths:
+        return [pathlib.Path(argument).resolve() for argument in paths]
     return sorted(ROOT.glob(DEFAULT_PATTERN))
 
 
 def main(arguments: list[str]) -> int:
+    reject_partial = REJECT_PARTIAL_FLAG in arguments
     paths = matrix_paths(arguments)
     if not paths:
         print(f"No invariant-proof matrices found at {DEFAULT_PATTERN}", file=sys.stderr)
@@ -221,7 +245,8 @@ def main(arguments: list[str]) -> int:
             errors.append(f"{path}: matrix file does not exist")
             continue
         text = path.read_text(encoding="utf-8")
-        errors.extend(validate_matrix(path, text, artifacts))
+        errors.extend(
+            validate_matrix(path, text, artifacts, reject_partial=reject_partial))
         for entry_id in ENTRY_HEADING.findall(text):
             if entry_id in all_ids:
                 errors.append(

@@ -1,6 +1,10 @@
 package com.thaap.payments.replay;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,12 +22,14 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -49,6 +55,7 @@ class OfflineReplayDatasetIntegrationTests {
     @Autowired private DatabaseCleaner databaseCleaner;
     @Autowired private OfflineReplayDatasetWorker worker;
     @Autowired private OfflineReplayDatasetService service;
+    @MockitoSpyBean private OfflineReplayDatasetExecutionProbe executionProbe;
 
     private MockMvc mockMvc;
 
@@ -187,6 +194,149 @@ class OfflineReplayDatasetIntegrationTests {
                         .content(datasetRequest(fixture, labelCutoff, simulationId)))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         return UUID.fromString(objectMapper.readTree(response).get("datasetId").asText());
+    }
+
+    /**
+     * Proof for {@code C51-CON-001}.
+     *
+     * <p>{@link OfflineReplayDatasetExecutionProbe} has existed since the dataset worker was
+     * built, as a declared "test seam for deterministic crash and stale-worker interleavings", wired
+     * into the worker at both points — and no test ever used it, because the row naming
+     * this proof closed on a suite nobody wrote ({@code ER-0099}, {@code TD-0007}).
+     *
+     * <p>These run against real PostgreSQL through {@code OfflineReplayDatasetPostgreSqlTests},
+     * which is what makes the lock and fencing claims mean anything.
+     */
+    @Test
+    void aCrashBetweenChunkEvidenceAndCheckpointResumesWithoutDoubleCounting() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("replay-crash-resume");
+        UUID datasetId = createDataset(fixture, fixture.labelAvailableAt(), null,
+                "replay-crash-resume");
+
+        // Fail exactly once, after the chunk's evidence rows are written and before the
+        // checkpoint advances. That window is the one where a resumed worker can re-read
+        // the same page and count it twice.
+        AtomicInteger crashes = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (crashes.getAndIncrement() == 0) {
+                throw new IllegalStateException("forced crash before checkpoint");
+            }
+            return null;
+        }).when(executionProbe).afterChunkEvidenceBeforeCheckpoint(any(), anyLong());
+
+        WorkerClaim first = worker.claim(datasetId, "crash-worker");
+        assertThat(first).isNotNull();
+        assertThatThrownBy(() -> worker.processNextChunk(first))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(crashes.get()).isEqualTo(1);
+
+        expireLease(datasetId);
+        complete(datasetId);
+
+        ReplayDatasetView dataset = service.get(fixture.manager().context(), datasetId);
+        assertThat(dataset.lifecycleStatus()).isEqualTo(ReplayDatasetLifecycleStatus.SUCCEEDED);
+        assertThat(dataset.coverage().processedCount()).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM replay_dataset_item_evidence WHERE replay_dataset_id = ?
+                """, Integer.class, datasetId)).isOne();
+    }
+
+    @Test
+    void aStaleWorkerCannotAdvanceADatasetAfterItsLeaseIsTakenOver() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("replay-stale-fence");
+        UUID datasetId = createDataset(fixture, fixture.labelAvailableAt(), null,
+                "replay-stale-fence");
+
+        WorkerClaim stale = worker.claim(datasetId, "stale-worker");
+        assertThat(stale).isNotNull();
+
+        // The takeover is applied directly rather than by ageing the lease and re-claiming.
+        // Lease expiry is judged against the wall clock, and the schema forbids writing an
+        // already-expired lease, so a re-claim here can only be raced into existence — this
+        // test was flaky for exactly that reason. The real expiry-and-recovery path is
+        // covered by aCrashBetweenChunkEvidenceAndCheckpointResumesWithoutDoubleCounting;
+        // what this test owns is the fencing invariant, which is a pure function of the
+        // epoch and needs no clock at all.
+        takeOverLease(datasetId);
+        long currentEpoch = jdbcTemplate.queryForObject("""
+                SELECT fencing_epoch FROM replay_dataset_manifests WHERE id = ?
+                """, Long.class, datasetId);
+        assertThat(currentEpoch).isGreaterThan(stale.fencingEpoch());
+
+        // The stale worker still holds a syntactically valid claim. Only the fencing epoch
+        // tells it apart from the live one, which is why it is checked in the same locked
+        // statement that reads the row rather than before it.
+        assertThat(worker.processNextChunk(stale)).isEqualTo(WorkOutcome.STALE);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM replay_dataset_chunks WHERE replay_dataset_id = ?
+                """, Integer.class, datasetId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT processed_count FROM replay_dataset_manifests WHERE id = ?
+                """, Long.class, datasetId)).isZero();
+    }
+
+    /** Simulates another worker winning the lease, without depending on the wall clock. */
+    private void takeOverLease(UUID datasetId) {
+        jdbcTemplate.update("""
+                UPDATE replay_dataset_manifests
+                   SET lease_owner = ?, lease_token = ?, fencing_epoch = fencing_epoch + 1
+                 WHERE id = ?
+                """, "recovering-worker", UUID.randomUUID(), datasetId);
+    }
+
+    @Test
+    void aCrashBeforeFinalizationLeavesNoPartiallyFinalizedDataset() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("replay-finalize-crash");
+        UUID datasetId = createDataset(fixture, fixture.labelAvailableAt(), null,
+                "replay-finalize-crash");
+
+        AtomicInteger crashes = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (crashes.getAndIncrement() == 0) {
+                throw new IllegalStateException("forced crash before finalization");
+            }
+            return null;
+        }).when(executionProbe).beforeFinalization(any());
+
+        WorkerClaim claim = worker.claim(datasetId, "finalize-crash-worker");
+        WorkOutcome outcome = worker.processNextChunk(claim);
+        assertThat(outcome).isEqualTo(WorkOutcome.CONTINUE);
+        assertThatThrownBy(() -> worker.processNextChunk(claim))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT lifecycle_status FROM replay_dataset_manifests WHERE id = ?
+                """, String.class, datasetId)).isNotEqualTo("SUCCEEDED");
+
+        expireLease(datasetId);
+        complete(datasetId);
+
+        assertThat(service.get(fixture.manager().context(), datasetId).lifecycleStatus())
+                .isEqualTo(ReplayDatasetLifecycleStatus.SUCCEEDED);
+    }
+
+    /**
+     * Ages the lease so the next claim is a recovery rather than a fresh claim.
+     *
+     * <p>{@code ck_replay_dataset_manifests_time} enforces {@code lease_expires_at >
+     * updated_at}, so a lease cannot simply be back-dated: the schema does not permit an
+     * already-expired lease to be written. Expiry is only reachable by ending the lease
+     * immediately after the claim instant, which is itself already in the past.
+     */
+    private void expireLease(UUID datasetId) {
+        // Anchor on created_at rather than the claim instant. created_at precedes a full
+        // HTTP creation round trip and a claim transaction, so the expiry it yields is
+        // decisively in the past; anchoring on updated_at leaves only the microseconds
+        // since the claim and races the wall clock.
+        Instant createdAt = jdbcTemplate.queryForObject("""
+                SELECT created_at FROM replay_dataset_manifests WHERE id = ?
+                """, Instant.class, datasetId);
+        jdbcTemplate.update("""
+                UPDATE replay_dataset_manifests
+                   SET updated_at = ?, lease_expires_at = ?
+                 WHERE id = ?
+                """, Timestamp.from(createdAt), Timestamp.from(createdAt.plusMillis(1)),
+                datasetId);
     }
 
     private String datasetRequest(ReplayFixture fixture, Instant labelCutoff,

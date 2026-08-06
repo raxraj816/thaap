@@ -43,7 +43,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: integrated gate and demo will exercise only committed-fact producers, exact-byte transport, inbox-idempotent projection handlers, projection-only recovery, immutable datasets, and read-only source reconciliation.
 - Proof: PhaseFiveSourceNonInterferenceIntegrationTests plus the public demo will compare source identities/states, processor invocation counts, webhook identities, fraud lineage, and ledger group/account/direction/amount digests before and after every failure/recovery stage. The PhaseFiveSourceNonInterferenceIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Capture, refund, chargeback, label, review, control, broker duplicate, poison event, consumer restart, rebuild activation/rollback, and dataset generation partitions are included.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-TEN-001
 
@@ -53,7 +53,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: aggregate proof will trace tenant-qualified composite keys, live actor resolvers, closed route roles, safe absence semantics, server-derived tenant identity, and bounded global operations DTOs through every Chapter 44–51 boundary.
 - Proof: PhaseFiveTenantIsolationIntegrationTests, API contracts, Kafka/PostgreSQL substitution tests, and browser role tests will cover two tenants, all merchant roles, both platform roles, disabled credentials, and copied identifiers. The PhaseFiveTenantIsolationIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Envelope/key/payload tenant permutations, same/foreign/absent IDs, live/disabled actor, merchant/platform credential swaps, and data present/stale/quarantined/rebuilt states are partitioned.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-SEC-001
 
@@ -63,7 +63,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: end-to-end allowlist/schema checks, exact sink scans, safe operational DTOs, closed telemetry dimensions, in-memory-only client credentials, and documentation/reference-client review will cross every boundary.
 - Proof: PhaseFivePrivacySinkIntegrationTests, UI storage/build scans, Python demo tests, Kafka record inspection, database/log/metric/audit scans, and malformed-error cases will use distinct canaries for every prohibited class. The PhaseFivePrivacySinkIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Valid and schema-invalid events, broker/auth failures, poison records, reconciliation mismatches, foreign IDs, disabled actors, browser reload, client error, and generated artifacts are scanned.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-CON-001
 
@@ -73,7 +73,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: integrated orchestration will rely on the exact Chapter 44–51 transaction and lock boundaries and will add no bypass; the closure gate will require all forced PostgreSQL and real Kafka suites before reporting success.
 - Proof: PhaseFiveFailureSequenceIntegrationTests and public failure demo will force both sides of source rollback, ack/finalize, inbox/offset, stream predecessor, lease takeover, catch-up/snapshot, activate/cancel, rollback/activate, and dataset checkpoint boundaries. The PhaseFiveFailureSequenceIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Every pre/post-commit crash point, current/stale token, duplicate/concurrent duplicate, same/unrelated stream, before/after snapshot live write, and restart order is covered.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-DATA-001
 
@@ -83,7 +83,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: aggregate traceability walk will join every API/UI field through projection and dataset manifests to immutable source lineage and require explicit unknown/partial coverage rather than inferred zero.
 - Proof: PhaseFiveLineageTraceabilityIntegrationTests plus demo reconciliation will select representative allow/block/step-up/review, capture/refund/chargeback, label, live/synthetic, bootstrap/live-event, stale/current, and unlabeled/contradictory cases. The PhaseFiveLineageTraceabilityIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Missing event, version gap, unsupported schema, absent feature, future/exact label, changed control, origin mismatch, bootstrap digest mismatch, rebuild mismatch, and same-count different-member dataset are included.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-API-001
 
@@ -103,7 +103,7 @@ aggregate result. Every proof and status below remains pending.
 - Implementation: aggregate health policy, after-commit metrics, safe structured logs, bounded operator APIs, and runbooks will reconcile the Chapter 44–51 signals without weakening component truth.
 - Proof: PhaseFiveOperationalSignalsIntegrationTests will induce each failure independently and in combinations, inspect meters/logs/readiness/operator summaries, and scan for high-cardinality/sensitive dimensions. The PhaseFiveOperationalSignalsIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Broker outage, publisher defect, auth/topic failure, unknown ack, blocked stream, lag, poison, database outage, stale generation, mismatch, worker failure, and recovery partitions are included.
-- Status: PASS
+- Status: PARTIAL
 
 ## C52-OPS-001
 
