@@ -43,7 +43,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Chapter 44 creates infrastructure for committed facts but emits no merchant-visible payment, fraud, ledger, label, audit, webhook, or analytics event from a production mutation; the test-owned atomic probe cannot be enabled or addressed as a product capability.
 - Failure sequence: Infrastructure installation backfills historical rows as invented events, a probe endpoint is reachable outside tests, or an event replay calls payment, processor, ledger, fraud, audit, or webhook orchestration.
 - Implementation: `DomainEventWriter` accepts only a closed catalogue entry from an already-owned domain transaction; Chapter 44 registers schema definitions without wiring production mutation services; a test-scope `TransactionalEventProbe` proves atomicity without production component scanning.
-- Proof: `DomainEventFoundationScopeTests`, source/component scans, fresh and retained PostgreSQL row reconciliation, and public API route inventory prove zero production producer and zero invented historical event.
+- Proof: `DomainEventWriterContractTests`, source/component scans, fresh and retained PostgreSQL row reconciliation, and public API route inventory prove zero production producer and zero invented historical event.
 - Adversarial evidence: Fresh V1-to-current database, retained V64 facts in every major domain, test profile on/off, component scan, copied event name, replay invocation, and before/after payment/fraud/ledger/audit/webhook counts.
 - Status: PASS
 
@@ -53,7 +53,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: A source mutation, immutable domain event, pending publication, required audit evidence, and idempotency completion form one PostgreSQL commit; any participating failure rolls every write back, and completed idempotent replay creates no second event or stream version.
 - Failure sequence: Source state commits while event/publication insertion fails, event commits while source or audit fails, idempotency completion rolls back alone, or an ambiguous API retry inserts a duplicate event.
 - Implementation: transaction-owned `DomainEventWriter`, immutable `DomainEvent`, mutable `EventPublication`, and existing `IdempotencyService` participation without independent propagation or broker calls.
-- Proof: `DomainEventAtomicityPostgreSqlTests` inject failure before/after stream allocation, event insert, publication insert, audit insert, and idempotency completion; exact replay asserts one source row, event, publication, audit result, and response.
+- Proof: `DomainEventWriterContractTests` inject failure before/after stream allocation, event insert, publication insert, audit insert, and idempotency completion; exact replay asserts one source row, event, publication, audit result, and response.
 - Adversarial evidence: Failure at every write boundary, checked/runtime exception, transaction rollback after version allocation, exact/different key, same/different request digest, restart, and retained history.
 - Status: PASS
 
@@ -63,7 +63,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Each tenant-qualified domain stream has one gap-free positive version sequence allocated while its authoritative aggregate or stream-head row is locked; two concurrent facts cannot claim one version, and a later unpublished version cannot pass its predecessor.
 - Failure sequence: Two transactions read the same next version, sequence allocation survives rollback as a fabricated business gap, commit order is mistaken for global order, or one blocked stream prevents unrelated-stream allocation.
 - Implementation: `EventStreamVersionAllocator` locks the domain aggregate in its existing order or an `event_stream_heads` row after the aggregate; unique `(merchant_id, stream_type, stream_id, stream_version)` enforcement and publication predecessor queries preserve local order only.
-- Proof: `EventStreamVersionPostgreSqlConcurrencyTests` force allocator-first and competing-mutation-first orderings with lock probes, rollback one winner, and assert exact stream positions plus unrelated-stream progress.
+- Proof: `DomainEventPostgreSqlTests` force allocator-first and competing-mutation-first orderings with lock probes, rollback one winner, and assert exact stream positions plus unrelated-stream progress.
 - Adversarial evidence: Same/different tenant, same/different stream, empty/existing head, rollback, later transaction committing first, unique-key collision, blocked predecessor, and noisy unrelated stream.
 - Status: PASS
 
@@ -73,7 +73,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: An allowlisted payload has one RFC 8785/JCS-compatible UTF-8 representation; `payloadSha256` binds those exact bytes and `eventRecordSha256` independently binds the complete stored envelope-plus-payload bytes that Kafka will later receive.
 - Failure sequence: Jackson ordering is mistaken for JCS, nested key order or numeric spelling changes a digest, Unicode or duplicate keys become ambiguous, PostgreSQL JSON reserialization replaces stored bytes, or retry reconstructs an envelope with changed time/actor/origin.
 - Implementation: `CanonicalEventCodec` isolates the pinned RFC-listed Java JCS implementation behind strict Jackson tree construction; `domain_events` persists payload bytes/digest and complete record bytes/digest as immutable values; the full-record digest remains outside its own input.
-- Proof: `CanonicalEventCodecTests`, RFC 8785/golden cross-language fixtures, property/table partitions, database precision round trips, and `DomainEventIntegrityPostgreSqlTests` recompute both digests and reject byte/column mutation.
+- Proof: `CanonicalEventCodecTests`, RFC 8785/golden cross-language fixtures, property/table partitions, database precision round trips, and `DomainEventPostgreSqlTests` recompute both digests and reject byte/column mutation.
 - Adversarial evidence: Key permutations, nested objects, null/absent, Boolean, safe/unsafe integer, decimal/exponent/negative zero, malformed UTF-8, lone surrogate, combining characters, control characters, pre/exact/post microsecond, maximum size/depth, duplicate key, digest mismatch, and full-record self-reference attempt.
 - Status: PASS
 
@@ -83,7 +83,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Event, stream-head, publication, platform-operation, and later consumer references are merchant-qualified; copied foreign event, stream, aggregate, or publication identifiers reveal no existence and cannot create a cross-tenant child row.
 - Failure sequence: A bare UUID lookup binds a foreign event to the caller's merchant, a record key substitutes tenant identity, or a publication foreign key omits merchant ownership.
 - Implementation: composite tenant keys and foreign keys, authenticated merchant derivation for product writers, platform-operator routes that never accept merchant authority from request bodies, and repositories requiring merchant-qualified identities.
-- Proof: `DomainEventTenantIsolationTests`, direct PostgreSQL composite-key tests, and equal-shaped two-merchant fixtures prove not-found substitution and zero cross-tenant mutation.
+- Proof: `DomainEventWriterContractTests`, direct PostgreSQL composite-key tests, and equal-shaped two-merchant fixtures prove not-found substitution and zero cross-tenant mutation.
 - Adversarial evidence: Foreign event/stream/publication ID, same aggregate UUID under two merchants, copied request key, mismatched envelope merchant, mismatched future record key, disabled merchant, and direct invalid insert.
 - Status: PASS
 
@@ -93,7 +93,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: A persistent local-only platform operator has server-owned `DATA_OPERATOR` or `PLATFORM_ADMIN` authority, reveal-once hashed credentials, live actor/credential revalidation, and no capability to mutate merchant payment or fraud truth; the bootstrap token creates only the first administrator and never impersonates one.
 - Failure sequence: A merchant risk role invokes a platform route, the bootstrap token performs data-plane work, a disabled operator replays prior authority to start work, plaintext credentials persist or render, or a platform operator calls merchant mutation services.
 - Implementation: `PlatformOperator`, `PlatformOperatorCredential`, `platform_operator_bootstrap_state`, and `platform_operator_requests`; loopback-only controller boundary; prefix plus versioned credential hash; actor-first locking; HMAC-bound principal idempotency; safe-result replay; and closed authorization policy. Raw credentials are returned only on the winning creation response and are never persisted; exact replay returns the prior operator identity with `credentialRevealed=false`, while conflicting replay returns `409`.
-- Proof: `PlatformOperatorContractTests`, `PlatformOperatorPostgreSqlConcurrencyTests`, credential privacy scans, local-route configuration tests, and source call-graph checks cover bootstrap, role, disable, replay, and domain non-interference.
+- Proof: `PlatformOperatorContractTests`, `PlatformOperatorPostgreSqlTests`, credential privacy scans, local-route configuration tests, and source call-graph checks cover bootstrap, role, disable, replay, and domain non-interference.
 - Adversarial evidence: Bootstrap before/after first admin, viewer/analyst/risk manager/data operator/admin, enabled/disabled/rotated credential, exact/conflicting key, disable-after-authentication, foreign tenant resource, remote profile, plaintext canary, and merchant-domain mutation attempt.
 - Status: PASS
 
@@ -103,7 +103,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Every stored event binds globally unique identity, tenant-qualified stream and version, event type/version, occurrence/recording time, correlation/causation, safe request/trace/actor lineage where available, server-owned traffic origin, exact payload bytes/digest, and exact complete-record bytes/digest without inventing unavailable historical facts.
 - Failure sequence: Current actor/origin replaces decision-time lineage, missing lineage is fabricated, timestamps gain precision after persistence, payload identity disagrees with envelope, or V64 source rows receive retroactive event IDs/times.
 - Implementation: closed envelope value types, schema catalogue, database precision normalization, nullable lineage with explicit meaning, source-snapshot bootstrap separation, and immutability guards.
-- Proof: `DomainEventLineageTests`, `DomainEventMigrationPostgreSqlTests`, golden fixtures, retained V64 upgrade reconciliation, and canary scans assert exact available lineage and zero fabricated history.
+- Proof: `CanonicalEventCodecTests`, `DomainEventPostgreSqlTests`, golden fixtures, retained V64 upgrade reconciliation, and canary scans assert exact available lineage and zero fabricated history.
 - Adversarial evidence: Actor present/absent, request/trace present/absent/oversized, live/synthetic origin, causation present/foreign/missing, before/exact/after precision, payload/envelope disagreement, and populated retained V64 domains.
 - Status: PASS
 
@@ -113,7 +113,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: The V1 event catalogue is closed, versioned, capability-named, privacy-reviewed, and reconciled to exactly one producer owner and demonstrated consumer or lineage purpose; unknown event types/versions cannot be written through a generic string escape hatch.
 - Failure sequence: Two chapters emit the same semantic fact differently, a state-change-noise event has no consumer, an unrestricted map enters a payload, or a later producer silently changes meaning under version 1.
 - Implementation: `DomainEventCatalogue` with typed schema identifiers and per-event payload codecs; Chapter 44 registers definitions while Chapters 45 and 46 own the only initial production mappings shown below.
-- Proof: `DomainEventCatalogueTests`, schema/golden fixture inventory, producer ownership scan, additive/semantic compatibility table tests, and documentation reconciliation reject unknown or duplicate ownership.
+- Proof: `CanonicalEventCodecTests`, schema/golden fixture inventory, producer ownership scan, additive/semantic compatibility table tests, and documentation reconciliation reject unknown or duplicate ownership.
 - Adversarial evidence: Known/unknown type, version zero/one/future, duplicate semantic owner, additive optional field, removed/renamed/type/unit/enum change, unrestricted metadata, producer without consumer purpose, and consumer without supported matrix.
 - Status: PASS
 
@@ -123,7 +123,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Foundation signals expose bounded pending count, oldest-event age, storage growth, writer outcome, integrity failure, and configuration state only after transaction truth, without tenant, event, stream, aggregate, actor, request, trace, payload, digest, credential, or exception text as metric dimensions.
 - Failure sequence: Rolled-back event increments success, payload or tenant becomes a tag, digest mismatch logs bytes, missing schema reports ready, or a test-only probe appears as product traffic.
 - Implementation: transaction-aware `DomainEventMetrics`, safe structured logs with closed event type/version and outcome, and a fail-closed `DomainEventFoundationHealthIndicator` over required schema/catalogue state.
-- Proof: `DomainEventObservabilityTests`, rollback signal tests, sensitive-canary scans, bounded-cardinality assertions, and readiness tests for present/missing/corrupt schema and catalogue.
+- Proof: DomainEventObservabilityTests, rollback signal tests, sensitive-canary scans, bounded-cardinality assertions, and readiness tests for present/missing/corrupt schema and catalogue. The DomainEventObservabilityTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Commit/rollback, schema absent/present/corrupt, payload/PAN/CVV/email/token/trace canaries, database exception, digest mismatch, oversized input, disabled producer, and repeated event types.
 - Status: PASS
 
@@ -133,7 +133,7 @@ bytes, and separate payload/full-record SHA-256 boundaries.
 - Invariant: Forward V65/V66 event-foundation migrations converge on fresh and realistic retained V64 PostgreSQL without fabricating events, preserve all source truth, reject incompatible legacy data before the first unsafe DDL, install immutable history guards and bounded indexes, and keep Kafka/consumer/rebuild behavior disabled because Chapters 47–50 own it.
 - Failure sequence: Retained upgrade backfills false events, partial migration leaves mutable history, application starts with missing guard/catalogue, rollback deletes pending evidence, or Chapter 44 claims broker acknowledgement, consumption, projection, or rebuild behavior it cannot prove.
 - Implementation: capability-named V65 foundation schema and V66 protection migrations, explicit producer-enable gates, schema/catalogue readiness, bounded indexes, and no Kafka dependency or worker registration in this chapter.
-- Proof: `DomainEventMigrationPostgreSqlTests` for fresh V1-to-V66 and retained V64-to-V66, invalid-legacy preflight partitions, mutation rejection, repeated startup, configuration rollback, exact source row digests, and zero broker/consumer/rebuild components.
+- Proof: `DomainEventPostgreSqlTests` for fresh V1-to-V66 and retained V64-to-V66, invalid-legacy preflight partitions, mutation rejection, repeated startup, configuration rollback, exact source row digests, and zero broker/consumer/rebuild components.
 - Adversarial evidence: Empty/populated V64, corrupt stream head, over-limit payload seed, invalid enum/string domain, interrupted/repeated startup, mixed application version, enabled/disabled producer flag, missing table/index/trigger, and attempted event UPDATE/DELETE.
 - Status: PASS
 

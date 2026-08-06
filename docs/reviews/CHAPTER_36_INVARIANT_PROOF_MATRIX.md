@@ -34,7 +34,7 @@ and production-boundary proof are verified.
 - Invariant: Merchant-risk monitoring reports authorization, decline, chargeback, fraud, review, enumeration, and volume facts without changing PaymentIntent, PaymentAttempt, Authorization, FraudDecision, label, refund, chargeback, ledger, or active merchant-profile truth.
 - Failure sequence: A monitoring request writes a domain row, treats a late label as authorization-time truth, changes an earlier decision/action, or automatically activates a risk tier while building a metric.
 - Implementation: Planned read-only monitoring queries over immutable PostgreSQL payment/fraud facts, explicit `asOf`, label `available_at`, optional append-only request/result snapshots, and append-only profile recommendations isolated from the existing dual-controlled profile lifecycle.
-- Proof: Planned `MerchantRiskMonitoringContractTests`, `MerchantRiskMonitoringDatabaseContractTests`, source-level mutation prohibition, before/after row digests, and a public monitoring reconciliation demo.
+- Proof: Planned `MerchantRiskMonitoringContractTests`, `MerchantRiskMonitoringPostgreSqlTests`, source-level mutation prohibition, before/after row digests, and a public monitoring reconciliation demo.
 - Adversarial evidence: Late fraud label, late chargeback, refunded chargeback cohort, contradictory labels, open review, risky-merchant recommendation, and a forced persistence failure while an optional snapshot is recorded.
 - Status: PASS
 
@@ -54,7 +54,7 @@ and production-boundary proof are verified.
 - Invariant: Taxonomy resolution, monitoring cohorts, drill-down rows, optional snapshots, and cursors are derived from the authenticated merchant and cannot include or disclose another merchant's facts.
 - Failure sequence: A caller substitutes another merchant's snapshot/cursor/resource ID, or a join omits `merchant_id` and contributes a foreign payment, label, chargeback, review, or incident.
 - Implementation: Planned operator-derived MerchantContext, merchant-qualified repository predicates and composite keys, opaque tenant-bound cursor identity, and same-tenant database constraints.
-- Proof: Planned `MerchantRiskMonitoringTenantIsolationTests`, direct PostgreSQL composite-key tests, and two-merchant equal-ID/equal-time cohort reconciliation.
+- Proof: Planned `MerchantRiskMonitoringPostgreSqlTests`, direct PostgreSQL composite-key tests, and two-merchant equal-ID/equal-time cohort reconciliation.
 - Adversarial evidence: Foreign UUIDs, same external chargeback identity, shared simulator card/IP HMACs, copied cursor, shared taxonomy code, and disabled foreign operator credential.
 - Status: PASS
 

@@ -13,6 +13,6 @@ docker run --rm -v "$PWD:/local" -v "$sdk_scratch:/out" \
   >/dev/null
 rm -rf "$sdk_scratch/thaap_sdk/generated/docs" "$sdk_scratch/thaap_sdk/generated/test"
 python3 scripts/stamp-python-sdk.py "$sdk_scratch/thaap_sdk/generated"
-diff -ru "$sdk_scratch/thaap_sdk/generated" \
+diff -ru --exclude=__pycache__ "$sdk_scratch/thaap_sdk/generated" \
   clients/python/thaap_sdk/thaap_sdk/generated
 echo "Python SDK regeneration PASS"

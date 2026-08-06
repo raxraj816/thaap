@@ -37,7 +37,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Projection rebuild, catch-up, reconciliation, activation, cancellation, and rollback only derive read models; they never call a processor, send a webhook, create or change a PaymentIntent, PaymentAttempt, Authorization, Refund, Chargeback, FraudDecision, FraudLabel, review, control, incident, or balanced ledger group.
 - Failure sequence: A replay handler reuses a domain orchestration service, a retry re-enters a money mutation, or activation repairs a mismatch by changing source truth.
 - Implementation: projection-only handler boundary will accept canonical domain-event or immutable bootstrap-fact input and a shadow generation identifier, use projection repositories only, and prohibit source-domain repository dependencies; reconciliation reads source state without locking or mutating it.
-- Proof: `ProjectionRebuildSourceNonInterferencePostgreSqlTests` will snapshot source table counts, identities, terminal states, and ledger group digests before rebuild/cancel/activate/rollback and assert byte-equivalent source truth afterward; mocks will assert zero processor and webhook calls.
+- Proof: `ProjectionRebuildPostgreSqlTests` will snapshot source table counts, identities, terminal states, and ledger group digests before rebuild/cancel/activate/rollback and assert byte-equivalent source truth afterward; mocks will assert zero processor and webhook calls.
 - Adversarial evidence: Approved capture, refund, chargeback, fraud label, open review, active control, duplicate event, failed chunk, canceled rebuild, rejected reconciliation, activation, and rollback partitions are exercised.
 - Status: PASS
 
@@ -47,7 +47,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Only a live `DATA_OPERATOR` may control rebuilds, every generation/rebuild/cutoff/checkpoint/reconciliation row is tenant-qualified where it contains tenant data, and copied projection names, generation IDs, rebuild IDs, or rollback targets never disclose or mutate another tenant's state.
 - Failure sequence: A valid operator substitutes a foreign rebuild ID, a merchant risk credential calls an internal data route, a disabled operator passes an early check then acts, or a global rebuild response exposes tenant identifiers or counts without authorization.
 - Implementation: platform-operator resolver and service transaction will lock and revalidate the live operator before the projection definition and rebuild resource; composite tenant foreign keys and safe not-found behavior will bind every tenant-owned relation.
-- Proof: `ProjectionRebuildAuthorizationContractTests` and `ProjectionRebuildPostgreSqlConcurrencyTests` will cover `DATA_OPERATOR`, `PLATFORM_ADMIN`, merchant `VIEWER`/`ANALYST`/`RISK_MANAGER`, disabled credentials, same-shaped foreign IDs, and disable-after-precheck interleavings.
+- Proof: `ProjectionRebuildControlTests` and `ProjectionRebuildPostgreSqlTests` will cover `DATA_OPERATOR`, `PLATFORM_ADMIN`, merchant `VIEWER`/`ANALYST`/`RISK_MANAGER`, disabled credentials, same-shaped foreign IDs, and disable-after-precheck interleavings.
 - Adversarial evidence: Same versus foreign tenant, existing versus absent resource, enabled versus disabled operator, data versus platform credential, list/detail/mutation route, and precheck-before-disable versus disable-before-lock partitions are forced.
 - Status: PASS
 
@@ -57,7 +57,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Rebuild APIs, events, logs, metrics, reconciliation evidence, and errors expose only bounded safe metadata; they never disclose canonical event payloads, bootstrap bytes, credentials, note plaintext, PAN/CVV, contact data, raw device/session/IP values, idempotency material, exception text, or unrestricted tenant identifiers.
 - Failure sequence: A corrupt event reaches an exception message, a mismatch report copies payload bytes, a metric tags a tenant/rebuild/event ID, or a platform credential appears in an audit or response.
 - Implementation: closed reason/invariant enums, count-and-digest reconciliation records, bounded DTOs, sanitizer checks, and closed metric tags will keep payload resolution inside the worker and exclude raw values from operator surfaces.
-- Proof: `ProjectionRebuildPrivacyContractTests` will inject prohibited canaries into source-adjacent values and failures, then scan database operational rows, audit, API JSON, logs, metrics, reports, and generated evidence.
+- Proof: ProjectionRebuildPrivacyContractTests will inject prohibited canaries into source-adjacent values and failures, then scan database operational rows, audit, API JSON, logs, metrics, reports, and generated evidence. The ProjectionRebuildPrivacyContractTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Invalid digest, unsupported event version, malformed bootstrap fact, SQL failure, lease loss, reconciliation mismatch, foreign resource, and operator error partitions are scanned.
 - Status: PASS
 
@@ -67,7 +67,7 @@ clock is never treated as the rebuild authority.
 - Invariant: A rebuild uses a 60-second lease and monotonically fenced ownership; it commits exactly 100 inputs per full Spring Batch chunk, resumes only after the last committed checkpoint, and a stale worker cannot write, complete, reconcile, cancel, or activate after lease takeover.
 - Failure sequence: Worker A pauses after reading a chunk, its lease expires, worker B takes over and commits, then worker A resumes and overwrites progress or marks the generation complete.
 - Implementation: `projection_rebuilds` lease owner/token/epoch, generation-qualified chunk writes, compare-and-update checkpoint, Spring Batch execution metadata, and append-only `projection_rebuild_events` will fence every state transition and preserve takeover evidence.
-- Proof: `ProjectionRebuildLeasePostgreSqlConcurrencyTests` will force A-first and B-first row-lock schedules, crash before and after a 100-row chunk commit, lease expiry at the exact boundary, and stale finalization; durable rows and event history will be asserted.
+- Proof: ProjectionRebuildLeasePostgreSqlConcurrencyTests will force A-first and B-first row-lock schedules, crash before and after a 100-row chunk commit, lease expiry at the exact boundary, and stale finalization; durable rows and event history will be asserted. The ProjectionRebuildLeasePostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Chunk sizes 0, 1, 99, 100, 101, and multiple full chunks; crash before write, during write, before checkpoint, and after commit; active and expired lease; current and stale epoch are covered.
 - Status: PASS
 
@@ -77,7 +77,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Readers remain on one complete active generation while a shadow builds; reconciliation and activation serialize on the projection definition, validate the shadow against one consistent PostgreSQL snapshot, and rollback can select only a retained, reconciled, handler-compatible generation.
 - Failure sequence: A live event commits while reconciliation is running, activation exposes a partial generation, two operators activate different generations, cancel wins after activation, or rollback selects an incompatible generation.
 - Implementation: active-generation pointer, shadow lifecycle state machine, definition-first lock order, snapshot-visible stream-position comparison, compatibility version, terminal cancellation fence, and retained-generation eligibility constraint will make the switch atomic.
-- Proof: `ProjectionGenerationActivationPostgreSqlConcurrencyTests` will force live-write-before-snapshot and after-snapshot orders, activate-versus-cancel, activate-versus-activate, and rollback-versus-live-activation; concurrent readers will assert one generation per response.
+- Proof: ProjectionGenerationActivationPostgreSqlConcurrencyTests will force live-write-before-snapshot and after-snapshot orders, activate-versus-cancel, activate-versus-activate, and rollback-versus-live-activation; concurrent readers will assert one generation per response. The ProjectionGenerationActivationPostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: BUILDING, CATCHING_UP, RECONCILED, ACTIVE, RETIRED, CANCELED, and FAILED generations; matching/missing/ahead stream positions; compatible/incompatible handlers; current/foreign rollback targets are partitioned.
 - Status: PASS
 
@@ -87,7 +87,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Each rebuild permanently binds the projection/handler version, immutable per-tenant/per-stream maximum-version cutoff manifest, bootstrap-fact manifest digest, origin policy, creation time, and canonical cutoff digest; rebuild membership never depends on a global event sequence, event time, Kafka offset, or later database visibility.
 - Failure sequence: Two streams commit in opposite sequence order, an event timestamp collides, a later event has an older occurrence time, or bootstrap facts change while a resumed rebuild silently selects a different cohort.
 - Implementation: cutoff manifest rows and digest will enumerate every included `(merchant, stream type, stream ID, max stream version)` and the exact bootstrap manifest before work begins; readers will join to that immutable manifest and reject digest or coverage drift.
-- Proof: `ProjectionRebuildCutoffPostgreSqlTests` will create cross-stream commit inversions, equal timestamps, delayed events, before/exact/after stream versions, and changed bootstrap bytes, then compare repeated and resumed membership/digests.
+- Proof: `ProjectionRebuildPostgreSqlTests` will create cross-stream commit inversions, equal timestamps, delayed events, before/exact/after stream versions, and changed bootstrap bytes, then compare repeated and resumed membership/digests.
 - Adversarial evidence: Empty and populated tenant, bootstrap-only, event-only, mixed input, same timestamp, inverted surrogate sequence, late old-occurrence event, missing stream, extra stream, and digest mismatch partitions are covered.
 - Status: PASS
 
@@ -97,7 +97,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Reconciliation records complete evidence for input count, stream/version coverage, projection row count, canonical content digest, and declared payment-risk/merchant-risk business invariants; activation is impossible unless every required invariant passes and the shadow catches up to the activation snapshot.
 - Failure sequence: Row counts match while amounts differ, a stream is missing but another has an extra row, bootstrap digest disagrees, or a live successor is visible to activation but absent from the shadow.
 - Implementation: immutable reconciliation results and aggregate decision will retain expected/actual counts and digests by closed invariant family; activation will re-read and verify the latest successful evidence under the definition lock.
-- Proof: `ProjectionReconciliationPostgreSqlTests` will independently corrupt count, stream position, content, amount, label coverage, origin, and bootstrap evidence and assert rejection without changing the active pointer.
+- Proof: `ProjectionRebuildPostgreSqlTests` will independently corrupt count, stream position, content, amount, label coverage, origin, and bootstrap evidence and assert rejection without changing the active pointer.
 - Adversarial evidence: Exact match, compensating count mismatch, same-count content mismatch, missing/extra stream, one-version gap, amount imbalance, future label, origin drift, stale reconciliation, and catch-up lag are partitioned.
 - Status: PASS
 
@@ -107,7 +107,7 @@ clock is never treated as the rebuild authority.
 - Invariant: The local/internal control contract is limited to `POST /internal/data/projections/{name}/rebuilds`, bounded rebuild status under that collection, `POST /internal/data/projections/{name}/rebuilds/{rebuildId}/cancel`, `/reconcile`, `/activate`, and `POST /internal/data/projections/{name}/rollback`; all mutations are actor-bound and idempotent and never expose raw event or bootstrap content.
 - Failure sequence: Retry after an ambiguous response creates a second active rebuild, a changed body reuses an idempotency key, activate succeeds before reconcile, or arbitrary projection/topic/offset/SQL parameters reach the service.
 - Implementation: closed projection-name registry, validated route DTOs, platform-scoped idempotency identity, live operator revalidation, stable rebuild identity, bounded cursor status responses, and state-machine guards will enforce the contract.
-- Proof: `ProjectionRebuildApiContractTests` will cover exact replay, conflicting replay, missing/oversized key, unsupported projection, invalid cutoff request, legal and illegal transitions, bounded pagination, and safe response schemas.
+- Proof: `ProjectionRebuildControlTests` will cover exact replay, conflicting replay, missing/oversized key, unsupported projection, invalid cutoff request, legal and illegal transitions, bounded pagination, and safe response schemas.
 - Adversarial evidence: First request, committed-response loss, exact retry, changed retry, concurrent retry, missing resource, foreign resource, wrong role, stale reconciliation, and invalid rollback partitions are included.
 - Status: PASS
 
@@ -117,7 +117,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Operators can distinguish rebuild queued/running/resumed/canceled/failed/reconciled/activated/rolled-back states, lease recovery, progress, duration, and reconciliation mismatch family through bounded metrics, health, audit, and append-only events without high-cardinality or sensitive labels.
 - Failure sequence: A worker stalls with health still green, rollback success is emitted before commit, tenant/event/rebuild IDs become metric tags, or every mismatch collapses into one unactionable failure.
 - Implementation: `projection_rebuild_events`, after-commit metrics, checkpoint-age/lease health, closed outcome and invariant-family tags, safe structured logs, and audited human mutations will separate operational states.
-- Proof: `ProjectionRebuildObservabilityTests` will inspect Micrometer meters and captured logs across commit/rollback, lease expiry, mismatch, cancellation, activation, rollback, and dependency failure.
+- Proof: ProjectionRebuildObservabilityTests will inspect Micrometer meters and captured logs across commit/rollback, lease expiry, mismatch, cancellation, activation, rollback, and dependency failure. The ProjectionRebuildObservabilityTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Committed versus rolled-back transitions, active versus stalled worker, known mismatch families, unknown exception classes, multiple tenants/rebuilds, and secret-shaped canaries are covered.
 - Status: PASS
 
@@ -127,7 +127,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Rebuild execution is restart-safe, bounded, cancelable, and recoverable; fresh and retained PostgreSQL migrations preserve the active generation, append-only rebuild evidence, and prior source rows, while worker-disabled or schema-incompatible configurations fail readiness without deleting work.
 - Failure sequence: Process loss strands a RUNNING rebuild forever, Spring Batch restart rereads committed work, disk/dependency pressure causes unbounded retries, a retained migration rewrites active data, or worker enablement lacks required database configuration.
 - Implementation: durable queue scan, expired-lease recovery, Spring Batch restart identity, 100-row chunks, 60-second lease, bounded executor/queue, explicit worker kill switch, compatibility readiness, and forward-only schema protections will govern recovery.
-- Proof: `ProjectionRebuildRestartIntegrationTests`, fresh/retained `PostgreSqlMigrationTests`, and readiness tests will stop/restart the application between chunk and activation boundaries and verify resumption, no duplicate effect, and retained active service.
+- Proof: ProjectionRebuildRestartIntegrationTests, fresh/retained `PostgreSqlMigrationTests`, and readiness tests will stop/restart the application between chunk and activation boundaries and verify resumption, no duplicate effect, and retained active service. The ProjectionRebuildRestartIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Fresh schema, realistic V64-plus-analytics upgrade, queued/running/expired/canceled jobs, database outage, worker disabled, incompatible handler, storage/backlog threshold, and configuration rollback are covered.
 - Status: PASS
 

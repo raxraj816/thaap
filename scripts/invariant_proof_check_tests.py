@@ -123,6 +123,75 @@ class InvariantProofCheckTests(unittest.TestCase):
 
         self.assertTrue(any("allowed only" in error for error in errors))
 
+    def test_proof_naming_a_test_class_that_does_not_exist_fails(self):
+        matrix = valid_matrix().replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: `NeverWrittenBoundaryTests` asserts the postcondition.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertTrue(any("names 'NeverWrittenBoundaryTests', which does not exist"
+                            in error for error in errors))
+
+    def test_proof_naming_an_existing_test_class_passes(self):
+        matrix = valid_matrix().replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: `RealBoundaryTests` asserts the postcondition.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts={"RealBoundaryTests"})
+
+        self.assertEqual([], errors)
+
+    def test_proof_naming_a_script_that_does_not_exist_fails(self):
+        matrix = valid_matrix().replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: `scripts/never-written-check.py` proves the postcondition.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertTrue(any("scripts/never-written-check.py" in error
+                            for error in errors))
+
+    def test_a_path_reference_resolves_by_basename_when_the_matrix_omits_its_package(self):
+        # Chapter 58 names SDK suites as `tests/test_secure_client.py`, which is
+        # relative to the client package rather than to the repository.
+        matrix = valid_matrix().replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: `tests/test_secure_client.py` asserts the postcondition.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts={"test_secure_client.py"})
+
+        self.assertEqual([], errors)
+
+    def test_backticked_prose_is_not_mistaken_for_an_artifact(self):
+        # `AUDIT` and `LIMIT` are SQL keywords the matrices quote, and `ER-0096` is a
+        # register coordinate. Treating them as missing files would make the gate noisy
+        # enough to be switched off, which is how the first unrun gate survived.
+        matrix = valid_matrix().replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: `AUDIT`, `LIMIT`, `ER-0096`, `PASS`, and `SYNTHETIC_SCENARIO` hold.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertEqual([], errors)
+
+    def test_the_repository_index_finds_a_real_committed_suite(self):
+        artifacts = checker.repository_artifacts(checker.ROOT)
+
+        self.assertIn("CanonicalEventCodecTests", artifacts)
+        self.assertIn("invariant-proof-check.py", artifacts)
+        self.assertNotIn("NeverWrittenBoundaryTests", artifacts)
+
     def test_chapter_19_recovery_provenance_is_honest_and_allowed(self):
         matrix = valid_matrix().replace("Chapter 99", "Chapter 19").replace(
             "- Matrix provenance: PRE_IMPLEMENTATION",

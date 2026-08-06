@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import sys
@@ -47,13 +48,85 @@ REQUIRED_LENSES = {
 PLACEHOLDER = re.compile(r"\b(TBD|TODO|FIXME|PLACEHOLDER)\b", re.IGNORECASE)
 CHAPTER_COORDINATE = re.compile(r"\bChapter\s+(\d+)([A-Z]?)\b", re.IGNORECASE)
 
+# A `Proof` field names the artifacts that hold the invariant. Anything in backticks
+# that is shaped like a test class or an executable file is treated as a claim that
+# the artifact exists, because that is how a reader uses the field: they run it.
+ARTIFACT_REFERENCE = re.compile(r"`([^`]+)`")
+DEBT_REFERENCE = re.compile(r"\bTD-\d{4}\b")
+CLASS_ARTIFACT = re.compile(r"^[A-Z][A-Za-z0-9]*(?:Tests|Test)$")
+FILE_ARTIFACT = re.compile(r"^[A-Za-z0-9_./-]+\.(?:py|sh|ts|tsx|java|kt)$")
+SOURCE_SUFFIXES = (".java", ".kt", ".ts", ".tsx", ".py", ".sh")
+IGNORED_DIRECTORIES = {
+    ".git", ".m2", "__pycache__", "build", "dist", "node_modules", "target", "venv",
+    ".venv",
+}
+
 
 def fields(text: str) -> dict[str, str]:
     return {name: value.strip() for name, value in FIELD_LINE.findall(text)}
 
 
-def validate_matrix(path: pathlib.Path, text: str) -> list[str]:
+def repository_artifacts(root: pathlib.Path) -> set[str]:
+    """Every source basename in the repository, plus its extension-free stem.
+
+    The stem is what lets a `Proof` field name a test class the way an engineer says
+    it out loud, while the basename resolves a file named with its extension.
+    """
+    names: set[str] = set()
+    # `os.walk` rather than `Path.walk`, which needs Python 3.12; the repository floor
+    # declared for the supported SDK is 3.11.
+    for _, subdirectories, files in os.walk(root):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in IGNORED_DIRECTORIES]
+        for name in files:
+            if name.endswith(SOURCE_SUFFIXES):
+                names.add(name)
+                names.add(name.rsplit(".", 1)[0])
+    return names
+
+
+def unresolved_artifacts(proof: str, root: pathlib.Path, names: set[str]) -> list[str]:
+    """Artifact names a `Proof` field claims that nothing in the repository provides.
+
+    `ER-0096` and `ER-0098` both closed a row on a gate that was never executed. The
+    weaker version of the same failure is a row that closes on an artifact that was
+    never written: the planned name survives into a `PASS` row, reads as evidence in
+    every summary, and resolves to nothing when an auditor goes looking for it.
+
+    A row that cites a `TD-NNNN` coordinate is exempt, because the gap has then been
+    moved into the technical debt register where it has an owner, a trigger and done
+    criteria. The exemption is deliberately not silent: it requires an author to name
+    the debt, and `technical-debt-check.py` holds that entry to the register's rules.
+    """
+    if DEBT_REFERENCE.search(proof):
+        return []
+    unresolved: list[str] = []
+    for reference in ARTIFACT_REFERENCE.findall(proof):
+        candidate = reference.strip()
+        if CLASS_ARTIFACT.match(candidate):
+            if candidate not in names:
+                unresolved.append(candidate)
+            continue
+        if not FILE_ARTIFACT.match(candidate):
+            continue
+        # A reference may be repository-relative, or relative to a package root that
+        # the matrix does not spell out; the basename settles the second case.
+        if (root / candidate).is_file():
+            continue
+        if candidate.rsplit("/", 1)[-1] in names:
+            continue
+        unresolved.append(candidate)
+    return unresolved
+
+
+def validate_matrix(
+        path: pathlib.Path,
+        text: str,
+        artifacts: set[str] | None = None,
+        root: pathlib.Path = ROOT) -> list[str]:
     errors: list[str] = []
+    if artifacts is None:
+        artifacts = repository_artifacts(root)
     matches = list(ENTRY_HEADING.finditer(text))
     metadata_text = text[:matches[0].start()] if matches else text
     metadata = fields(metadata_text)
@@ -118,6 +191,9 @@ def validate_matrix(path: pathlib.Path, text: str) -> list[str]:
             errors.append(f"{path}: {entry_id} Status must be PASS")
         if PLACEHOLDER.search(entry_text):
             errors.append(f"{path}: {entry_id} contains an unresolved placeholder")
+        for artifact in unresolved_artifacts(entry.get("Proof", ""), root, artifacts):
+            errors.append(
+                f"{path}: {entry_id} Proof names '{artifact}', which does not exist")
 
     missing_lenses = sorted(REQUIRED_LENSES - covered_lenses)
     if missing_lenses:
@@ -139,12 +215,13 @@ def main(arguments: list[str]) -> int:
 
     errors: list[str] = []
     all_ids: dict[str, pathlib.Path] = {}
+    artifacts = repository_artifacts(ROOT)
     for path in paths:
         if not path.is_file():
             errors.append(f"{path}: matrix file does not exist")
             continue
         text = path.read_text(encoding="utf-8")
-        errors.extend(validate_matrix(path, text))
+        errors.extend(validate_matrix(path, text, artifacts))
         for entry_id in ENTRY_HEADING.findall(text):
             if entry_id in all_ids:
                 errors.append(

@@ -3785,6 +3785,16 @@ Vision owners: `VP-002`, `VP-007`, and `VP-008`.
 Entry gate: Phase 5 must provide a point-in-time dataset manifest and Phase 6
 must expose model explanation/failure states before active model influence.
 
+Inherited debt: `TD-0007` and `TD-0008` are `OPEN` and owned by the first Phase 7
+chapter. Phase 5 froze per-concern proof suites for observability, privacy,
+restart, deployment, authorization and forced-ordering concurrency, then
+implemented one contract class plus a `*PostgreSqlTests` subclass per domain; the
+seventeen rows under `TD-0007` and the six Chapter 52 cross-cutting rows under
+`TD-0008` name suites that were never written. Projection rebuild and offline
+replay are the two Phase 5 outputs Phase 7 consumes as trusted model inputs, and
+both carry unproven restart, lease-fencing and observability rows, so the debt is
+paid before that dependency is taken rather than after.
+
 Named owner slices:
 
 1. **Dataset And Generator Governance**

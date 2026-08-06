@@ -44,6 +44,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
                     "openapi-contract-check.py",
                     "openapi-compatibility-check.py",
                     "python-sdk-scope-check.py",
+                    "python-sdk-package-check.py",
                     "invariant-proof-check.py",
                     "chapter-closure-check.py",
                     "learning-day-check.sh"):
@@ -72,6 +73,56 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.assertTrue(python_marker.is_file())
             self.assertTrue(vision_marker.is_file())
 
+    def test_every_required_gate_script_is_actually_invoked(self):
+        # Stubbing a checker and asserting exit 0 does not prove the readiness run
+        # calls it: an unreferenced stub is silently never executed. `ER-0098` records
+        # the correction that a gate script not invoked by this run is not a gate, so
+        # the invocation itself is what has to be asserted. Deleting any line below
+        # from commit-readiness-check.sh fails this test.
+        required_gates = (
+            "technical-debt-check.py",
+            "vision-coverage-check.py",
+            "escaped-review-check.py",
+            "executable-artifact-naming-check.py",
+            "public-api-error-contract-check.py",
+            "openapi-contract-check.py",
+            "openapi-compatibility-check.py",
+            "python-sdk-scope-check.py",
+            "python-sdk-package-check.py",
+            "invariant-proof-check.py",
+            "learning-day-check.sh",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = pathlib.Path(temporary_directory)
+            self.create_required_files(root)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            self.write_executable(fake_bin / "git", "#!/usr/bin/env bash\nexit 0\n")
+            self.write_executable(fake_bin / "rg", "#!/usr/bin/env bash\nexit 1\n")
+            markers = {gate: root / f"ran-{gate}" for gate in required_gates}
+            for gate, marker in markers.items():
+                self.write_executable(
+                    root / "scripts" / gate,
+                    f"#!/usr/bin/env bash\ntouch '{marker}'\n")
+            self.write_executable(
+                root / "scripts" / "chapter-closure-check.py",
+                "#!/usr/bin/env bash\nexit 0\n")
+
+            environment = os.environ.copy()
+            environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
+            result = subprocess.run(
+                [str(SCRIPT_PATH), "2026-08-06"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            never_invoked = sorted(
+                gate for gate, marker in markers.items() if not marker.is_file())
+            self.assertEqual([], never_invoked)
+
     def test_chapter_52_runs_phase_5_aggregate_closure(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = pathlib.Path(temporary_directory)
@@ -90,6 +141,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
                     "openapi-contract-check.py",
                     "openapi-compatibility-check.py",
                     "python-sdk-scope-check.py",
+                    "python-sdk-package-check.py",
                     "invariant-proof-check.py",
                     "chapter-closure-check.py",
                     "learning-day-check.sh"):
