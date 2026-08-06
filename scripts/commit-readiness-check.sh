@@ -109,6 +109,10 @@ echo "Checking supported Python SDK scope boundaries..."
 scripts/python-sdk-scope-check.py
 
 echo
+echo "Checking the supported Python SDK installs and runs as a package..."
+scripts/python-sdk-package-check.py
+
+echo
 echo "Checking chapter invariant-to-proof traceability..."
 if [[ -n "$invariant_matrix" ]]; then
   scripts/invariant-proof-check.py "$invariant_matrix"

@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -127,29 +128,69 @@ def check_build_determinism(workspace: pathlib.Path) -> list[str]:
     return [f"repeated builds produced different package contents: {differing[:10]}"]
 
 
+def release_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def accepts_runtime(specifier: str, version: str) -> bool:
+    """Evaluate a `requires-python` specifier without depending on `packaging`.
+
+    A gate that cannot run unless the host happens to have a third-party package
+    installed is the failure this whole audit is about: it reports FAIL for an
+    environment reason and nobody can tell that from a real one. `requires-python`
+    only ever carries release comparisons, so it is evaluated directly here and
+    `packaging` is used when present purely as the more precise implementation.
+    """
+    candidate = release_tuple(version)
+    for clause in (part.strip() for part in specifier.split(",")):
+        if not clause:
+            continue
+        match = re.fullmatch(r"(>=|<=|==|!=|>|<)\s*([0-9]+(?:\.[0-9]+)*)", clause)
+        if match is None:
+            raise ValueError(f"unsupported requires-python clause {clause!r}")
+        operator, bound_text = match.group(1), match.group(2)
+        bound = release_tuple(bound_text)
+        # Pad to equal length so 3.11 compares against 3.11.0 as the same release.
+        width = max(len(candidate), len(bound))
+        left = candidate + (0,) * (width - len(candidate))
+        right = bound + (0,) * (width - len(bound))
+        satisfied = {
+            ">=": left >= right,
+            "<=": left <= right,
+            "==": left == right,
+            "!=": left != right,
+            ">": left > right,
+            "<": left < right,
+        }[operator]
+        if not satisfied:
+            return False
+    return True
+
+
 def check_declared_runtime_range() -> list[str]:
-    try:
-        from packaging.specifiers import SpecifierSet
-    except ModuleNotFoundError:
-        return ["packaging is required to verify the declared runtime range"]
-
-    import re
-
     text = (SDK_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r'requires-python\s*=\s*"([^"]+)"', text)
     if match is None:
         return ["pyproject.toml declares no requires-python"]
-    specifier = SpecifierSet(match.group(1))
+    declared = match.group(1)
+
+    try:
+        from packaging.specifiers import SpecifierSet
+    except ModuleNotFoundError:
+        accepts = lambda version: accepts_runtime(declared, version)
+    else:
+        specifier = SpecifierSet(declared)
+        accepts = lambda version: version in specifier
 
     failures = [
-        f"declared runtime range {specifier} rejects supported Python {version}"
+        f"declared runtime range {declared} rejects supported Python {version}"
         for version in SUPPORTED_RUNTIMES
-        if version not in specifier
+        if not accepts(version)
     ]
     failures += [
-        f"declared runtime range {specifier} accepts untested Python {version}"
+        f"declared runtime range {declared} accepts untested Python {version}"
         for version in UNSUPPORTED_RUNTIMES
-        if version in specifier
+        if accepts(version)
     ]
     return failures
 

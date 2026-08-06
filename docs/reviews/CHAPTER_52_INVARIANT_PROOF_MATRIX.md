@@ -41,7 +41,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: The integrated source-to-event-to-Kafka-to-projection-to-rebuild workflow preserves authoritative payment, processor, fraud, review, label, control, webhook, and balanced-ledger truth; publication, consumption, poison recovery, rebuild, dataset creation, activation, and rollback never repeat a business mutation.
 - Failure sequence: Broker recovery republishes a capture as a command, consumer restart duplicates an amount, poison recovery calls source orchestration, or rebuild/rollback changes source rows while the demo still reports success.
 - Implementation: integrated gate and demo will exercise only committed-fact producers, exact-byte transport, inbox-idempotent projection handlers, projection-only recovery, immutable datasets, and read-only source reconciliation.
-- Proof: `PhaseFiveSourceNonInterferenceIntegrationTests` plus the public demo will compare source identities/states, processor invocation counts, webhook identities, fraud lineage, and ledger group/account/direction/amount digests before and after every failure/recovery stage.
+- Proof: PhaseFiveSourceNonInterferenceIntegrationTests plus the public demo will compare source identities/states, processor invocation counts, webhook identities, fraud lineage, and ledger group/account/direction/amount digests before and after every failure/recovery stage. The PhaseFiveSourceNonInterferenceIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Capture, refund, chargeback, label, review, control, broker duplicate, poison event, consumer restart, rebuild activation/rollback, and dataset generation partitions are included.
 - Status: PASS
 
@@ -51,7 +51,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: Two merchants and platform operators remain separated across event identity, Kafka record key validation, inbox/quarantine, projection rows, freshness, generations, rebuilds, datasets, APIs, metrics/logs, and public cockpit state; platform authority cannot mutate merchant truth and merchant roles cannot operate infrastructure.
 - Failure sequence: A foreign event key is paired with a valid envelope, a copied projection/rebuild/dataset ID is queried, a merchant manager calls an internal data route, or global health exposes tenant metadata.
 - Implementation: aggregate proof will trace tenant-qualified composite keys, live actor resolvers, closed route roles, safe absence semantics, server-derived tenant identity, and bounded global operations DTOs through every Chapter 44–51 boundary.
-- Proof: `PhaseFiveTenantIsolationIntegrationTests`, API contracts, Kafka/PostgreSQL substitution tests, and browser role tests will cover two tenants, all merchant roles, both platform roles, disabled credentials, and copied identifiers.
+- Proof: PhaseFiveTenantIsolationIntegrationTests, API contracts, Kafka/PostgreSQL substitution tests, and browser role tests will cover two tenants, all merchant roles, both platform roles, disabled credentials, and copied identifiers. The PhaseFiveTenantIsolationIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Envelope/key/payload tenant permutations, same/foreign/absent IDs, live/disabled actor, merchant/platform credential swaps, and data present/stale/quarantined/rebuilt states are partitioned.
 - Status: PASS
 
@@ -61,7 +61,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: The integrated product never emits prohibited payment, personal, credential, note, device/session/IP, idempotency, unrestricted metadata, event payload, broker secret, or exception content into Kafka-unsafe fields, operational tables, quarantine, audit, logs, metrics, API/UI, fixtures, demos, reports, or build output.
 - Failure sequence: A producer schema permits a forbidden field, a Kafka error logs credentials, quarantine copies payload bytes, UI persists an operator key, or the demo prints a canary while individual unit tests remain green.
 - Implementation: end-to-end allowlist/schema checks, exact sink scans, safe operational DTOs, closed telemetry dimensions, in-memory-only client credentials, and documentation/reference-client review will cross every boundary.
-- Proof: `PhaseFivePrivacySinkIntegrationTests`, UI storage/build scans, Python demo tests, Kafka record inspection, database/log/metric/audit scans, and malformed-error cases will use distinct canaries for every prohibited class.
+- Proof: PhaseFivePrivacySinkIntegrationTests, UI storage/build scans, Python demo tests, Kafka record inspection, database/log/metric/audit scans, and malformed-error cases will use distinct canaries for every prohibited class. The PhaseFivePrivacySinkIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Valid and schema-invalid events, broker/auth failures, poison records, reconciliation mismatches, foreign IDs, disabled actors, browser reload, client error, and generated artifacts are scanned.
 - Status: PASS
 
@@ -71,7 +71,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: Atomic source/event commit, gap-free stream allocation, fenced publication, inbox/projection commit-before-offset acknowledgement, per-stream ordering, rebuild lease/checkpoint, snapshot reconciliation, activation, rollback, and dataset restart all preserve one convergent result under forced failures and restarts.
 - Failure sequence: Source commits without event, ack precedes publisher finalization crash, projection commits before offset-ack failure, poison blocks unrelated streams, stale rebuild worker resumes after takeover, or live event races activation.
 - Implementation: integrated orchestration will rely on the exact Chapter 44–51 transaction and lock boundaries and will add no bypass; the closure gate will require all forced PostgreSQL and real Kafka suites before reporting success.
-- Proof: `PhaseFiveFailureSequenceIntegrationTests` and public failure demo will force both sides of source rollback, ack/finalize, inbox/offset, stream predecessor, lease takeover, catch-up/snapshot, activate/cancel, rollback/activate, and dataset checkpoint boundaries.
+- Proof: PhaseFiveFailureSequenceIntegrationTests and public failure demo will force both sides of source rollback, ack/finalize, inbox/offset, stream predecessor, lease takeover, catch-up/snapshot, activate/cancel, rollback/activate, and dataset checkpoint boundaries. The PhaseFiveFailureSequenceIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Every pre/post-commit crash point, current/stale token, duplicate/concurrent duplicate, same/unrelated stream, before/after snapshot live write, and restart order is covered.
 - Status: PASS
 
@@ -81,7 +81,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: A merchant-visible analytic or dataset result remains traceable to canonical event/bootstrap bytes, tenant stream/version, occurrence/recording time, origin, decision-time feature and control versions, label availability, active generation, source cutoff manifest, handler/evaluator versions, and query/output digest.
 - Failure sequence: A projection number lacks source coverage, rebuild uses a global sequence cutoff, later labels leak backward, bootstrap bytes drift, or a dataset and simulation report appear equivalent despite different membership.
 - Implementation: aggregate traceability walk will join every API/UI field through projection and dataset manifests to immutable source lineage and require explicit unknown/partial coverage rather than inferred zero.
-- Proof: `PhaseFiveLineageTraceabilityIntegrationTests` plus demo reconciliation will select representative allow/block/step-up/review, capture/refund/chargeback, label, live/synthetic, bootstrap/live-event, stale/current, and unlabeled/contradictory cases.
+- Proof: PhaseFiveLineageTraceabilityIntegrationTests plus demo reconciliation will select representative allow/block/step-up/review, capture/refund/chargeback, label, live/synthetic, bootstrap/live-event, stale/current, and unlabeled/contradictory cases. The PhaseFiveLineageTraceabilityIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Missing event, version gap, unsupported schema, absent feature, future/exact label, changed control, origin mismatch, bootstrap digest mismatch, rebuild mismatch, and same-count different-member dataset are included.
 - Status: PASS
 
@@ -101,7 +101,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: End-to-end operations distinguish outbox backlog, publication acknowledgement/retry/unknown/blocked, consumer lag/duplicate/quarantine, projection freshness/coverage, rebuild progress/mismatch/activation/rollback, and dataset progress/compatibility using closed safe dimensions and truthful readiness.
 - Failure sequence: Global green health hides one stale component, rollback increments success, event/tenant IDs become labels, broker outage is confused with poison, or an active incompatible generation remains ready.
 - Implementation: aggregate health policy, after-commit metrics, safe structured logs, bounded operator APIs, and runbooks will reconcile the Chapter 44–51 signals without weakening component truth.
-- Proof: `PhaseFiveOperationalSignalsIntegrationTests` will induce each failure independently and in combinations, inspect meters/logs/readiness/operator summaries, and scan for high-cardinality/sensitive dimensions.
+- Proof: PhaseFiveOperationalSignalsIntegrationTests will induce each failure independently and in combinations, inspect meters/logs/readiness/operator summaries, and scan for high-cardinality/sensitive dimensions. The PhaseFiveOperationalSignalsIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0008.
 - Adversarial evidence: Broker outage, publisher defect, auth/topic failure, unknown ack, blocked stream, lag, poison, database outage, stale generation, mismatch, worker failure, and recovery partitions are included.
 - Status: PASS
 
@@ -121,7 +121,7 @@ aggregate result. Every proof and status below remains pending.
 - Invariant: Phase 5 can be declared complete only when an integrated gate enumerates every Chapter 44–52 matrix and dossier, requires each matrix `FROZEN`/`VERIFIED` with every invariant `PASS`, each dossier `READY_TO_MERGE`/`MERGE`, all migrations/tests/demos/current sources agree, and no blocking debt or escaped finding remains.
 - Failure sequence: The gate validates only Chapter 52, accepts an absent inherited artifact, ignores a pending invariant or `DO_NOT_MERGE`, uses stale test counts, or README/master-plan status claims completion while a blocking finding is open.
 - Implementation: Phase 5 aggregate validator and repository tests will use an explicit immutable Chapter 44–52 coordinate list and cross-check matrix/dossier metadata, escaped/debt registers, README, master plan, vision coverage, learning trail, and demo/test evidence.
-- Proof: `phase_five_closure_check_tests.py` will delete or corrupt each required artifact/field in isolated fixtures and prove fail-closed behavior, then validate the complete real repository only after all evidence passes.
+- Proof: `phase_closure_check_tests.py` will delete or corrupt each required artifact/field in isolated fixtures and prove fail-closed behavior, then validate the complete real repository only after all evidence passes.
 - Adversarial evidence: Missing matrix/dossier, wrong coordinate, duplicate invariant ID, pending/failed status, non-merge recommendation, open P0/P1/frozen P2, undocumented debt, stale README/master plan, missing demo, and all-valid repository are covered.
 - Status: PASS
 
