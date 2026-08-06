@@ -1,5 +1,7 @@
 package com.thaap.payments.controls;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -232,7 +234,7 @@ public class AuthoredRuleCodec {
     }
 
     private ResponseStatusException invalid(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.AUTHORED_RULE_REQUEST_INVALID, message);
     }
 
     public record EncodedRule(AuthoredRuleNode node, String canonicalJson, String digest, int predicateCount) { }

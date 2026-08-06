@@ -1,5 +1,7 @@
 package com.thaap.payments.replay;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.event.EventTimePrecision;
 import com.thaap.payments.fraud.FeatureCatalogue;
@@ -60,8 +62,7 @@ public class OfflineReplayDatasetService {
             Instant cohortStart, Instant cohortEnd, Instant labelAvailabilityCutoff,
             ReplayDatasetTrafficOriginPolicy trafficOriginPolicy, String requestId) {
         if (!creationEnabled) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Offline replay dataset creation is disabled");
+            throw new PublicApiException(PublicApiErrorDescriptor.OFFLINE_REPLAY_DATASET_CREATION_DISABLED, "Offline replay dataset creation is disabled");
         }
         authorizeCreateReplay(context);
         lockMerchantDatasetCreation(context.merchantId());
@@ -163,8 +164,7 @@ public class OfflineReplayDatasetService {
     public void authorizeCreateReplay(RiskOperatorContext context) {
         String role = lockActiveOperator(context);
         if (!RiskOperatorRole.RISK_MANAGER.name().equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required for offline replay dataset creation");
+            throw new PublicApiException(PublicApiErrorDescriptor.OFFLINE_REPLAY_DATASET_MANAGER_REQUIRED, "RISK_MANAGER role is required for offline replay dataset creation");
         }
     }
 
@@ -206,8 +206,7 @@ public class OfflineReplayDatasetService {
                                 ReplayDatasetTrafficOriginPolicy.valueOf(resultSet.getString(5)))
                         : null, generationId, cutoffManifestId, merchantId, merchantId);
         if (cutoff == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Replay dataset cutoff was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.REPLAY_DATASET_CUTOFF_NOT_FOUND, "Replay dataset cutoff was not found");
         }
         if (!originSubset(requestedOrigin, cutoff.originPolicy())) {
             throw badRequest("Replay origin policy is broader than the immutable cutoff");
@@ -235,8 +234,7 @@ public class OfflineReplayDatasetService {
                                 resultSet.getString(9))
                         : null, merchantId, simulationRunId);
         if (simulation == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Compatibility simulation was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.COMPATIBILITY_SIMULATION_NOT_FOUND, "Compatibility simulation was not found");
         }
         String expectedOrigin = originPolicy == ReplayDatasetTrafficOriginPolicy.LIVE_ONLY
                 ? "LIVE_ONLY" : "INCLUDE_SYNTHETIC";
@@ -250,8 +248,7 @@ public class OfflineReplayDatasetService {
                 || !FeatureCatalogue.VERSION.equals(simulation.featureCatalogueVersion())
                 || !FraudTaxonomyCatalogue.VERSION.equals(simulation.taxonomyVersion())
                 || originPolicy == ReplayDatasetTrafficOriginPolicy.SYNTHETIC_ONLY) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Compatibility simulation does not match the replay manifest boundary");
+            throw new PublicApiException(PublicApiErrorDescriptor.COMPATIBILITY_SIMULATION_MANIFEST_MISMATCH, "Compatibility simulation does not match the replay manifest boundary");
         }
         return simulation;
     }
@@ -269,8 +266,7 @@ public class OfflineReplayDatasetService {
                 """, resultSet -> resultSet.next() ? resultSet.getString(1) : null,
                 context.merchantId(), context.operatorId());
         if (role == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is no longer active");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_CREDENTIAL_INACTIVE, "Risk operator credential is no longer active");
         }
         return role;
     }
@@ -281,8 +277,7 @@ public class OfflineReplayDatasetService {
                 """, resultSet -> resultSet.next()
                         ? resultSet.getObject(1, UUID.class) : null, merchantId);
         if (lockedMerchantId == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator merchant is unavailable");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_MERCHANT_UNAVAILABLE, "Risk operator merchant is unavailable");
         }
     }
 
@@ -317,8 +312,7 @@ public class OfflineReplayDatasetService {
                 """, resultSet -> resultSet.next() ? mapView(resultSet, merchantId) : null,
                 merchantId, datasetId);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Offline replay dataset was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.OFFLINE_REPLAY_DATASET_NOT_FOUND, "Offline replay dataset was not found");
         }
         return view;
     }
@@ -370,7 +364,7 @@ public class OfflineReplayDatasetService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.OFFLINE_REPLAY_DATASET_REQUEST_INVALID, message);
     }
 
     private record CutoffLineage(String eventCutoffDigest, String bootstrapDigest,

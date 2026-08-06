@@ -708,6 +708,12 @@ projections, losslessly paginated analytics, rebuild/activation, and
 point-in-time replay datasets. The public payment-risk analytics demo and real
 Kafka/PostgreSQL proof pass.
 Phase 5 implementation status: COMPLETE
+Phase 6 adds the source-reconciled payment investigation, canonical lifecycle
+timeline, HMAC-safe same-merchant pivots, typed saved views, bounded restart-safe
+bulk review assignment, denominator-honest insights, V86-V91, the date-versioned
+`2026-08-01` OpenAPI contract with a stable public error catalogue, and one
+supported Python sandbox SDK generated from that exact contract.
+Phase 6 implementation status: COMPLETE
 The permanent THAAP vision matrix now
 maps 23 challenger promises to exact current evidence and Phase 5–10 owner
 slices; the readiness gate rejects vague or stale coverage. The API also does

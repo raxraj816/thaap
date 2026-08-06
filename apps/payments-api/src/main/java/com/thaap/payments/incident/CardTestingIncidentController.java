@@ -1,5 +1,7 @@
 package com.thaap.payments.incident;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -45,7 +47,7 @@ public class CardTestingIncidentController {
             @RequestParam(defaultValue = "25") int limit,
             @RequestParam(name = "starting_after", required = false) UUID startingAfter) {
         if (limit < 1 || limit > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "limit must be between 1 and 100");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAGE_LIMIT_INVALID, "limit must be between 1 and 100");
         }
         List<CardTestingIncident> incidents;
         if (startingAfter == null) {
@@ -53,8 +55,7 @@ public class CardTestingIncidentController {
         } else {
             CardTestingIncident cursor = incidentRepository.findByIdAndMerchantId(
                             startingAfter, context.merchantId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "CardTestingIncident cursor was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CARD_TESTING_INCIDENT_CURSOR_NOT_FOUND, "CardTestingIncident cursor was not found"));
             incidents = incidentRepository.listAfter(context.merchantId(), status,
                     cursor.getCreatedAt(), cursor.getId(), PageRequest.of(0, limit));
         }
@@ -64,8 +65,7 @@ public class CardTestingIncidentController {
     @GetMapping("/{id}")
     public IncidentResponse detail(RiskOperatorContext context, @PathVariable UUID id) {
         CardTestingIncident incident = incidentRepository.findByIdAndMerchantId(id, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "CardTestingIncident was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CARD_TESTING_INCIDENT_NOT_FOUND, "CardTestingIncident was not found"));
         return response(context.merchantId(), incident);
     }
 

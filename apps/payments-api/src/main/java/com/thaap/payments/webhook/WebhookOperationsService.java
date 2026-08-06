@@ -1,5 +1,7 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -60,8 +62,7 @@ public class WebhookOperationsService {
         requireManager(context);
         requireCursorPair(cursorCreatedAt, cursorId);
         if (createdAfter != null && createdBefore != null && !createdAfter.isBefore(createdBefore)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "createdAfter must be before createdBefore");
+            throw new PublicApiException(PublicApiErrorDescriptor.CREATED_RANGE_INVALID, "createdAfter must be before createdBefore");
         }
         return deliveryRepository.findDeadLetters(context.merchantId(), eventType != null, eventType,
                         errorCode != null, errorCode, createdAfter != null, createdAfter,
@@ -111,19 +112,16 @@ public class WebhookOperationsService {
         WebhookDelivery delivery = deliveryRepository.findByIdAndMerchantIdForUpdate(deliveryId, merchantId)
                 .orElseThrow(WebhookOperationsService::notFound);
         if (!endpoint.getId().equals(delivery.getWebhookEndpointId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook delivery endpoint changed while redelivery was requested");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_DELIVERY_ENDPOINT_CHANGED, "Webhook delivery endpoint changed while redelivery was requested");
         }
         if (!endpoint.isActive()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook endpoint must be active for redelivery");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_INACTIVE_FOR_REDELIVERY, "Webhook endpoint must be active for redelivery");
         }
         int requestedGeneration;
         try {
             requestedGeneration = delivery.scheduleManualRedelivery();
         } catch (IllegalStateException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook delivery generation must be terminal before redelivery");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_DELIVERY_NOT_TERMINAL, "Webhook delivery generation must be terminal before redelivery");
         }
         UUID redeliveryRequestId = UUID.randomUUID();
         Instant now = clock.instant();
@@ -161,8 +159,7 @@ public class WebhookOperationsService {
 
     private static void requireManager(RiskOperatorContext context) {
         if (context.role() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_MANAGER_ROLE_REQUIRED, "RISK_MANAGER role is required");
         }
     }
 
@@ -178,29 +175,26 @@ public class WebhookOperationsService {
                 .orElseThrow(WebhookOperationsService::riskResourceNotFound);
         if (!credential.getRiskOperatorId().equals(actor.getId())
                 || actor.getRole() != context.role()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_STALE, "Risk operator credential is stale");
         }
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_MANAGER_ROLE_REQUIRED, "RISK_MANAGER role is required");
         }
         return actor;
     }
 
     private static ResponseStatusException riskResourceNotFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Risk resource was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.RISK_RESOURCE_NOT_FOUND, "Risk resource was not found");
     }
 
     private static void requireCursorPair(Instant cursorCreatedAt, UUID cursorId) {
         if ((cursorCreatedAt == null) != (cursorId == null)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "cursorCreatedAt and cursorId must be supplied together");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAGINATION_CURSOR_INCOMPLETE, "cursorCreatedAt and cursorId must be supplied together");
         }
     }
 
     private static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Webhook delivery was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_DELIVERY_NOT_FOUND, "Webhook delivery was not found");
     }
 
     public record DeadLetterView(UUID id, UUID webhookEndpointId, UUID webhookEventId,

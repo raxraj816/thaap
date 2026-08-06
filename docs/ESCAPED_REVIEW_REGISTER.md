@@ -1401,3 +1401,275 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: A completion gate must enumerate all normative source-of-truth documents and test omission plus case/wording variants of stale status, not rely on a hand-checked subset.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-08-01
+
+## ER-0083
+
+- Status: RESOLVED
+- Severity: P0
+- Chapter: 57
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: Chapter 57 public error contract implementation review
+- Invariant: An unexpected server failure must return the reviewed public error shape without emitting database, driver, or row content to any sink.
+- Finding: `GlobalApiExceptionHandler.handleUnexpected` passed the throwable as the trailing slf4j argument, so the full stack trace was logged. PostgreSQL constraint violations carry `Failing row contains (...)` detail, which placed cardholder-adjacent row values and internal schema into application logs.
+- Why prior review missed it: The privacy proof asserted only on the HTTP response body. The existing log canaries lived in unrelated concurrency tests, so the handler change was reviewed as a logging improvement rather than as a privacy boundary change.
+- Resolution evidence: The handler now logs only `requestId`, path, and exception simple name. `ApiErrorContractTests.unexpectedErrorsUseStandardShapeWithoutLeakingDetails` and twelve `ReviewResolutionPostgreSqlConcurrencyTests` parameterizations assert `CapturedOutput` never contains `Failing row contains`.
+- Process correction: Any change to an exception handler is reviewed as a privacy boundary change and must carry a log-sink canary, not only a response-body assertion.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0084
+
+- Status: RESOLVED
+- Severity: P0
+- Chapter: 57
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: `scripts/public-api-error-contract-check.py`
+- Invariant: The `error` field is a stable machine-readable failure class that names a domain condition and is never derived from human message text.
+- Finding: The catalogue was generated mechanically from message strings. Twenty-three codes carried a truncated hash suffix such as `..._e6e895eedf`, one hundred eighty-five codes were whole English sentences, and several were truncated at a Java string-concatenation boundary, producing codes and safe messages that could not be a compatibility contract.
+- Why prior review missed it: The gate asserted only that at least one hundred descriptors existed and that codes were unique. Cardinality and uniqueness cannot detect message-derived naming.
+- Resolution evidence: The catalogue was curated to 271 reviewed domain codes. The gate now rejects duplicate codes, a constant that does not mirror `upper(code)`, a hash-truncated suffix, and codes exceeding seven tokens. `PublicApiErrorDescriptorTests.catalogueConstantsMirrorTheirStableCodeAndCarryCompleteSafeMessages` proves the same properties in the running JVM and additionally rejects safe messages truncated at a concatenation boundary.
+- Process correction: A gate over a public contract must assert the shape of every entry, not the population size. Contract identifiers may never be produced from prose by an automated refactor without an explicit human curation pass.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0085
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 57
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: Chapter 57 published contract review
+- Invariant: Every stable error code a client may receive is discoverable in the published OpenAPI contract.
+- Finding: `ApiErrorResponse.error` was published as an undescribed `string`. The contract asserted in prose that clients should classify using the error field while publishing nothing that told a client which values exist, so no generated SDK or merchant integration could enumerate them.
+- Why prior review missed it: The contract gate validated paths, operation identifiers, version headers, and security schemes, and treated schema presence as sufficient without checking that the documented compatibility surface was actually populated.
+- Resolution evidence: `PublicOpenApiConfiguration.publishStableErrorCatalogue` injects all 271 codes and 37 recovery actions from `PublicApiErrorDescriptor` as `x-extensible-enum`, documents `message` as non-contractual, and is proven by `VersionedPublicContractTests.publishedContractEnumeratesEveryStableErrorCodeSoClientsNeverParseMessages`. A closed `enum` was rejected because it would make every future code addition a breaking change for strictly validating clients.
+- Process correction: A field described as a compatibility contract must publish its permitted values, and the value set must be derived from the enforcing code so it cannot drift.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0086
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 57
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: `VersionedPublicContractTests.servedArtifactIsByteExactAndRuntimeContractExcludesInternalSurfaces`
+- Invariant: The committed public OpenAPI artifact describes the API that actually runs.
+- Finding: The byte-exactness test compared the served artifact to the committed artifact, both of which are the same classpath file. Nothing compared either to the springdoc contract produced by the running application, so any server-side contract change could ship with a stale published artifact.
+- Why prior review missed it: Byte-exact serving was accepted as artifact correctness. The review did not ask which two independent sources the equality actually related.
+- Resolution evidence: `VersionedPublicContractTests.committedArtifactDescribesTheRunningApiAndNotAStaleSnapshot` compares the parsed runtime contract to the committed artifact and fails closed on drift. It also writes the runtime contract to `apps/payments-api/target/openapi/runtime-public-contract.json`, and `scripts/generate-openapi-contract.py --source` freezes the artifact from that same JVM, so regeneration and verification share one source.
+- Process correction: An equality proof must name the two independent sources it relates. Comparing an artifact to itself is not evidence.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0087
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 58
+- Category: WEAK_PROOF
+- Frozen promise affected: NO
+- Date found: 2026-08-03
+- Escaped gate: `scripts/generate-python-sdk.sh`
+- Invariant: A generated SDK is never published with an unresolved generator token.
+- Finding: The guard was written as `if rg -n 'ERROR_TO_EXAMPLE_VALUE' ...; then`. Where `rg` is not installed the shell returns 127, the condition evaluates false, and `set -e` does not apply inside an `if` condition, so the guard silently never executed and the script still reported success.
+- Why prior review missed it: The script was reviewed for the correctness of the condition it expresses rather than for its behavior when the tool it depends on is absent.
+- Resolution evidence: The guard now uses `grep` and branches on the exact exit status: `0` fails as a found generator token, `1` is clean, and any other status fails as a broken scan. Regeneration was re-run and the guard executes.
+- Process correction: A shell gate must distinguish "checked and clean" from "could not check". Any gate whose failure mode is silence is treated as absent.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0088
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 56
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: `ReviewBulkPostgreSqlConcurrencyTests.forcedRowLockInterleavingLetsOnlyTheCommittedLiveLeaseWin`
+- Invariant: Under a forced row-lock interleaving, only the committed live lease wins and the contending worker observes it.
+- Finding: The test wrote `started_at` and `updated_at` with PostgreSQL `CURRENT_TIMESTAMP` while the rows under test are written by the application `Clock` bean. Under Testcontainers the database runs on a separate virtual-machine clock, so a sub-millisecond skew intermittently produced `started_at < created_at` and failed `ck_review_bulk_action_requests_time`. The concurrency invariant therefore had a non-deterministic proof.
+- Why prior review missed it: The review focused on the forced interleaving and lock-wait observation and did not ask which clock each timestamp column came from. The failure only surfaces when the two clocks drift.
+- Resolution evidence: The test injects the application `Clock` and binds `Timestamp.from(clock.instant())`, matching the single clock source used by `ReviewBulkActionStore`. Five consecutive runs pass. Production was never affected because the store derives `created_at`, `started_at`, and `updated_at` from one `clock.instant()` call per operation.
+- Process correction: Any assertion touching a database ordering constraint must use a single clock source. Mixing `CURRENT_TIMESTAMP` with application-written timestamps under an ordering constraint is treated as a defect even when the suite is green.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0089
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 53
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: absent proof for `GET /risk/workspace/payments/{id}/webhook-activity`
+- Invariant: Every investigation route named by the Chapter 53 promises returns authoritative evidence rather than an unhandled server error.
+- Finding: `PaymentTimelineService.webhookActivity` selected `last_error`, a column dropped by `V9__harden_webhook_delivery_execution` and replaced by the closed enum column `last_error_code`. Every call to the webhook-activity route raised `BadSqlGrammarException` and returned HTTP 500. The route had never been invoked by any test, so the schema drift survived a full green suite and a chapter review.
+- Why prior review missed it: The review treated the route as covered because the service class and its DTO existed and compiled. Compilation cannot detect a dropped column referenced from a string literal, and no proof exercised the route end to end.
+- Resolution evidence: The query now selects `last_error_code`, which is the closed diagnostic enum the DTO field `safeFailureCode` was always intended to carry, and binds the keyset cursor instant as `Timestamp.from(afterTime)`. `PaymentInvestigationSourceReconciliationTests.readingDetailSearchTimelineAndRelatedLeavesEveryAuthoritativeRowByteIdentical` and `PaymentInvestigationTenantIsolationTests.everyPaymentScopedRouteTreatsAForeignIdExactlyLikeAnAbsentId` now invoke the route directly, and `PaymentInvestigationReadinessTests.sourceOnlyRoutesKeepWorkingWhileTheProjectionIsDown` asserts it returns 200 during a projection outage.
+- Process correction: Every route named in an invariant matrix must be invoked by at least one proof before the matrix row can leave `PENDING`. A route with no executing test is treated as unimplemented regardless of whether its handler compiles.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0090
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 53
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: absent projection-outage proof for `PaymentInvestigationService.analytics`
+- Invariant: A derived read-model outage degrades only the projection-backed section and never removes authoritative source detail.
+- Finding: `ProjectionDefinitionStore` is annotated `@Repository`, so Spring persistence-exception translation rewrote the `IllegalStateException` it threw into `InvalidDataAccessApiUsageException`. Both graceful-degradation handlers, in `PaymentInvestigationService.analytics` and `RelatedPaymentService`, caught `IllegalStateException` and were therefore unreachable dead code. A disabled or handler-incompatible projection made `GET /risk/workspace/payments/{id}` return HTTP 500, which is precisely the failure sequence C53-OPS-001 was written to prevent.
+- Why prior review missed it: The review read the catch block and accepted the stated intent. No test ever ran the investigation surface with the projection unavailable, so the degradation branch was never executed and its unreachability was invisible.
+- Resolution evidence: New `ProjectionGenerationUnavailableException` extends `RuntimeException` rather than `IllegalStateException`, so persistence-exception translation leaves it intact; `ProjectionDefinitionStore.requireActive` throws it and both degradation sites catch it. `PaymentInvestigationReadinessTests.aDisabledProjectionStillLeavesAuthoritativeSourceDetailFullyReadable` proves the detail route stays 200 with `analyticsContext` reported `UNAVAILABLE` and reason `active_projection_unavailable`, and `aDisabledProjectionMakesSearchFailLoudlyRatherThanReturnAnEmptyPage` proves the projection-only route refuses rather than reporting a falsely empty result set. The full backend suite passes at 929 tests.
+- Process correction: A degradation handler is not proven by reading its catch clause. Every declared degradation path must be executed by a test that makes the dependency genuinely unavailable, and any handler catching a framework-translated exception type must be verified against the type that actually escapes the proxy.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0091
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 54
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: Chapter 54 proof asserted the refusal status and code for forged timeline evidence but never asserted that the published recovery contract was truthful.
+- Invariant: A stable public error code classifies its failure exactly, and `retryable` is true only when replaying the identical request can succeed without operator intervention.
+- Finding: `TIMELINE_INTEGRITY_UNAVAILABLE` was published as `503 SERVICE_UNAVAILABLE`, `retryable=true`, message "Canonical timeline evidence is temporarily unavailable", recovery `retry_the_safe_read_after_retry_after`. Every one of its four raise sites in `PaymentTimelineService` is deterministic and permanent. The most severe of them, the `map` identity check, fires when a stored row disagrees with its own signed record, which is tamper detection on an append-only store that `PaymentTimelineAppendPostgreSqlTests` had already proven cannot be repaired or deleted. The contract therefore instructed every client and SDK to retry forever against evidence that can never become readable, and buried a forgery signal under a transient-error class that no operator pages on.
+- Why prior review missed it: The Chapter 54 hostile pass exercised the boundary correctly and asserted `503` and `timeline_integrity_unavailable`, then treated matching the shipped descriptor as proof. It never asked whether the descriptor itself was honest, so the test encoded the defect as the expected answer. The failure sequence "retryable is true for a permanent failure" belonged to the error-contract family, which no Chapter 54 row owned.
+- Resolution evidence: The two operationally distinct causes are now separate codes. `TIMELINE_EVIDENCE_INTEGRITY_FAILED` (`500`, `retryable=false`, recovery `contact_support_with_the_request_id`) covers the signed-record identity mismatch and logs at ERROR with the event and stream identity so the tamper signal is visible in operations. `TIMELINE_INTEGRITY_UNAVAILABLE` retains `503`/`retryable=true` for the genuinely transient case, a stored event this build has no reviewed presentation mapper for, which a later deployment fixes without the caller changing anything. The change is additive to the published catalogue. `PaymentTimelineAppendPostgreSqlTests.aRowWhoseDatabaseIdentityDisagreesWithItsSignedRecordIsRefusedNotRendered` now asserts `500`, the new code, and `retryable=false`. `PublicApiErrorCatalogueTests.twoDistinctOperationalCausesNeverShareOneCode` pins the split.
+- Process correction: The boundary family was reopened rather than the single observed descriptor. `PublicApiErrorCatalogueTests` now proves the retry contract for every descriptor in the catalogue: no `503` may be non-retryable, no non-transient status may be retryable, every retryable code must name its safe replay, no permanent code may invite an unchanged retry, and no `5xx` may blame the caller. A proof that asserts an error code must assert the recovery semantics that code publishes, because matching the shipped value only proves the code did not change.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0092
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 57
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: `ApiErrorContractTests` and `scripts/public-api-error-contract-check.py` both certified the error contract, but each only inspected the catalogue in isolation. Neither compared the codes the API actually emits on the wire against the codes the API publishes to clients.
+- Invariant: Every stable code a public response can emit is published in `/developer/error-catalog` and the OpenAPI error vocabulary, with identical status and retry semantics on both sides.
+- Finding: `GlobalApiExceptionHandler` carried a second, undocumented error vocabulary written as bare string literals, together with its own `retryable` and `recoveryAction` rules derived from HTTP status. Four emitted codes existed nowhere in `PublicApiErrorDescriptor`, so they appeared in neither the published catalogue nor the OpenAPI `x-extensible-enum`: `method_not_allowed`, `unsupported_media_type`, `client_error`, `server_error`. Worse, the two vocabularies disagreed where they overlapped. A `404` was published with recovery `verify_the_tenant_scoped_identifier` but emitted with `correct_the_request_before_retry`, and the handler's transient recovery hints (`retry_with_same_idempotency_key_after_retry_after`, `wait_for_retry_after_then_retry_with_same_idempotency_key`) were spellings the catalogue never contained. An integrator branching on the documented contract would have built handling for strings the runtime never sends, and received strings the documentation never mentions.
+- Why prior review missed it: The existing proofs asserted properties of the catalogue (uniqueness, constant-to-code agreement, minimum size, message safety) and properties of individual responses (status, code, envelope shape), but nothing joined the two sets. The generic framework failure families were also the least interesting to write a domain test for, which is exactly why they were the ones that drifted. The `x-extensible-enum` decision to keep the published list open, taken so that adding a code stays non-breaking, removed the last place a schema validator would have noticed the omission.
+- Resolution evidence: `method_not_allowed`, `unsupported_media_type`, `client_error`, and `server_error` are now first-class descriptors. `PublicApiErrorDescriptor.byCode` resolves any emitted code back to its catalogue entry, and `GlobalApiExceptionHandler` reads `retryable` and `recoveryAction` from that entry instead of re-deriving them; the parallel status-based rules are deleted. Emitting a code that is not in the catalogue now fails loudly rather than shipping an undocumented contract. The regenerated `openapi/thaap-public-api-2026-08-01.yaml` carries the completed vocabulary, and the contract drift gate in `VersionedPublicContractTests` proved the staleness before the artifact was refreshed.
+- Process correction: `ApiErrorCompatibilityTests` closes the join that was missing. `everyEmittedCodeIsPublishedInTheCatalogueClientsAreToldToBranchOn` walks eleven real failure families end to end and requires each emitted code to appear in `/developer/error-catalog`; `theCatalogueAgreesWithTheEnvelopeOnStatusAndRetrySemantics` requires status, `retryable`, and `recoveryAction` to be identical on the wire and in the documentation. The general lesson is that a contract proof must test the join between what the system does and what the system says, because each side can be internally consistent while the pair is a lie.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0093
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 57
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-03
+- Escaped gate: `VersionedPublicContractTests` asserted the security block of the sandbox scenario operations, but it asserted the value the generator happened to emit rather than the credential the runtime actually demands.
+- Invariant: A published security requirement states exactly the credentials an operation enforces, so a generated client neither withholds a credential the API needs nor supplies one it does not.
+- Finding: Every `/developer/scenario-runs` operation published `security: [{merchantApi: [], scenarioRunner: []}]`. A single OpenAPI requirement object listing two schemes means both are mandatory. The runtime disagrees: `MerchantContextArgumentResolver` requires only `X-Api-Key`, and treats `X-Thaap-Scenario-Runner-Token` as optional, validating it only when present in order to mark the call as synthetic traffic. The contract therefore told every generated SDK and strict client that a merchant key alone could not open the sandbox, which is the first surface a new integrator touches. The mismatch was an over-declaration rather than a privilege hole, but a contract that misstates its credential boundary in either direction cannot be trusted in the direction that matters.
+- Why prior review missed it: The security declarations are derived from path prefixes in `PublicOpenApiConfiguration.security`, while enforcement is derived from handler parameter types resolved by an argument resolver. Nothing joined the two, and the existing assertion was written by reading the generated document, so it recorded the generator's opinion as the expected answer.
+- Resolution evidence: The scenario operations now publish `security: [{merchantApi: []}]`, and every merchant-authenticated operation documents `X-Thaap-Scenario-Runner-Token` as an optional header whose description states that it never replaces the merchant credential. The committed and bundled `openapi/thaap-public-api-2026-08-01.yaml` were regenerated, and `VersionedPublicContractTests` now asserts the corrected requirement together with the optional parameter.
+- Process correction: `OpenApiSecurityContractTests.everyDeclaredCredentialIsTheCredentialTheHandlerActuallyEnforces` derives the enforced credential for all 133 public operations from `RequestMappingHandlerMapping` handler signatures and requires the published document to match exactly, so the path-prefix heuristic can no longer drift from enforcement without failing. `noOperationOutsideTheDocumentationSurfaceIsPublishedAsOpen` and `merchantAndRiskOperatorCredentialsAreNeverInterchangeable` close the remaining partitions of the same family.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-03
+
+## ER-0094
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 55
+- Category: WEAK_PROOF
+- Frozen promise affected: NO
+- Date found: 2026-08-05
+- Escaped gate: every chapter's PostgreSQL proofs were run per-class or per-chapter, never as one whole-suite pass, so the suite's aggregate resource cost was never a measured quantity.
+- Invariant: Adding a proof must not make an unrelated proof fail. Test infrastructure is part of the product's evidence chain, and evidence that only holds when run in isolation is not evidence.
+- Finding: Every `*PostgreSqlTests` class in the repository declares its own `@Container` static PostgreSQL container, so each class costs the suite one Docker container and one Spring application context. Adding the two new Chapter 55 PostgreSQL classes took the full suite from 25 contexts / 26 containers to 27 / 28, and at that point `DomainEventPostgreSqlTests` — a Chapter 51 class untouched by the change — began failing all four of its tests with `No qualifying bean of type DatabaseCleaner`. The context logged a successful startup, so the failure presented as a nonsensical missing-bean error rather than as resource exhaustion. Running the same three classes together passed; only the full-suite aggregate reproduced it.
+- Why prior review missed it: The per-class container pattern was inherited and never questioned, because at 25 classes it still worked. No gate measured contexts or containers, and no chapter ran `-Dtest='*PostgreSql*'` as a single pass, so the suite's headroom was invisible until it was gone. Each chapter's proofs were green in isolation, which is precisely the condition under which an aggregate limit stays hidden.
+- Resolution evidence: `ReviewBulkPostgreSqlTestBase` now owns one manually started singleton container for the whole `bulk` package, and all three review-bulk PostgreSQL classes extend it. The container is deliberately not a `@Container` field: that annotation starts and stops the container per test class, so the second subclass would receive a fresh container on a new port while the cached Spring context still addressed the stopped one — a failure mode observed and rejected during this fix. `@EnabledIf` preserves the previous skip-without-Docker behaviour. The review-bulk PostgreSQL proofs now cost one context and one container instead of three of each, and the full `*PostgreSql*` suite is green again.
+- Process correction: A new PostgreSQL proof class in an area that already has one must extend that area's shared base rather than declare a fresh container. More generally, a chapter's PostgreSQL evidence is not complete until the whole `*PostgreSql*` suite has been run in one pass, because per-class runs cannot observe an aggregate resource limit. The lesson is that "each proof passes" and "the proofs pass together" are different claims, and only the second one is the one that ships.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-05
+
+## ER-0095
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 55
+- Category: WEAK_PROOF
+- Frozen promise affected: NO
+- Date found: 2026-08-05
+- Escaped gate: the `ER-0094` process correction was written narrowly enough that it did not bind the next class that triggered the same failure.
+- Invariant: Adding a proof must not make an unrelated proof fail. A correction for a recurring failure has to name the condition that causes it, not the one place it was last observed.
+- Finding: `ER-0094` corrected the per-class container pattern by adding `ReviewBulkPostgreSqlTestBase` and instructing that "a new PostgreSQL proof class in an area that already has one must extend that area's shared base." `ReviewBulkAssignmentMigrationPostgreSqlTests` was then added under `com.thaap.payments.database`, an area whose only existing class — `DecisionIntelligencePostgreSqlMigrationTests` — declared its own `@Container` and had no shared base. The instruction was followed to the letter and the defect recurred anyway: the full suite went red with `OfflineReplayDatasetIntegrationTests` failing all four tests on `No qualifying bean of type DatabaseCleaner`, the same nonsensical missing-bean presentation of container/context exhaustion that `ER-0094` diagnosed.
+- Why prior review missed it: The correction was phrased around "an area that already has a shared base," which is a property of the codebase's current state rather than of the risk. An area with two container-declaring classes and no base was exactly the gap the wording left open. The pure-Flyway migration classes also looked exempt because they start no Spring context — but they still cost a whole database each, and the binding constraint is the Docker host, not the context cache.
+- Resolution evidence: `MigrationPostgreSqlTestBase` now owns one manually started singleton container for the `database` package and carries the shared `database()`, `migrate()`, and `drop()` helpers; both `DecisionIntelligencePostgreSqlMigrationTests` and `ReviewBulkAssignmentMigrationPostgreSqlTests` extend it, so the two Chapter 55 migration proofs added zero containers to the suite. Subclasses work inside their own generated schema, so sharing one database is safe. The full backend suite is green at 1152 tests with zero failures.
+- Process correction: The rule is now stated as a property of the risk rather than of the current tree: no test class may declare its own PostgreSQL `@Container`; every PostgreSQL proof extends a package-level shared base, and a package that lacks one gets a base created as part of the change that adds its second such class. The wider lesson is that a process correction which names a location rather than a condition will be obeyed and still fail, so a correction should be written so that following it prevents the recurrence rather than merely describing the fix that resolved the original instance.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-05
+
+## ER-0096
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 58
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-06
+- Escaped gate: the SDK regeneration check exists and is correct, but it had never been executed, so a stale generated client passed every gate that did run.
+- Invariant: The committed Python SDK is generated from the exact committed OpenAPI contract. A client generated from an older contract silently disagrees with the server about which credentials exist and which fields are returned.
+- Finding: `scripts/python-sdk-regeneration-check.sh` had never been run in any environment, because it requires Docker and `C58-GEN-001` recorded its byte-stability claim as asserted-by-script rather than demonstrated. Its first execution failed. The committed client carried contract digest `8ca1ba94…` while `openapi/thaap-public-api-2026-08-01.yaml` hashes to `97c0d31e…`: the SDK had been generated from a contract predating the Chapter 53–56 endpoints. It was missing the `DrillThrough` model, and it still modelled `X-Thaap-Scenario-Runner-Token` as a `scenarioRunner` security scheme that the current contract does not attach to any operation. The contract now models the token as an explicit optional header parameter on all 42 merchant operations, which matches `MerchantContextArgumentResolver`, where the token is what flips `TrafficOrigin` from `MERCHANT_API` to `SYNTHETIC_SCENARIO`. The consequence was not a broken call: `Credentials(scenario_runner_token=…)` was accepted and the header was never sent, so the sandbox quickstart's generated payments would have been recorded as live merchant traffic and entered live-only fraud metrics. Nothing would have failed.
+- Why prior review missed it: Section 15 of the Phase 6 plan states that a chapter adding a public endpoint after Chapter 57 owns the additive regeneration. Chapters 53–56 added endpoints and regenerated the contract but not the client, and no gate compared the two because the only gate that would have was itself unrun. The matrix row honestly recorded "asserted by the script but not yet demonstrated by a recorded run," which is precisely the state in which a claim looks proven in a summary and is not.
+- Resolution evidence: The SDK was regenerated from the committed contract; two independent generations produced byte-identical trees and `scripts/python-sdk-regeneration-check.sh` reports `Python SDK regeneration PASS`. `Credentials` now rejects a scenario token without a merchant key and rejects holding merchant and risk-operator authority in one client. A client constructed with a runner token attaches the qualifier to every request it makes, because forgetting it per call fails silently rather than loudly. `tests/test_payment_quickstart_contract.py::test_scenario_traffic_is_tagged_synthetic_and_live_traffic_is_not` asserts the two origins, and `tests/test_secure_client.py::test_scenario_qualifier_is_absent_unless_the_session_is_synthetic` asserts the qualifier never appears on a live session.
+- Process correction: A gate that has never been executed does not count as evidence, and a matrix row must not reach `PASS` on a script's assertion alone. Any row whose proof is a script now requires a recorded run in the closure dossier before it closes. The regeneration check runs before Chapter 59 closure and on every later contract change, so the additive-regeneration obligation is enforced by execution rather than by a paragraph in a plan.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-06
+
+## ER-0097
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 58
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-06
+- Escaped gate: the secret-hygiene proof asserted on the exception's message and `__cause__` but never on `__context__`, so the leak sat one attribute away from every assertion.
+- Invariant: The SDK never places a credential, raw response body, or request URL into an exception, log, or representation. `C58-SEC-001` and `C58-OBS-001` both depend on this.
+- Finding: `_SafeApiClient` raised its safe `ThaapApiError` and `ThaapTransportError` with `raise … from None` inside the `except` block. That clears `__cause__` and sets `__suppress_context__`, which stops the default traceback printer — but `__context__` still referenced the underlying generated `ApiException` or urllib3 exception, whose `body` and `headers` attributes carry the raw server response and the request headers, and whose message carries the full request URL. Every assertion in the suite passed because they all read `str(error)`, `repr(error)` and `__cause__`. Any consumer that walks the exception chain directly — structured log handlers, error reporters, `traceback` helpers that ignore the suppression flag — would have published the credential and the response body into the integrator's logging system.
+- Why prior review missed it: `raise … from None` reads as the idiom for "drop the chain," and the tests were written against the two attributes that idiom visibly affects. The suppression flag is a rendering hint, not a deletion, and no test asserted the distinction. This is the `WEAK_PROOF` shape of a real implementation defect: the promise was correct, the mechanism was almost correct, and the proof only covered the visible half.
+- Resolution evidence: The safe error is now constructed inside the handler and raised after the `except` block completes, so no exception is being handled at the raise point and `__context__` is null. `tests/test_client_observability.py::test_the_exception_chain_never_reattaches_the_raw_response_body` and `::test_a_transport_failure_reports_a_decision_not_a_stack_of_internals` assert both `__cause__` and `__context__` are `None`, and assert the base URL, credential and server message are absent from the rendered exception.
+- Process correction: A non-disclosure claim about an exception must be proven over the whole reachable object graph, not over its default rendering: `str`, `repr`, `__cause__`, `__context__`, and any attribute a reporter would serialise. The boundary family for secret hygiene is reopened to that standard, which is why the transport failure path was audited and fixed in the same change rather than only the API error path where the defect was first seen.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-06
+
+## ER-0098
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 57
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-06
+- Escaped gate: `scripts/openapi-contract-check.sh` was written but never wired into `scripts/commit-readiness-check.sh`, so it had been failing without anyone learning that it was.
+- Invariant: Section 3.5 of the Phase 6 plan freezes that every published operation carries its correct credential scheme, so a client generated from the contract presents what the server actually requires.
+- Finding: The contract published `security: [{merchantApi: []}]` for every `/developer/scenario-runs*` operation and attached the runner token as an optional header, on the reasoning that `MerchantContextArgumentResolver` merely accepts the token to flip `TrafficOrigin`. That reasoning holds for the 36 ordinary merchant operations and is wrong for all six scenario operations: every one of them reaches `DeveloperScenarioService.requireSynthetic`, which rejects any context whose origin is not `SYNTHETIC_SCENARIO`, and only a valid runner token produces that origin. The published contract therefore told a generated client that a merchant key alone was sufficient for six operations that return `SCENARIO_RUNNER_CREDENTIAL_REQUIRED` without the token, so a client generated from the contract would fail every documented sandbox scenario call. `openapi-contract-check.sh` asserted the correct blanket rule and was therefore red — but being unwired from `scripts/commit-readiness-check.sh`, its failure was invisible.
+- Why prior review missed it: The credential decision was made once, for the family, and recorded as a considered comment in `PublicOpenApiConfiguration` explaining why the token is only a traffic-origin qualifier. That reasoning is correct for ordinary merchant operations and was generalised over a path prefix to the scenario routes, where a second guard exists one layer down in the service. No test derived the expectation from an enforcement point, and `VersionedPublicContractTests` asserted the wrong expectation confidently across four scenario pointers. The first attempt at the fix repeated the error in a third form: reading only `DeveloperScenarioController` shows `requireScenarioRunner` in three of six handlers, which suggested a three/three split until `DeveloperScenarioService.requireSynthetic` was found guarding all six. Three independent attempts inferred this boundary from a convenient surface rather than from where it is enforced.
+- Resolution evidence: A new `@RequiresScenarioRunner` annotation marks each handler that rejects a merchant key presented alone, and sits beside the guard rather than in a separate list. `PublicOpenApiConfiguration` reads it from the running handler mapping to publish the `scenarioRunner` requirement; `OpenApiSecurityContractTests.credentialsOf` reads the same annotation to derive the enforced boundary it compares the contract against, so expected and actual still come from two different artifacts and the comparison retains content. All six scenario operations declare `merchantApi` AND `scenarioRunner` and no longer duplicate the token as a bare header; the other 36 merchant operations keep the optional qualifier. `openapi-contract-check.py` restores the blanket rule and additionally rejects an operation that publishes the token both ways. `VersionedPublicContractTests` asserts both groups separately with the reason recorded. The contract was regenerated, the SDK regenerated from it, and `openapi-contract-check.sh`, the Redocly lint, the compatibility check and the breaking-change negative fixture all pass.
+- Process correction: A gate script that is not invoked by `scripts/commit-readiness-check.sh` is not a gate. `openapi-contract-check.py` is now wired into the readiness run alongside the compatibility check, and both are covered by `commit_readiness_check_tests.py` so removing either fails a test. The wider correction, shared with `ER-0096`: before a chapter closes, every script named as proof in its matrix must have a recorded execution, because an unrun script is indistinguishable from a passing one in a summary and is frequently red.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-06

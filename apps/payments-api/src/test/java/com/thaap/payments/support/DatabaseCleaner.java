@@ -7,6 +7,10 @@ import org.springframework.stereotype.Component;
 public class DatabaseCleaner {
 
     private static final String[] TABLES = {
+            "review_bulk_action_items",
+            "review_bulk_action_requests",
+            "payment_investigation_saved_views",
+            "payment_investigation_relation_anchors",
             "replay_dataset_compatibility_evidence",
             "replay_dataset_item_evidence",
             "replay_dataset_chunk_results",
@@ -137,6 +141,8 @@ public class DatabaseCleaner {
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY FALSE");
             try {
                 for (String table : new String[] {
+                        "review_bulk_action_items", "review_bulk_action_requests",
+                        "payment_investigation_saved_views", "payment_investigation_relation_anchors",
                         "replay_dataset_compatibility_evidence", "replay_dataset_item_evidence",
                         "replay_dataset_chunk_results", "replay_dataset_chunks",
                         "replay_dataset_results", "replay_dataset_manifests",
@@ -230,6 +236,8 @@ public class DatabaseCleaner {
             }
         } else {
             jdbcTemplate.execute("TRUNCATE TABLE replay_dataset_compatibility_evidence, "
+                    + "review_bulk_action_items, review_bulk_action_requests, "
+                    + "payment_investigation_saved_views, payment_investigation_relation_anchors, "
                     + "replay_dataset_item_evidence, replay_dataset_chunk_results, "
                     + "replay_dataset_chunks, replay_dataset_results, replay_dataset_manifests, "
                     + "projection_reconciliations, projection_rebuild_events, projection_rebuilds, "

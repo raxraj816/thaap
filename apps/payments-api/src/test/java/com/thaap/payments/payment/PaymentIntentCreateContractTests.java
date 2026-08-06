@@ -231,7 +231,7 @@ class PaymentIntentCreateContractTests {
                 .getContentAsString();
         var error = objectMapper.readTree(response);
 
-        assertStandardError(error, 400, "bad_request", "req_day6_missing_idempotency", "/payment_intents");
+        assertStandardError(error, 400, "idempotency_key_required", "req_day6_missing_idempotency", "/payment_intents");
         assertThat(error.get("message").asText()).isEqualTo("Missing Idempotency-Key header");
         assertThat(countRows("payment_intents")).isZero();
     }
@@ -294,7 +294,7 @@ class PaymentIntentCreateContractTests {
                 .getContentAsString();
         var error = objectMapper.readTree(response);
 
-        assertStandardError(error, 409, "conflict", "req_day6_conflict", "/payment_intents");
+        assertStandardError(error, 409, "idempotency_key_conflict", "req_day6_conflict", "/payment_intents");
         assertThat(error.get("message").asText())
                 .isEqualTo("Idempotency key was already used with a different request");
         assertThat(countRows("payment_intents")).isEqualTo(1);

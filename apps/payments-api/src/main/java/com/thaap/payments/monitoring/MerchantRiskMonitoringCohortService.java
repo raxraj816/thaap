@@ -1,5 +1,7 @@
 package com.thaap.payments.monitoring;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.monitoring.MerchantRiskMonitoringQueryService.MonitoringRequest;
 import com.thaap.payments.monitoring.MerchantRiskMonitoringQueryService.MonitoringWindow;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -395,7 +397,7 @@ public class MerchantRiskMonitoringCohortService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_MONITORING_COHORT_REQUEST_INVALID, message);
     }
 
     public record CohortPage(MerchantRiskMetricCode metricCode, String definitionVersion,

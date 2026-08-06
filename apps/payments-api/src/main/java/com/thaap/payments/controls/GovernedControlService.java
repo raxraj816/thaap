@@ -1,5 +1,7 @@
 package com.thaap.payments.controls;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
@@ -189,8 +191,7 @@ public class GovernedControlService {
         }
         PaymentMethod paymentMethod = paymentMethodRepository
                 .findByIdAndMerchantId(paymentMethodId, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "PaymentMethod was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_METHOD_NOT_FOUND, "PaymentMethod was not found"));
         String keyVersion = sensitiveValueHasher.currentKeyVersion();
         String subjectHmac = sensitiveValueHasher.hmacSha256(
                 EXCEPTION_HMAC_DOMAIN, paymentMethod.getCardFingerprint(), keyVersion);
@@ -377,7 +378,7 @@ public class GovernedControlService {
                 + (lock ? " FOR UPDATE" : ""), resultSet -> resultSet.next() ? mapRule(resultSet) : null,
                 merchantId, id);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Authored rule was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHORED_RULE_NOT_FOUND, "Authored rule was not found");
         }
         return view;
     }
@@ -407,7 +408,7 @@ public class GovernedControlService {
                         + " WHERE exception.merchant_id = ? AND exception.id = ?" + (lock ? " FOR UPDATE" : ""),
                 resultSet -> resultSet.next() ? mapException(resultSet) : null, merchantId, id);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Safety exception was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAFETY_EXCEPTION_NOT_FOUND, "Safety exception was not found");
         }
         return view;
     }
@@ -441,7 +442,7 @@ public class GovernedControlService {
 
     private void lockManager(RiskOperatorContext context) {
         if (context.role() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "RISK_MANAGER role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_MANAGER_ROLE_REQUIRED, "RISK_MANAGER role is required");
         }
         String role = jdbcTemplate.query("""
                 SELECT role FROM risk_operators
@@ -449,7 +450,7 @@ public class GovernedControlService {
                 """, resultSet -> resultSet.next() ? resultSet.getString(1) : null,
                 context.merchantId(), context.operatorId());
         if (!RiskOperatorRole.RISK_MANAGER.name().equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active RISK_MANAGER role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.ACTIVE_RISK_MANAGER_ROLE_REQUIRED, "Active RISK_MANAGER role is required");
         }
         Integer guardCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM merchant_risk_configuration_guards"
                 + " WHERE merchant_id = ?", Integer.class, context.merchantId());
@@ -464,8 +465,7 @@ public class GovernedControlService {
                 (org.springframework.jdbc.core.ResultSetExtractor<Boolean>) resultSet -> resultSet.next(),
                 context.merchantId());
         if (!Boolean.TRUE.equals(guard)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Merchant risk configuration guard is unavailable");
+            throw new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_CONFIGURATION_GUARD_UNAVAILABLE, "Merchant risk configuration guard is unavailable");
         }
     }
 
@@ -477,8 +477,7 @@ public class GovernedControlService {
 
     private void requireIndependentApprover(UUID creator, UUID approver) {
         if (creator.equals(approver)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Control creator cannot approve the same version");
+            throw new PublicApiException(PublicApiErrorDescriptor.GOVERNED_CONTROL_SELF_APPROVAL_FORBIDDEN, "Control creator cannot approve the same version");
         }
     }
 
@@ -530,11 +529,11 @@ public class GovernedControlService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.GOVERNED_CONTROL_REQUEST_INVALID, message);
     }
 
     private ResponseStatusException conflict(String message) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message);
+        return new PublicApiException(PublicApiErrorDescriptor.GOVERNED_CONTROL_CONFLICT, message);
     }
 
     public record RuleView(UUID id, String ruleCode, String displayName, int versionNumber,

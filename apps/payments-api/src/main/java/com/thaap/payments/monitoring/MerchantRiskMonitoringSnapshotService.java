@@ -1,5 +1,7 @@
 package com.thaap.payments.monitoring;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
@@ -201,8 +203,7 @@ public class MerchantRiskMonitoringSnapshotService {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND,
-                "Merchant risk monitoring resource was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_MONITORING_NOT_FOUND, "Merchant risk monitoring resource was not found");
     }
 
     public record SnapshotView(UUID id, UUID merchantId, UUID createdByOperatorId,

@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.review.ManualReviewCase;
 import com.thaap.payments.review.ManualReviewCaseRepository;
@@ -65,8 +67,7 @@ public class ReviewNoteService {
                             supersedesNoteId, context.merchantId())
                     .filter(note -> note.getManualReviewCaseId().equals(reviewCaseId))
                     .filter(note -> note.getLifecycleStatus() == ReviewNoteLifecycleStatus.ACTIVE)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "Superseded review note was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.SUPERSEDED_REVIEW_NOTE_NOT_FOUND, "Superseded review note was not found"));
         }
         ReviewNoteContentValidator.ValidatedNote validated = contentValidator.validate(content);
         Instant createdAt = now();
@@ -98,14 +99,12 @@ public class ReviewNoteService {
             UUID noteId) {
         RiskOperator actor = liveActorForUpdate(context);
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only a risk manager can redact review notes");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOTE_REDACTION_MANAGER_REQUIRED, "Only a risk manager can redact review notes");
         }
         lockedCase(reviewCaseId, context.merchantId());
         noteRepository.findByIdAndMerchantIdForUpdate(noteId, context.merchantId())
                 .filter(note -> note.getManualReviewCaseId().equals(reviewCaseId))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Review note was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOTE_NOT_FOUND, "Review note was not found"));
     }
 
     @Transactional
@@ -136,14 +135,12 @@ public class ReviewNoteService {
             UUID noteId, String requestId) {
         RiskOperator actor = liveActorForUpdate(context);
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only a risk manager can redact review notes");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOTE_REDACTION_MANAGER_REQUIRED, "Only a risk manager can redact review notes");
         }
         lockedCase(reviewCaseId, context.merchantId());
         ReviewNote note = noteRepository.findByIdAndMerchantIdForUpdate(noteId, context.merchantId())
                 .filter(candidate -> candidate.getManualReviewCaseId().equals(reviewCaseId))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Review note was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOTE_NOT_FOUND, "Review note was not found"));
         Instant now = now();
         if (note.terminate(ReviewNoteRedactionReason.MANAGER_REDACTION, context.operatorId(), now)) {
             noteRepository.saveAndFlush(note);
@@ -190,18 +187,15 @@ public class ReviewNoteService {
     private void authorizeCaseAccess(RiskOperator actor, ManualReviewCase reviewCase,
             long expectedAssignmentVersion) {
         if (actor.getRole() == RiskOperatorRole.VIEWER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Viewer role cannot access protected review notes");
+            throw new PublicApiException(PublicApiErrorDescriptor.PROTECTED_REVIEW_NOTE_ACCESS_FORBIDDEN, "Viewer role cannot access protected review notes");
         }
         if (reviewCase.getAssignmentVersion() != expectedAssignmentVersion) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "ManualReviewCase assignment version is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_ASSIGNMENT_VERSION_STALE, "ManualReviewCase assignment version is stale");
         }
         if (actor.getRole() == RiskOperatorRole.ANALYST
                 && (reviewCase.getStatus() != ManualReviewCaseStatus.ASSIGNED
                     || !actor.getId().equals(reviewCase.getAssignedOperatorId()))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Analyst must be assigned to the review case");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_ANALYST_NOT_ASSIGNED, "Analyst must be assigned to the review case");
         }
     }
 
@@ -209,19 +203,16 @@ public class ReviewNoteService {
         RiskOperator actor = operatorRepository.findByIdAndMerchantIdForUpdate(
                         context.operatorId(), context.merchantId())
                 .filter(RiskOperator::isActive)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Review case was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_CASE_NOT_FOUND, "Review case was not found"));
         if (actor.getRole() != context.role()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_STALE, "Risk operator credential is stale");
         }
         return actor;
     }
 
     private ManualReviewCase lockedCase(UUID reviewCaseId, UUID merchantId) {
         return reviewCaseRepository.findByIdAndMerchantIdForUpdate(reviewCaseId, merchantId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Review case was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_CASE_NOT_FOUND, "Review case was not found"));
     }
 
     private Map<String, Object> safeState(ReviewNote note) {

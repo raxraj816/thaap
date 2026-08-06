@@ -1,5 +1,7 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.tenant.MerchantContext;
 import jakarta.servlet.http.HttpServletRequest;
@@ -76,8 +78,7 @@ public class WebhookController {
             @RequestParam(required = false) Instant beforeCreatedAt,
             @RequestParam(required = false) UUID beforeId) {
         if ((beforeCreatedAt == null) != (beforeId == null)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "beforeCreatedAt and beforeId must be supplied together");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAGINATION_BEFORE_CURSOR_INCOMPLETE, "beforeCreatedAt and beforeId must be supplied together");
         }
         List<WebhookDelivery> deliveries = beforeCreatedAt == null
                 ? deliveryRepository.findByMerchantIdOrderByCreatedAtDescIdDesc(
@@ -112,8 +113,7 @@ public class WebhookController {
 
     private WebhookDelivery loadDelivery(MerchantContext merchantContext, UUID id) {
         return deliveryRepository.findByIdAndMerchantId(id, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Webhook delivery was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_DELIVERY_NOT_FOUND, "Webhook delivery was not found"));
     }
 
     private String requestIdFrom(HttpServletRequest request) {

@@ -1,5 +1,7 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
@@ -347,8 +349,7 @@ public class WebhookEndpointVerificationService {
         if (previous.lifecycleStatus() == WebhookEndpointVerificationStatus.PENDING) {
             if (previous.expiresAt().isAfter(now)
                     || dispatchLeaseIsActive(merchantId, pendingId, now)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Webhook endpoint verification is already in progress");
+                throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_VERIFICATION_IN_PROGRESS, "Webhook endpoint verification is already in progress");
             }
             jdbcTemplate.update("""
                     UPDATE webhook_endpoint_verifications
@@ -393,8 +394,7 @@ public class WebhookEndpointVerificationService {
     private WebhookEndpoint requireEndpoint(UUID merchantId, UUID endpointId, boolean lock) {
         return (lock ? endpointRepository.findByIdAndMerchantIdForUpdate(endpointId, merchantId)
                 : endpointRepository.findByIdAndMerchantId(endpointId, merchantId))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Webhook endpoint was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_NOT_FOUND, "Webhook endpoint was not found"));
     }
 
     private ChallengeView requireChallenge(UUID merchantId, UUID endpointId,
@@ -422,8 +422,7 @@ public class WebhookEndpointVerificationService {
                         resultSet.getTimestamp("completed_at") == null ? null
                                 : resultSet.getTimestamp("completed_at").toInstant()), arguments);
         if (rows.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Webhook endpoint verification was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_VERIFICATION_NOT_FOUND, "Webhook endpoint verification was not found");
         }
         return rows.getFirst();
     }

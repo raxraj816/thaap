@@ -1,5 +1,8 @@
 package com.thaap.payments.riskcontext;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
+import com.thaap.payments.investigation.InvestigationRelationAnchorWriter;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.tenant.TrafficOrigin;
 import java.net.InetAddress;
@@ -20,26 +23,28 @@ public class RiskContextService {
     private final SensitiveValueHasher hasher;
     private final Clock clock;
     private final RiskContextMetrics metrics;
+    private final InvestigationRelationAnchorWriter relationAnchorWriter;
 
     public RiskContextService(RiskContextRepository repository, SensitiveValueHasher hasher, Clock clock,
-            RiskContextMetrics metrics) {
+            RiskContextMetrics metrics, InvestigationRelationAnchorWriter relationAnchorWriter) {
         this.repository = repository;
         this.hasher = hasher;
         this.clock = clock;
         this.metrics = metrics;
+        this.relationAnchorWriter = relationAnchorWriter;
     }
 
     public RiskContext create(UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId,
             RiskContextRequest request, TrafficOrigin trafficOrigin) {
         if (request == null) {
+            relationAnchorWriter.write(merchantId, paymentIntentId, paymentAttemptId, null);
             metrics.recordObservation(false);
             return null;
         }
         Instant now = clock.instant();
         if (request.observedAt() != null && request.observedAt().isAfter(now)) {
             metrics.recordRejection("FUTURE_OBSERVED_AT");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "RiskContext observedAt is too far in the future");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_CONTEXT_OBSERVED_AT_IN_FUTURE, "RiskContext observedAt is too far in the future");
         }
         String ip = normalizeIp(request.ipAddress());
         VersionedIdentity ipIdentity = identity("ip", merchantId, ip);
@@ -52,6 +57,7 @@ public class RiskContextService {
                 sessionIdentity.encodedAliases(),
                 hasAnyIdentity(request) ? hasher.currentKeyVersion() : null,
                 request, trafficOrigin, now));
+        relationAnchorWriter.write(merchantId, paymentIntentId, paymentAttemptId, riskContext);
         metrics.recordObservation(true);
         return riskContext;
     }
@@ -75,8 +81,7 @@ public class RiskContextService {
         }
         if (value.codePoints().anyMatch(Character::isISOControl)) {
             metrics.recordRejection("CONTROL_CHARACTER");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "RiskContext identity contains a control character");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_CONTEXT_IDENTITY_INVALID, "RiskContext identity contains a control character");
         }
         return value.trim().toLowerCase(Locale.ROOT);
     }
@@ -105,7 +110,7 @@ public class RiskContextService {
             return address.getHostAddress().toLowerCase(Locale.ROOT);
         } catch (Exception exception) {
             metrics.recordRejection("INVALID_IP");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "RiskContext IP address is invalid");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_CONTEXT_IP_ADDRESS_INVALID, "RiskContext IP address is invalid");
         }
     }
 

@@ -1,5 +1,7 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
@@ -65,7 +67,7 @@ public class RefundController {
     @GetMapping("/{id}")
     public RefundResponse getRefund(MerchantContext merchantContext, @PathVariable UUID id) {
         Refund refund = refundRepository.findByIdAndMerchantId(id, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Refund was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REFUND_NOT_FOUND, "Refund was not found"));
         return RefundResponse.from(refund);
     }
 
@@ -73,15 +75,13 @@ public class RefundController {
             CreateRefundRequest request, String requestId) {
         PaymentIntent paymentIntent = paymentIntentRepository
                 .findByIdAndMerchantIdForUpdate(request.paymentIntentId(), merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentIntent was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_FOUND, "PaymentIntent was not found"));
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (startingStatus != PaymentIntentStatus.CAPTURED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be refunded from status " + startingStatus);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_REFUNDABLE, "PaymentIntent cannot be refunded from status " + startingStatus);
         }
         if (request.amount() != paymentIntent.getAmount()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
+            throw new PublicApiException(PublicApiErrorDescriptor.REFUND_AMOUNT_INVALID, "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         }
         FullRefundService.Result result = fullRefundService.refundLocked(merchantContext.merchantId(),
                 paymentIntent, RefundReasonCode.MERCHANT_REQUESTED, null, false);

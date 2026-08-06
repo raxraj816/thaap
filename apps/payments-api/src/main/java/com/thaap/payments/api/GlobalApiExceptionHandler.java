@@ -6,6 +6,7 @@ import jakarta.validation.ConstraintViolationException;
 import com.thaap.payments.ratelimit.RateLimitExceededException;
 import com.thaap.payments.ratelimit.RateLimitUnavailableException;
 import com.thaap.payments.workspace.SavedSearchUpgradeRequiredException;
+import com.thaap.payments.investigation.PaymentSavedViewUpgradeRequiredException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -102,6 +103,14 @@ public class GlobalApiExceptionHandler {
                 List.of());
     }
 
+    @ExceptionHandler(PublicApiException.class)
+    public ResponseEntity<ApiErrorResponse> handlePublicApi(PublicApiException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        PublicApiErrorDescriptor descriptor = exception.descriptor();
+        return error(descriptor.status(), descriptor.code(), descriptor.safeMessage(), request,
+                response, List.of(), descriptor.retryable(), descriptor.recoveryAction());
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleNoResource(NoResourceFoundException exception,
             HttpServletRequest request, HttpServletResponse response) {
@@ -155,10 +164,20 @@ public class GlobalApiExceptionHandler {
                 exception.getMessage(), request, response, List.of());
     }
 
+    @ExceptionHandler(PaymentSavedViewUpgradeRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> handlePaymentSavedViewUpgrade(
+            PaymentSavedViewUpgradeRequiredException exception,
+            HttpServletRequest request, HttpServletResponse response) {
+        return error(HttpStatus.CONFLICT, "saved_view_upgrade_required",
+                "Payment saved view requires an explicit schema upgrade",
+                request, response, List.of());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception exception, HttpServletRequest request,
             HttpServletResponse response) {
         String requestId = requestId(request, response);
+        // Stack traces are withheld: driver/constraint text can carry row and column values.
         log.error("Unhandled API exception requestId={} path={} exceptionType={}",
                 requestId, request.getRequestURI(), exception.getClass().getSimpleName());
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error", "Internal server error", request,
@@ -168,9 +187,22 @@ public class GlobalApiExceptionHandler {
 
     private ResponseEntity<ApiErrorResponse> error(HttpStatus status, String error, String message,
             HttpServletRequest request, HttpServletResponse response, List<ApiErrorField> fieldErrors) {
+        // Retry and recovery semantics are read from the published catalogue, never re-derived
+        // here. A second opinion in this class is how a client ends up retrying forever against a
+        // failure the catalogue documents as permanent.
+        PublicApiErrorDescriptor descriptor = PublicApiErrorDescriptor.byCode(error)
+                .orElseThrow(() -> new IllegalStateException(
+                        "unpublished error code emitted by the public API: " + error));
+        return error(status, error, message, request, response, fieldErrors,
+                descriptor.retryable(), descriptor.recoveryAction());
+    }
+
+    private ResponseEntity<ApiErrorResponse> error(HttpStatus status, String error, String message,
+            HttpServletRequest request, HttpServletResponse response, List<ApiErrorField> fieldErrors,
+            boolean retryable, String recoveryAction) {
         String requestId = requestId(request, response);
         ApiErrorResponse body = new ApiErrorResponse(requestId, Instant.now(), status.value(), error, message,
-                request.getRequestURI(), fieldErrors);
+                request.getRequestURI(), fieldErrors, retryable, recoveryAction);
         return ResponseEntity.status(status).body(body);
     }
 
@@ -189,10 +221,14 @@ public class GlobalApiExceptionHandler {
         return switch (status) {
             case BAD_REQUEST -> "bad_request";
             case UNAUTHORIZED -> "unauthorized";
+            case FORBIDDEN -> "forbidden";
             case NOT_FOUND -> "not_found";
             case METHOD_NOT_ALLOWED -> "method_not_allowed";
+            case UNSUPPORTED_MEDIA_TYPE -> "unsupported_media_type";
             case CONFLICT -> "conflict";
             case INTERNAL_SERVER_ERROR -> "internal_server_error";
+            // Framework-raised statuses outside the mapped set still get a published code. The
+            // envelope status field carries the exact status; the code carries the class.
             default -> status.is4xxClientError() ? "client_error" : "server_error";
         };
     }

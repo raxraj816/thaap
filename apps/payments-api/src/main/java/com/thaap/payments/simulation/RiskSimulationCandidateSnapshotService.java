@@ -1,5 +1,7 @@
 package com.thaap.payments.simulation;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,7 +58,7 @@ public class RiskSimulationCandidateSnapshotService {
                         ? new PolicyIdentity(resultSet.getString(1), resultSet.getInt(2)) : null,
                 merchantId, candidateVersionId);
         if (policy == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation candidate was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_CANDIDATE_NOT_FOUND, "Simulation candidate was not found");
         }
         List<RiskSimulationCandidateSnapshot.Threshold> thresholds = jdbcTemplate.query("""
                 SELECT threshold_code, feature_code, feature_version, value_type, operator,
@@ -75,8 +77,7 @@ public class RiskSimulationCandidateSnapshotService {
                         resultSet.getInt(10), resultSet.getString(11)),
                 merchantId, candidateVersionId);
         if (thresholds.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Simulation candidate must contain at least one threshold");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_CANDIDATE_THRESHOLD_MISSING, "Simulation candidate must contain at least one threshold");
         }
         RiskSimulationCandidateSnapshot snapshot = new RiskSimulationCandidateSnapshot(
                 RiskSimulationCandidateSnapshot.SCHEMA_VERSION, candidateType, candidateVersionId,
@@ -97,7 +98,7 @@ public class RiskSimulationCandidateSnapshotService {
                                 FraudDecisionAction.valueOf(resultSet.getString(3))) : null,
                 merchantId, candidateVersionId);
         if (rule == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation candidate was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_CANDIDATE_NOT_FOUND, "Simulation candidate was not found");
         }
         authoredRuleCodec.parseStored(rule.json(), rule.digest());
         AuthoredRuleSimulationSnapshot snapshot = new AuthoredRuleSimulationSnapshot(
@@ -130,7 +131,7 @@ public class RiskSimulationCandidateSnapshotService {
                         resultSet.getTimestamp(10).toInstant(), resultSet.getTimestamp(11).toInstant()) : null,
                 merchantId, candidateVersionId);
         if (snapshot == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation candidate was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_CANDIDATE_NOT_FOUND, "Simulation candidate was not found");
         }
         authoredRuleCodec.parseStored(snapshot.sourceRuleJson(), snapshot.sourceRuleDigest());
         String canonical = write(snapshot);

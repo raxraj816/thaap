@@ -59,6 +59,8 @@ import {
   getProjectionAnalyticsStatus,
   verifyWebhookEndpoint,
 } from "./api";
+import { Phase6Workspace } from "./Phase6Workspace";
+import { DeveloperPortal } from "./DeveloperPortal";
 
 type FailureState = "authentication" | "denied" | "stale" | "rate-limited" | "dependency" | "invalid";
 type Notice = { kind: "error" | "success"; message: string; state?: FailureState } | null;
@@ -113,9 +115,16 @@ export function App() {
   const [webhookVerification, setWebhookVerification] = useState<WebhookVerification | null>(null);
   const [developerWorkerId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
+  const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [retryTask, setRetryTask] = useState<(() => Promise<void>) | null>(null);
   const [sliceFailures, setSliceFailures] = useState<Partial<Record<WorkspaceSlice, SliceFailure>>>({});
   const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const restoreRoute = () => setRoutePath(window.location.pathname);
+    window.addEventListener("popstate", restoreRoute);
+    return () => window.removeEventListener("popstate", restoreRoute);
+  }, []);
 
   useEffect(() => {
     setNoteDraft("");
@@ -549,6 +558,25 @@ export function App() {
 
   const canAnalyze = operatorSession?.role === "ANALYST" || operatorSession?.role === "RISK_MANAGER";
   const canManage = operatorSession?.role === "RISK_MANAGER";
+  const phase6Route = routePath === "/workspace/payments"
+    || /^\/workspace\/payments\/[0-9a-fA-F-]{36}$/.test(routePath)
+    || routePath === "/workspace/insights" || routePath === "/workspace/bulk"
+    || routePath === "/workspace/payment-views";
+  const developerRoute = ["/developer/quickstart", "/developer/api",
+    "/developer/webhooks", "/developer/scenarios"].includes(routePath);
+
+  function navigate(path: string) {
+    const allowed = ["/", "/workspace/reviews", "/workspace/payments", "/workspace/insights",
+      "/workspace/payment-views", "/workspace/bulk", "/workspace/controls",
+      "/workspace/disputes", "/workspace/webhooks",
+      "/developer/quickstart", "/developer/api", "/developer/webhooks",
+      "/developer/scenarios"].includes(path)
+      || /^\/workspace\/payments\/[0-9a-fA-F-]{36}$/.test(path);
+    if (!allowed) throw new Error("Workspace route is not allowlisted");
+    window.history.pushState(null, "", path);
+    setRoutePath(path);
+    window.requestAnimationFrame(() => headingRef.current?.focus());
+  }
 
   return (
     <div className="app-shell">
@@ -558,7 +586,35 @@ export function App() {
           <h1 ref={headingRef} tabIndex={-1}>Analyst cockpit</h1>
           <p className="lede">Explainable review queues, durable context, and explicit risk truth.</p>
         </div>
+        <nav className="workspace-nav developer-masthead-nav" aria-label="Developer resources">
+          <a href="/developer/quickstart"
+            aria-current={routePath === "/developer/quickstart" ? "page" : undefined}
+            onClick={(event) => { event.preventDefault(); navigate("/developer/quickstart"); }}>
+            Developer quickstart</a>
+          <a href="/developer/api" aria-current={routePath === "/developer/api" ? "page" : undefined}
+            onClick={(event) => { event.preventDefault(); navigate("/developer/api"); }}>API</a>
+        </nav>
         {operatorSession && <div className="session-actions">
+          <nav className="workspace-nav" aria-label="Risk workspace">
+            <a href="/workspace/reviews" aria-current={routePath === "/workspace/reviews" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/reviews"); }}>Reviews</a>
+            <a href="/workspace/payments" aria-current={routePath.startsWith("/workspace/payments") ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/payments"); }}>Payments</a>
+            <a href="/workspace/insights" aria-current={routePath === "/workspace/insights" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/insights"); }}>Insights</a>
+            <a href="/workspace/payment-views"
+              aria-current={routePath === "/workspace/payment-views" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/payment-views"); }}>Saved views</a>
+            <a href="/workspace/bulk" aria-current={routePath === "/workspace/bulk" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/bulk"); }}>Bulk assignment</a>
+            <a href="/workspace/controls" aria-current={routePath === "/workspace/controls" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/controls"); }}>Controls</a>
+            <a href="/workspace/disputes" aria-current={routePath === "/workspace/disputes" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/disputes"); }}>Disputes</a>
+            {canManage && <a href="/workspace/webhooks"
+              aria-current={routePath === "/workspace/webhooks" ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate("/workspace/webhooks"); }}>Webhooks</a>}
+          </nav>
           {operatorSession && <span className="pill" aria-label="Signed-in operator role">
             {operatorSession.role.replace("_", " ")}
           </span>}
@@ -573,7 +629,9 @@ export function App() {
           onClick={() => void run(retryTask)}>Retry same safe request</button>}
       </div>}
 
-      {!operatorSession ? (
+      {developerRoute ? (
+        <DeveloperPortal path={routePath} navigate={navigate} />
+      ) : !operatorSession ? (
         <main className="connect-panel">
           <section className="card intro-card">
             <span className="section-index">01</span>
@@ -660,6 +718,9 @@ export function App() {
             </div>}
           </section>
         </main>
+      ) : phase6Route ? (
+        <Phase6Workspace credential={credential} operator={operatorSession}
+          path={routePath} navigate={navigate} />
       ) : (
         <main className="workspace-grid">
           <aside className="card filter-rail" aria-label="Queue controls">

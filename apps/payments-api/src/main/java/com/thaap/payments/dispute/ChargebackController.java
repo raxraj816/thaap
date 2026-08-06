@@ -1,5 +1,7 @@
 package com.thaap.payments.dispute;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.tenant.MerchantContext;
@@ -50,7 +52,7 @@ public class ChargebackController {
     public ChargebackResponse get(MerchantContext context, @PathVariable UUID id) {
         return repository.findByIdAndMerchantId(id, context.merchantId())
                 .map(ChargebackResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chargeback was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_NOT_FOUND, "Chargeback was not found"));
     }
 
     @PostMapping("/{id}/evidence_packets")

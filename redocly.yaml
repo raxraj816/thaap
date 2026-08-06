@@ -1,0 +1,11 @@
+apis:
+  thaap@2026-08-01:
+    root: openapi/thaap-public-api-2026-08-01.yaml
+extends:
+  - minimal
+rules:
+  operation-operationId: error
+  security-defined: error
+  no-unresolved-refs: error
+  no-server-trailing-slash: error
+  no-server-example.com: off

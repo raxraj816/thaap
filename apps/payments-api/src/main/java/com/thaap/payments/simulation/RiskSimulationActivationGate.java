@@ -1,5 +1,7 @@
 package com.thaap.payments.simulation;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -56,7 +58,7 @@ public class RiskSimulationActivationGate {
                         resultSet.getLong(8), resultSet.getLong(9), resultSet.getLong(10)) : null,
                 merchantId, runId);
         if (facts == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_NOT_FOUND, "Simulation was not found");
         }
         List<RiskSimulationGateReason> reasons = new ArrayList<>();
         if (facts.status() != RiskSimulationLifecycleStatus.SUCCEEDED) {

@@ -1,5 +1,7 @@
 package com.thaap.payments.review;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.tenant.TrafficOrigin;
 import java.time.Instant;
@@ -29,7 +31,7 @@ public class RiskLabelController {
             @RequestParam(defaultValue = "25") int limit,
             @RequestParam(name = "starting_after", required = false) UUID startingAfter) {
         if (limit < 1 || limit > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "limit must be between 1 and 100");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAGE_LIMIT_INVALID, "limit must be between 1 and 100");
         }
         List<FraudLabel> labels;
         if (startingAfter == null) {
@@ -37,8 +39,7 @@ public class RiskLabelController {
                     context.merchantId(), PageRequest.of(0, limit));
         } else {
             FraudLabel cursor = repository.findByIdAndMerchantId(startingAfter, context.merchantId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "FraudLabel cursor was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.FRAUD_LABEL_CURSOR_NOT_FOUND, "FraudLabel cursor was not found"));
             labels = repository.listAfter(context.merchantId(), cursor.getCreatedAt(), cursor.getId(),
                     PageRequest.of(0, limit));
         }
@@ -49,8 +50,7 @@ public class RiskLabelController {
     public FraudLabelReadResponse detail(RiskOperatorContext context, @PathVariable UUID id) {
         return repository.findByIdAndMerchantId(id, context.merchantId())
                 .map(FraudLabelReadResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "FraudLabel was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.FRAUD_LABEL_NOT_FOUND, "FraudLabel was not found"));
     }
 
     public record FraudLabelReadResponse(UUID id, UUID paymentIntentId, UUID paymentAttemptId,

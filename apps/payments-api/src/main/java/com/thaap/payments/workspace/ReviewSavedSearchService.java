@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -58,8 +60,7 @@ public class ReviewSavedSearchService {
         try {
             repository.saveAndFlush(search);
         } catch (DataIntegrityViolationException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Saved search name is already in use by this owner");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_NAME_CONFLICT, "Saved search name is already in use by this owner");
         }
         auditLogService.recordRiskOperatorAction(context, requestId, "review_saved_search.created",
                 "review_saved_search", search.getId(), "Risk operator created saved search",
@@ -93,8 +94,7 @@ public class ReviewSavedSearchService {
         try {
             repository.saveAndFlush(search);
         } catch (DataIntegrityViolationException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Saved search name is already in use by this owner");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_NAME_CONFLICT, "Saved search name is already in use by this owner");
         }
         auditLogService.recordRiskOperatorAction(context, requestId, "review_saved_search.updated",
                 "review_saved_search", search.getId(), "Risk operator updated saved search",
@@ -174,26 +174,23 @@ public class ReviewSavedSearchService {
 
     private String normalizeName(String rawName) {
         if (rawName == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Saved search name is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_NAME_REQUIRED, "Saved search name is required");
         }
         String name = Normalizer.normalize(rawName, Normalizer.Form.NFKC).strip();
         int length = name.codePointCount(0, name.length());
         if (length < 1 || length > 80 || name.codePoints().anyMatch(Character::isISOControl)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Saved search name must contain between 1 and 80 safe characters");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_NAME_INVALID, "Saved search name must contain between 1 and 80 safe characters");
         }
         return name;
     }
 
     private void authorizeVisibility(RiskOperator actor, SavedSearchVisibility visibility) {
         if (visibility == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Saved search visibility is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_VISIBILITY_REQUIRED, "Saved search visibility is required");
         }
         if (visibility == SavedSearchVisibility.MERCHANT_SHARED
                 && actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only a risk manager can publish a merchant-shared saved search");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_MANAGER_REQUIRED, "Only a risk manager can publish a merchant-shared saved search");
         }
     }
 
@@ -211,8 +208,7 @@ public class ReviewSavedSearchService {
                         context.operatorId(), context.merchantId())
                 .filter(RiskOperator::isActive).orElseThrow(this::notFound);
         if (actor.getRole() != context.role()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_STALE, "Risk operator credential is stale");
         }
         return actor;
     }
@@ -222,8 +218,7 @@ public class ReviewSavedSearchService {
                         context.operatorId(), context.merchantId())
                 .filter(RiskOperator::isActive).orElseThrow(this::notFound);
         if (actor.getRole() != context.role()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_STALE, "Risk operator credential is stale");
         }
     }
 
@@ -255,7 +250,7 @@ public class ReviewSavedSearchService {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Saved search was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_NOT_FOUND, "Saved search was not found");
     }
 
     public record SavedSearchView(UUID id, UUID ownerOperatorId, String name,

@@ -2,114 +2,196 @@
 
 - Chapter: Chapter 59 — Workspace Trust And Integrated Phase 6 Closure
 - Chapter number: 59
-- Status: IN_PROGRESS
+- Status: READY_TO_MERGE
 - Invariant matrix: docs/reviews/CHAPTER_59_INVARIANT_PROOF_MATRIX.md
 - Matrix provenance: PRE_IMPLEMENTATION
 - Promise freeze: CONFIRMED
 - Failure inventory: COMPLETE
-- Traceability review: PENDING
-- Hostile review: PENDING
-- Boundary family review: PENDING
+- Traceability review: PASS
+- Hostile review: PASS
+- Boundary family review: PASS
 - Custom infrastructure review: NOT_APPLICABLE
 - Escaped review assessment: COMPLETE
-- Merge recommendation: DO_NOT_MERGE
+- Merge recommendation: MERGE
 
-This dossier was opened on 2026-08-02 before Chapter 59 integrated closure
-work. The chapter remains dependency-blocked until Chapters 53–58 are all
-merge-ready.
+This dossier was opened on 2026-08-02 before Chapter 59 integration work. All
+thirteen matrix rows now hold on executed evidence, and Chapters 53–58 are each
+`VERIFIED` with every row `PASS` and a dossier recommending `MERGE`.
 
 ## Observable promises
 
-Phase 6 closes only when one authorized analyst can complete the full
-source-reconciled investigation/action/insight journey and one new merchant
-developer can complete the versioned-contract/SDK/webhook/scenario/analytics
-journey with no source reading, hidden configuration, false authority, tenant
-leak, secret leak, duplicate effect, or unsupported production claim.
+Two journeys, both executed rather than described.
+
+An authorized analyst moves from freshness-qualified search to a source-reconciled
+payment, a complete deterministic decision explanation, the canonical timeline,
+bounded same-merchant pivots, a review action, label and outcome evidence, and
+denominator-honest insight — without leaving the routed workspace and without
+rewriting original payment, decision or event truth.
+
+A new merchant developer uses only published version, error and OpenAPI
+documentation plus a clean-installed SDK to create sandbox objects, confirm a
+payment with safe ambiguous-outcome recovery, interpret risk outcomes, verify and
+deduplicate a signed webhook, run and resume a trusted scenario, and read
+freshness-qualified analytics — without reading THAAP source.
 
 ## Failure inventory
 
-The matrix freezes cross-chapter analyst and developer journeys, complete
-tenant/credential/privacy sinks, real cross-feature interleavings, source/event/
-projection/label/insight lineage, final route/OpenAPI/SDK inventory, browser
-route/state/accessibility, fresh/retained V91 migration, observability,
-governance, recovery, and Phase 7–10 exclusions.
+The matrix freezes the integrated families: analyst journey and payment/fraud
+truth, developer journey, tenant and credential isolation, security and privacy,
+cross-feature concurrency, data and ML lineage, final API and SDK contract, routed
+browser and accessibility, fresh and retained migration, observability, recovery,
+and phase boundary.
 
 ## Boundary family evidence
 
-Pending. Required proof crosses chapter seams: search-to-source authority,
-timeline/relationship pagination during change, action/label/insight refresh,
-bulk/source locks and leases, projection activation, credential/tenant cache
-changes, OpenAPI-to-package digest, exact webhook representation, migration
-upgrade/restart, partial readiness, and both zero-hidden-knowledge journeys.
+Every row of the matrix names its exact artifacts. The integrated additions this
+chapter owns are:
+
+| Artifact | What it proves that no chapter could alone |
+|---|---|
+| `PublicContractPhaseInventoryTests` | The one document every integrator reads still describes the whole product, exactly once, and the shipped client was generated from that same document |
+| `scripts/phase-closure-check.py --phase-6` | Every matrix, dossier, product artifact, completion marker and the SDK-to-contract digest agree |
+| `docs/operations/DECISION_INTELLIGENCE_WORKSPACE_OPERATIONS_RUNBOOK.md` | An operator can recover every declared failure without editing history |
+| `@RequiresScenarioRunner` | The published credential requirement is derived from the enforcement point rather than from a path prefix |
 
 ## Enforcement boundaries
 
-Planned enforcement is the union of Chapters 53–58 at their real boundaries:
-source transactions and mutation services, canonical event ordering, signed
-cursors and typed digests, tenant-qualified durable workers, active projection
-generation, API version/error/OpenAPI gates, generated SDK plus narrow secure
-transport, explicit routed UI state, immutable migrations, and bounded
-operational signals.
+Nothing in Chapter 59 becomes a new authority. Source domain tables remain
+authoritative; canonical events remain the immutable business ordering and never
+authorize a mutation; Phase 5 projections remain discovery and aggregate analytics
+carrying generation, freshness and coverage; audit remains security evidence and is
+never rendered as payment truth. Mutations continue through their existing typed
+services and lock orders.
+
+The one boundary this chapter tightened is the credential declaration.
+`@RequiresScenarioRunner` sits on the six scenario handlers;
+`PublicOpenApiConfiguration` reads it from the running handler mapping to publish
+the requirement, and `OpenApiSecurityContractTests` reads it to derive the enforced
+boundary it compares the contract against. Expected and actual come from two
+different artifacts, so the comparison retains content — a list hardcoded in both
+would have proven only that it equals itself.
 
 ## Exact proof
 
-No Chapter 59 integrated proof exists yet. Every matrix row remains `PENDING`.
-Closure requires deterministic PostgreSQL interleavings and postconditions,
-real HTTP and hostile local transport fixtures, fresh/retained migrations,
-route/contract/package inventories, real browser/accessibility proof, complete
-regression, both demos, traceability, and a separately timed hostile review.
+- Backend: 1256 tests green, including the new `PublicContractPhaseInventoryTests`.
+- UI: 83 tests across 11 files, `axe-core` on every route.
+- SDK: 54 tests against a real loopback `ThreadingHTTPServer`.
+- `scripts/openapi-contract-check.sh` → PASS (125 paths, 133 operations) plus lint.
+- `scripts/openapi-compatibility-check.py` → PASS, 0 operations added since baseline.
+- `scripts/openapi-breaking-change-negative-test.sh` → PASS.
+- `scripts/python-sdk-regeneration-check.sh` → PASS, byte-identical across two runs.
+- `scripts/python-sdk-package-check.py` → PASS: offline clean install, suite from the
+  installed package, build determinism, declared runtime range negatives.
+- `scripts/python-sdk-scope-check.py` → PASS, with 7 planted-violation tests.
+- `scripts/phase-closure-check.py --phase-6` → PASS.
 
 ## Migration evidence
 
-Pending fresh V1→V91 and retained V85→V91 PostgreSQL evidence with exact schema
-and row fingerprints, malformed/backfill/constraint/restart/failure partitions,
-Hibernate validation, measured query plans, old/new deployment behavior, and
-immutable migration-history proof.
+`DecisionIntelligencePostgreSqlMigrationTests` proves fresh `V1→V91` and retained
+`V85→V91` against real PostgreSQL with repeated startup;
+`ReviewBulkAssignmentMigrationPostgreSqlTests` and
+`PaymentRelationshipMigrationPostgreSqlTests` prove the V86–V90 protections. No
+reverse migration exists and none is claimed — a rollback plan assuming Flyway can
+undo V86–V91 would be false, and the runbook says so explicitly.
 
 ## Demo evidence
 
-Pending. Demo one is the complete analyst search→explain→timeline→related→
-action→label/outcome→insight journey. Demo two is the clean-installed SDK
-create→confirm/retry→webhook→scenario→analytics journey. Both use only public
-product surfaces, preserve source truth, and expose partial/failure recovery.
+Both public journeys run without hidden configuration, a remote host, a real
+credential, or a package registry:
+
+- `scripts/demo-payment-investigation.py`, `scripts/demo-saved-views-and-bulk-review.py`
+  and `scripts/demo-workspace-insights.py` for the analyst journey.
+- `clients/python/thaap_sdk/examples/sandbox_quickstart.py` for the developer
+  journey — executed as a test, so the demo cannot drift from the documentation.
 
 ## Operational signals
 
-Pending phase-wide bounded outcome/latency/lag/backlog/freshness/coverage/
-contract/package/readiness signals, alert and runbook exercises, injected
-dependency/saturation/worker/migration/browser/client failures, and recovery
-without sensitive or high-cardinality dimensions.
+Bounded, closed-enum signals for investigation section status, timeline and
+relationship query outcome, saved-view lifecycle, bulk backlog and lease recovery,
+insight not-computable reason, version resolution, contract drift, and browser
+route/slice outcome. No merchant, operator, payment, review, view, cursor,
+credential, URL, amount, message or exception text appears as a dimension.
+Readiness composes dependencies explicitly rather than collapsing them, so a
+partial outage cannot report ready.
 
 ## Known debt
 
-No debt is accepted at freeze. Any genuine non-P0 deferral discovered during
-implementation must receive an immutable `TD-NNNN` with exact DRI, trigger,
-done criteria, destination plan references, and current review evidence before
-Chapter 59 can recommend merge. Phase 7–10 capabilities are explicit roadmap
-scope, not Phase 6 debt.
+None accepted, and one inherited item resolved rather than deferred again.
+
+`TD-0006` — the investigation navigation page-envelope naming split — named this
+chapter as its resolution owner and named its trigger precisely: before the
+versioned artifact declares any navigation route generally available, and before
+the SDK publishes a shared pager. That trigger fired here. All four cursor-paged
+investigation surfaces now publish their rows as `data`, a contract test asserts
+the single name rather than tolerating either, and `thaap_sdk.iterate_rows` pages
+every route unmodified.
+
+No transitional dual-emit field was needed. Duplicating every timeline row would
+have doubled the largest responses in the product to preserve a compatibility
+window for zero deployed consumers. The rename is a breaking change and was
+treated as one: `scripts/openapi-compatibility-check.py` rejected it, and the
+reviewed baseline was updated by the deliberate `--update-baseline` command so the
+change appears in review as a baseline diff. That option exists here only because
+Phase 6 is a local sandbox whose SDK regenerates from the contract in the same
+commit; Phase 9 owns deployed compatibility, where it will not.
+
+Every Phase 6 exclusion in Section 4.2 of the detailed plan retains its named
+Phase 7–10 owner and unblock evidence; none became debt.
+`scripts/technical-debt-check.py` passes with six entries, zero open.
 
 ## Custom infrastructure decision
 
-`NOT_APPLICABLE`. Chapter 59 integrates and proves the mature and reviewed
-boundaries selected by Chapters 53–58. It may add closure orchestration and
-test fixtures, but it cannot introduce a proprietary protocol, generator,
-queue, scheduler, concurrency layer, migration system, or analytics store.
+`NOT_APPLICABLE`. Spring Batch owns restart and chunk mechanics, PostgreSQL owns
+snapshot and locking semantics, mature OpenAPI tooling owns generation, lint and
+diff, OpenAPI Generator owns client operations and models, and standard-library
+primitives own HMAC and URL parsing. THAAP owns only product policy.
 
 ## Escaped-review assessment
 
-No Chapter 59 escaped finding exists at freeze. Any escape receives an
-`ER-NNNN`, one required root-cause classification, a reopened whole boundary
-family, product evidence, and a durable process correction before closure.
+The temporally later hostile pass found three findings, all resolved with product
+evidence and a process correction.
+
+`ER-0096` and `ER-0098` share a root cause worth naming plainly: a gate that
+existed, had been reviewed, and had never been executed. In both cases the first
+execution failed. `ER-0096`'s consequence was the more serious — a stale generated
+client accepted the scenario runner token and never sent it, so sandbox payments
+would have been recorded as live merchant traffic and entered live-only fraud
+metrics, with nothing failing anywhere.
+
+`ER-0097` was an implementation defect whose proof covered only the visible half:
+`raise … from None` clears `__cause__` and suppresses the printed traceback but
+leaves `__context__` referencing the exception carrying the raw response body and
+request headers.
+
+The corrections are mechanical. Both OpenAPI gates are invoked by
+`scripts/commit-readiness-check.sh` and covered by fixture tests that fail if
+either is removed. No matrix row whose proof is a script may close without a
+recorded run in its dossier. A non-disclosure claim about an exception is proven
+over the whole reachable object graph.
+
+One further correction is recorded honestly rather than quietly fixed: the first
+attempt at the `ER-0098` remedy was itself wrong. Reading only
+`DeveloperScenarioController` suggested three of six scenario operations required
+the token; `DeveloperScenarioService.requireSynthetic` guards all six. Three
+independent attempts — the original contract, the original check, and the first
+correction — each inferred the rule from a convenient surface rather than the
+enforcement point. That is why the fix is an annotation on the handlers rather than
+a more carefully written list.
 
 ## Source-of-truth reconciliation
 
-The detailed/master plans, vision matrix, architecture, READMEs, technical debt
-and escaped-review registers, all seven matrices/dossiers, and the learning
-trail must agree exactly. Chapter and Phase completion markers remain absent
-until every completion predicate passes.
+`README.md`, `apps/payments-api/README.md`, `docs/README.md`,
+`docs/IMPLEMENTATION_MASTER_PLAN.md`,
+`docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`,
+`docs/THAAP_VISION_COVERAGE_MATRIX.md`, and the 2026-08-06 learning trail all
+carry the exact marker `Phase 6 implementation status: COMPLETE` and agree that
+Chapters 53–59 are complete. `VP-004` and the Phase 6 boundary of `VP-005` are now
+`PROVEN_CURRENT_SCOPE`; `VP-016` records exact Phase 6 proof while retaining its
+Phase 9 deployed-compatibility and Phase 10 PSP-guide owners.
 
 ## Merge recommendation
 
-`DO_NOT_MERGE`. Chapters 53–58, implementation, integrated proof, migrations,
-both demos, operations/recovery, traceability, later hostile review, and final
-source reconciliation remain incomplete.
+`MERGE`. Both public journeys run from published artifacts alone, every matrix row
+holds at its real enforcement boundary, all three escaped findings are resolved
+with process corrections that are enforced by tests rather than by intent, and no
+debt is accepted.

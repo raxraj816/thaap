@@ -83,7 +83,7 @@ class ApiErrorContractTests {
                 .getContentAsString();
 
         var error = objectMapper.readTree(response);
-        assertStandardError(error, 401, "unauthorized", "req_day3_contract", "/customers");
+        assertStandardError(error, 401, "api_key_required", "req_day3_contract", "/customers");
         assertThat(error.get("message").asText()).isEqualTo("Missing X-Api-Key header");
     }
 
@@ -105,7 +105,7 @@ class ApiErrorContractTests {
 
         assertThat(generatedRequestId).isNotBlank();
         assertThat(UUID.fromString(generatedRequestId)).isNotNull();
-        assertStandardError(error, 401, "unauthorized", generatedRequestId, "/customers");
+        assertStandardError(error, 401, "api_key_required", generatedRequestId, "/customers");
     }
 
     @Test
@@ -202,7 +202,8 @@ class ApiErrorContractTests {
                 .getContentAsString();
 
         var error = objectMapper.readTree(response);
-        assertStandardError(error, 404, "not_found", "req_missing", "/payment_intents/" + missingPaymentIntent);
+        assertStandardError(error, 404, "payment_intent_not_found", "req_missing",
+                "/payment_intents/" + missingPaymentIntent);
         assertThat(error.get("message").asText()).isEqualTo("PaymentIntent was not found");
     }
 
@@ -262,7 +263,7 @@ class ApiErrorContractTests {
                 .getContentAsString();
 
         var error = objectMapper.readTree(response);
-        assertStandardError(error, 409, "conflict", "req_conflict", "/payment_intents");
+        assertStandardError(error, 409, "idempotency_key_conflict", "req_conflict", "/payment_intents");
         assertThat(error.get("message").asText())
                 .isEqualTo("Idempotency key was already used with a different request");
     }

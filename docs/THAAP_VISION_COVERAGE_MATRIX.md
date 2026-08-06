@@ -74,38 +74,35 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 
 ## VP-004: Explainable Controls And Decisions
 
-- Status: PARTIAL_NEXT_OWNER
+- Status: PROVEN_CURRENT_SCOPE
 - Vision promise: Every decision exposes score/level, matched and non-matched controls, reason codes, feature snapshot, versions, related evidence, and a safe timeline.
 - Current evidence: Chapters 22–31 and 38–39 preserve immutable feature/rule/control results, precedence, simulations, exceptions, activation, rollback, and decision evidence.
-- Remaining gap: The cockpit lacks one unified payment-to-risk-to-analyst-to-outcome explanation surface and bounded related-transaction navigation.
-- Owner phase: Phase 6
+- Remaining gap: None in current scope. Model contribution remains explicitly `NOT_CONFIGURED` until Phase 7 registers a governed served model; absence is published as a state rather than a zero score, so no reader can mistake "no model" for "scored low risk".
+- Owner phase: Phase 6 (complete); Phase 7 owns model explanation
 - Owner slice: Phase 6 Chapters 53–54 — Unified Payment Investigation,
   Decision Explanation, Canonical Timeline, And Safe Related-Payment Pivots
 - Primary DRI: Fraud/Risk Product and Product Design
-- Trigger: Satisfied 2026-08-02; Phase 5 is complete, the Phase 6 decisions are
-  founder-confirmed, Chapters 53–54 have frozen pre-implementation matrices,
-  and Chapter 53 is the dependency-ready entry.
+- Trigger: Satisfied. Chapters 53–54 are complete; their matrices are `VERIFIED`
+  with every row `PASS` and their dossiers recommend `MERGE`.
 - Done evidence: One tenant-scoped read model and UI reconcile payment, attempt, processor, rule/model, review, label, dispute, webhook, and ledger evidence with source links, freshness, empty/stale states, and privacy proof.
-- Merchant / analyst demo: Open a risky attempt and explain every decision input, winning action, later analyst action, label, and money effect from one screen.
-- Last reviewed: 2026-08-02
+- Merchant / analyst demo: `scripts/demo-payment-investigation.py` opens a risky attempt and explains every decision input, the winning control and why weaker or unavailable ones did not win, the later analyst action, the label, and the money effect from one route.
+- Last reviewed: 2026-08-06
 
 ## VP-005: Analyst Operations Depth
 
-- Status: PARTIAL_NEXT_OWNER
+- Status: PROVEN_CURRENT_SCOPE
 - Vision promise: Analysts can search, prioritize, assign, investigate, annotate safely, resolve, govern controls, and measure outcomes without reading database rows.
 - Current evidence: Chapters 26–27 and 36–40 prove actor roles, assignment/resolution, saved searches, protected notes, SLA-aware filters, monitoring, simulation, governed controls, and dispute operations.
-- Remaining gap: Unified investigation timelines, bounded bulk operations, related-transaction pivots, queue productivity, outcome/business insights, and case-level performance views are incomplete.
-- Owner phase: Phase 6
+- Remaining gap: None within the Phase 6 boundary. Bulk actions remain deliberately limited to assignment and release; resolution, labels, money, disputes and control activation keep their case-specific human authority, and cross-merchant pivots remain Phase 8.
+- Owner phase: Phase 6 (complete); Phase 8 owns cross-merchant intelligence
 - Owner slice: Phase 6 Chapters 55–56 — Investigation Saved Views, Bounded
   Bulk Review Assignment, Queue Productivity, And Decision/Business Insights
 - Primary DRI: Risk Operations and Product Design
-- Trigger: Phase 6 promise freeze satisfied 2026-08-02; Chapters 55–56 have
-  frozen pre-implementation matrices, while Chapter 55 remains dependency-
-  gated until Chapters 53–54 establish the investigation/relationship contract
-  used by saved views and drill-through.
+- Trigger: Satisfied. Chapters 55–56 are complete; their matrices are `VERIFIED`
+  with every row `PASS` and their dossiers recommend `MERGE`.
 - Done evidence: Role-safe search/detail/timeline, saved views, bounded bulk actions, related pivots, workload/SLA/outcome metrics, accessibility, partial failure, audit, and two-tenant proof pass.
-- Merchant / analyst demo: Triage a queue, investigate linked evidence, take one bounded action, and show its audit, SLA, and outcome impact from the cockpit.
-- Last reviewed: 2026-08-02
+- Merchant / analyst demo: `scripts/demo-saved-views-and-bulk-review.py` triages a queue and runs a bounded bulk assignment that ends `PARTIAL` with per-item `SUCCEEDED`/`STALE`/`NOT_FOUND` truth; `scripts/demo-workspace-insights.py` shows the outcome and SLA impact with exact denominators.
+- Last reviewed: 2026-08-06
 
 ## VP-006: Post-Authorization Protection
 
@@ -252,20 +249,20 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Status: PARTIAL_NEXT_OWNER
 - Vision promise: A merchant developer receives versioned APIs, OpenAPI, error catalogue, idempotency/webhook guidance, test cards, SDK/reference clients, and a usable sandbox.
 - Current evidence: Chapters 20, 41, and 42 provide public APIs, request IDs/errors, test-card catalogue, scenario runner, webhook signing/verification/redelivery examples, and hardened loopback clients.
-- Remaining gap: Generated OpenAPI, formal API version lifecycle, complete error catalogue, supported SDK, contract compatibility CI, onboarding quickstart, cohesive developer portal, and one supported PSP integration guide remain incomplete.
+- Remaining gap: The Phase 6 boundary is met — generated OpenAPI, the `2026-08-01` version lifecycle, the stable error catalogue, the supported Python sandbox SDK, contract compatibility CI, the onboarding quickstart and the developer portal all hold on executed evidence. Public package distribution and independently versioned deployed clients remain Phase 9; a real PSP integration guide remains Phase 10.
 - Owner phase: Phase 6, Phase 9, and Phase 10
 - Owner slice: Phase 6 Chapters 57–58 — Versioned OpenAPI, Stable Errors,
   Supported Python SDK, And Sandbox Onboarding; Phase 9 Release Compatibility
   And External Integration Hardening; Phase 10 External PSP Adapter And
   Provenance Contract
 - Primary DRI: Developer Experience
-- Trigger: Chapters 57–58 have frozen pre-implementation matrices after the
-  founder-confirmed Phase 6 freeze on 2026-08-02; Chapter 57 is dependency-
-  ready. Start Phase 9 compatibility hardening before hosted or independently
+- Trigger: The Phase 6 portion is satisfied. Chapters 57–58 are complete; their
+  matrices are `VERIFIED` with every row `PASS` and their dossiers recommend
+  `MERGE`. Start Phase 9 compatibility hardening before hosted or independently
   versioned clients, and Phase 10 PSP guidance only after partner/adapter scope.
 - Done evidence: OpenAPI and examples match executable contracts, error catalogue is complete, one supported SDK/reference client passes generated contract tests, onboarding works without source reading, and compatibility/rollback CI rejects breaking changes.
-- Merchant / analyst demo: A new merchant follows only published docs/SDK to onboard, run a payment-risk scenario, verify webhooks, inspect analytics, and recover a safe retry.
-- Last reviewed: 2026-08-02
+- Merchant / analyst demo: `clients/python/thaap_sdk/examples/sandbox_quickstart.py` is run as published by `test_the_published_quickstart_runs_from_environment_alone`, so the zero-source-reading journey is an executed test rather than a claim; `scripts/python-sdk-package-check.py` proves it installs offline into a clean environment first.
+- Last reviewed: 2026-08-06
 
 ## VP-017: Durable Event, Analytics, And Replay Lineage
 
@@ -282,6 +279,8 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Last reviewed: 2026-08-01
 
 Phase 5 implementation status: COMPLETE
+
+Phase 6 implementation status: COMPLETE
 
 ## VP-018: Honest Production-Shaped Simulator Boundary
 

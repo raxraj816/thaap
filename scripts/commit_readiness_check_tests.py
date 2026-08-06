@@ -40,6 +40,10 @@ class CommitReadinessCheckTests(unittest.TestCase):
                     "technical-debt-check.py",
                     "escaped-review-check.py",
                     "executable-artifact-naming-check.py",
+                    "public-api-error-contract-check.py",
+                    "openapi-contract-check.py",
+                    "openapi-compatibility-check.py",
+                    "python-sdk-scope-check.py",
                     "invariant-proof-check.py",
                     "chapter-closure-check.py",
                     "learning-day-check.sh"):
@@ -82,6 +86,10 @@ class CommitReadinessCheckTests(unittest.TestCase):
                     "vision-coverage-check.py",
                     "escaped-review-check.py",
                     "executable-artifact-naming-check.py",
+                    "public-api-error-contract-check.py",
+                    "openapi-contract-check.py",
+                    "openapi-compatibility-check.py",
+                    "python-sdk-scope-check.py",
                     "invariant-proof-check.py",
                     "chapter-closure-check.py",
                     "learning-day-check.sh"):

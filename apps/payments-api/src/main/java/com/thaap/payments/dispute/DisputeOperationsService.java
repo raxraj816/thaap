@@ -1,5 +1,7 @@
 package com.thaap.payments.dispute;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
@@ -176,8 +178,7 @@ public class DisputeOperationsService {
     public OutcomeView recordOutcome(MerchantContext context, UUID chargebackId,
             String externalEventKey, DisputeOutcome outcome, Instant occurredAt, String requestId) {
         if (context.trafficOrigin() != TrafficOrigin.SYNTHETIC_SCENARIO) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Trusted scenario runner credential is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.SCENARIO_RUNNER_CREDENTIAL_REQUIRED, "Trusted scenario runner credential is required");
         }
         Instant receivedAt = now();
         if (occurredAt == null || occurredAt.isAfter(receivedAt)) {
@@ -288,7 +289,7 @@ public class DisputeOperationsService {
                         resultSet.getString(2), resultSet.getBoolean(3), delivery, communication,
                         resultSet.getBoolean(4), device) : null, merchantId, chargebackId);
         if (facts == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dispute workflow was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_WORKFLOW_NOT_FOUND, "Dispute workflow was not found");
         }
         return facts;
     }
@@ -347,14 +348,14 @@ public class DisputeOperationsService {
                     """, resultSet -> resultSet.next() ? resultSet.getObject(1, UUID.class) : null,
                     merchantId, chargebackId);
             if (lockedId == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dispute workflow was not found");
+                throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_WORKFLOW_NOT_FOUND, "Dispute workflow was not found");
             }
         }
         WorkflowView workflow = jdbcTemplate.query(workflowSelect()
                         + " WHERE workflow.merchant_id = ? AND workflow.chargeback_id = ?",
                 resultSet -> resultSet.next() ? mapWorkflow(resultSet) : null, merchantId, chargebackId);
         if (workflow == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dispute workflow was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_WORKFLOW_NOT_FOUND, "Dispute workflow was not found");
         }
         return workflow;
     }
@@ -464,8 +465,7 @@ public class DisputeOperationsService {
         if (context.role() != RiskOperatorRole.VIEWER
                 && context.role() != RiskOperatorRole.ANALYST
                 && context.role() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "A risk-operator role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_ROLE_REQUIRED, "A risk-operator role is required");
         }
     }
 
@@ -481,20 +481,19 @@ public class DisputeOperationsService {
                 .orElseThrow(DisputeOperationsService::riskResourceNotFound);
         if (!credential.getRiskOperatorId().equals(actor.getId())
                 || actor.getRole() != context.role()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Risk operator credential is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_STALE, "Risk operator credential is stale");
         }
         return actor;
     }
 
     private void requireManager(RiskOperator actor) {
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "RISK_MANAGER role is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_MANAGER_ROLE_REQUIRED, "RISK_MANAGER role is required");
         }
     }
 
     private static ResponseStatusException riskResourceNotFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Risk resource was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.RISK_RESOURCE_NOT_FOUND, "Risk resource was not found");
     }
 
     private List<String> split(String value) {
@@ -510,11 +509,11 @@ public class DisputeOperationsService {
     }
 
     private ResponseStatusException conflict(String message) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message);
+        return new PublicApiException(PublicApiErrorDescriptor.DISPUTE_CONFLICT, message);
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.DISPUTE_REQUEST_INVALID, message);
     }
 
     public record WorkflowView(UUID id, UUID merchantId, UUID chargebackId, String reasonCode,

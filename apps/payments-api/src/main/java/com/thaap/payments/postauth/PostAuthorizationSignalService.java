@@ -1,5 +1,7 @@
 package com.thaap.payments.postauth;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
@@ -65,15 +67,14 @@ public class PostAuthorizationSignalService {
     public ResponseEntity<PostAuthorizationSignalController.SignalResponse> create(MerchantContext context,
             PostAuthorizationSignalController.CreateSignalRequest request, String requestId) {
         merchantRepository.findByIdForMoneyMutation(context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Merchant was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.MERCHANT_NOT_FOUND, "Merchant was not found"));
         String fingerprint = fingerprint(request);
         PostAuthorizationSignal duplicate = signalRepository
                 .findByMerchantIdAndExternalEventKey(context.merchantId(), request.externalEventKey())
                 .orElse(null);
         if (duplicate != null) {
             if (!duplicate.getRequestFingerprint().equals(fingerprint)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "External post-authorization event key was already used with different content");
+                throw new PublicApiException(PublicApiErrorDescriptor.POST_AUTHORIZATION_EVENT_KEY_CONFLICT, "External post-authorization event key was already used with different content");
             }
             ManualReviewCase existingReview = duplicate.getRecommendation()
                     == PostAuthorizationSignalRecommendation.REVIEW
@@ -88,42 +89,34 @@ public class PostAuthorizationSignalService {
 
         PaymentIntent paymentIntent = paymentIntentRepository.findByIdAndMerchantIdForUpdate(
                         request.paymentIntentId(), context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "PaymentIntent was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_FOUND, "PaymentIntent was not found"));
         if (paymentIntent.getStatus() != PaymentIntentStatus.CAPTURED
                 && paymentIntent.getStatus() != PaymentIntentStatus.REFUNDED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot receive a post-authorization signal from status "
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_SIGNALABLE, "PaymentIntent cannot receive a post-authorization signal from status "
                             + paymentIntent.getStatus());
         }
         if (paymentIntent.getCaptureMethod() != CaptureMethod.AUTOMATIC) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Post-authorization signals require an automatically captured PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.POST_AUTHORIZATION_SIGNAL_REQUIRES_AUTOMATIC_CAPTURE, "Post-authorization signals require an automatically captured PaymentIntent");
         }
         Instant now = clock.instant();
         if (request.evidenceOccurredAt().isAfter(request.receivedAt())
                 || request.receivedAt().isAfter(now)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Signal time order must be evidenceOccurredAt <= receivedAt <= server time");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIGNAL_TIME_ORDER_INVALID, "Signal time order must be evidenceOccurredAt <= receivedAt <= server time");
         }
         Authorization authorization = authorizationRepository.findApprovedAuthorizationsForPaymentIntent(
                         context.merchantId(), paymentIntent.getId(), PaymentAttemptStatus.AUTHORIZED,
                         AuthorizationStatus.APPROVED).stream().findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent does not have approved authorization evidence"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_AUTHORIZATION_EVIDENCE_MISSING, "PaymentIntent does not have approved authorization evidence"));
         if (authorization.getAuthorizedAmount() != paymentIntent.getAmount()
                 || !authorization.getCurrency().equals(paymentIntent.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Authorization does not match captured PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.CAPTURE_AUTHORIZATION_MISMATCH, "Authorization does not match captured PaymentIntent");
         }
         if (request.evidenceOccurredAt().isBefore(authorization.getCreatedAt())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Post-authorization signal evidence cannot predate authorization");
+            throw new PublicApiException(PublicApiErrorDescriptor.POST_AUTHORIZATION_SIGNAL_EVIDENCE_PREDATES_AUTHORIZATION, "Post-authorization signal evidence cannot predate authorization");
         }
         FraudDecision decision = fraudDecisionRepository.findByMerchantIdAndPaymentAttemptId(
                         context.merchantId(), authorization.getPaymentAttemptId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentAttempt does not have fraud decision lineage"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_FRAUD_LINEAGE_MISSING, "PaymentAttempt does not have fraud decision lineage"));
         PostAuthorizationSignal signal = signalRepository.saveAndFlush(new PostAuthorizationSignal(
                 context.merchantId(), request.externalEventKey(), fingerprint, paymentIntent.getId(),
                 authorization.getPaymentAttemptId(), authorization.getId(), decision.getId(),

@@ -1,5 +1,7 @@
 package com.thaap.payments.ledger;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.tenant.MerchantContext;
 import java.time.Instant;
 import java.util.List;
@@ -29,8 +31,7 @@ public class LedgerEntryController {
     public List<LedgerEntryResponse> listLedgerEntries(MerchantContext merchantContext,
             @RequestParam(name = "limit", defaultValue = "" + DEFAULT_LEDGER_ENTRY_LIMIT) int limit) {
         if (limit < 1 || limit > MAX_LEDGER_ENTRY_LIMIT) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Ledger entry limit must be between 1 and " + MAX_LEDGER_ENTRY_LIMIT);
+            throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_ENTRY_LIMIT_INVALID, "Ledger entry limit must be between 1 and " + MAX_LEDGER_ENTRY_LIMIT);
         }
         return ledgerEntryRepository.findByMerchantIdOrderByCreatedAtDescIdDesc(merchantContext.merchantId(),
                         PageRequest.of(0, limit))

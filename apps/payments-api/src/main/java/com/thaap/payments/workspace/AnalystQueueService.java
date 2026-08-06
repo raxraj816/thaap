@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.fraud.FraudDecisionAction;
@@ -247,7 +249,7 @@ public class AnalystQueueService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.ANALYST_QUEUE_REQUEST_INVALID, message);
     }
 
     public record ReviewQueuePage(String filterSchemaVersion, Instant asOf,

@@ -1,5 +1,7 @@
 package com.thaap.payments.tenant;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.security.SecretHasher;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,14 +43,14 @@ public class MerchantContextArgumentResolver implements HandlerMethodArgumentRes
         HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
         String apiKey = request == null ? null : request.getHeader(API_KEY_HEADER);
         if (apiKey == null || apiKey.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing X-Api-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.API_KEY_REQUIRED, "Missing X-Api-Key header");
         }
         TrafficOrigin trafficOrigin = resolveTrafficOrigin(request);
         return merchantRepository.findByApiKeyHash(SecretHasher.sha256(apiKey))
                 .filter(merchant -> merchant.isActive())
                 .map(merchant -> new MerchantContext(merchant.getId(), merchant.getName(),
                         merchant.getApiKeyPrefix(), trafficOrigin))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.API_KEY_INVALID, "Invalid API key"));
     }
 
     private TrafficOrigin resolveTrafficOrigin(HttpServletRequest request) {
@@ -59,8 +61,7 @@ public class MerchantContextArgumentResolver implements HandlerMethodArgumentRes
         if (scenarioRunnerToken.isBlank() || !MessageDigest.isEqual(
                 suppliedToken.getBytes(StandardCharsets.UTF_8),
                 scenarioRunnerToken.getBytes(StandardCharsets.UTF_8))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Invalid scenario runner credential");
+            throw new PublicApiException(PublicApiErrorDescriptor.SCENARIO_RUNNER_CREDENTIAL_INVALID, "Invalid scenario runner credential");
         }
         return TrafficOrigin.SYNTHETIC_SCENARIO;
     }

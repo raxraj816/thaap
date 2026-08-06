@@ -1,5 +1,7 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -146,8 +148,7 @@ public class PaymentIntent {
     public void markProcessingAfterConfirm() {
         if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION
                 && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be processed from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_PROCESSABLE, "PaymentIntent cannot be processed from status " + status);
         }
         this.status = PaymentIntentStatus.PROCESSING;
         this.updatedAt = Instant.now();
@@ -173,8 +174,7 @@ public class PaymentIntent {
 
     public void markRequiresCaptureAfterAuthorization() {
         if (status != PaymentIntentStatus.PROCESSING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be authorization-approved from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_AUTHORIZABLE, "PaymentIntent cannot be authorization-approved from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_CAPTURE;
         this.updatedAt = Instant.now();
@@ -182,8 +182,7 @@ public class PaymentIntent {
 
     public void markProcessingAfterReviewApproval() {
         if (status != PaymentIntentStatus.REQUIRES_REVIEW) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot continue after review from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_RESUMABLE_AFTER_REVIEW, "PaymentIntent cannot continue after review from status " + status);
         }
         this.status = PaymentIntentStatus.PROCESSING;
         this.updatedAt = Instant.now();
@@ -191,8 +190,7 @@ public class PaymentIntent {
 
     public void markRequiresPaymentMethodAfterProcessorDecline() {
         if (status != PaymentIntentStatus.PROCESSING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be processor-declined from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_DECLINABLE, "PaymentIntent cannot be processor-declined from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
         this.updatedAt = Instant.now();
@@ -200,8 +198,7 @@ public class PaymentIntent {
 
     public void markRequiresActionAfterProcessorStepUp() {
         if (status != PaymentIntentStatus.PROCESSING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot require action from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_ACTION_NOT_REQUIRABLE, "PaymentIntent cannot require action from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_ACTION;
         this.updatedAt = Instant.now();
@@ -209,8 +206,7 @@ public class PaymentIntent {
 
     public void markProcessingAfterAuthentication() {
         if (status != PaymentIntentStatus.REQUIRES_ACTION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot continue authentication from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_AUTHENTICATION_NOT_CONTINUABLE, "PaymentIntent cannot continue authentication from status " + status);
         }
         status = PaymentIntentStatus.PROCESSING;
         updatedAt = Instant.now();
@@ -218,8 +214,7 @@ public class PaymentIntent {
 
     public void markRequiresPaymentMethodAfterAuthenticationFailure() {
         if (status != PaymentIntentStatus.REQUIRES_ACTION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot fail authentication from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_AUTHENTICATION_NOT_FAILABLE, "PaymentIntent cannot fail authentication from status " + status);
         }
         status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
         updatedAt = Instant.now();
@@ -227,8 +222,7 @@ public class PaymentIntent {
 
     public void capture() {
         if (status != PaymentIntentStatus.REQUIRES_CAPTURE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be captured from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CAPTURABLE, "PaymentIntent cannot be captured from status " + status);
         }
         this.status = PaymentIntentStatus.CAPTURED;
         this.updatedAt = Instant.now();
@@ -242,8 +236,7 @@ public class PaymentIntent {
                 && status != PaymentIntentStatus.REQUIRES_REVIEW
                 && status != PaymentIntentStatus.AUTHORIZED
                 && status != PaymentIntentStatus.REQUIRES_CAPTURE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be canceled from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CANCELABLE, "PaymentIntent cannot be canceled from status " + status);
         }
         this.status = PaymentIntentStatus.CANCELED;
         this.updatedAt = Instant.now();
@@ -255,12 +248,10 @@ public class PaymentIntent {
 
     public void refund(long refundAmount) {
         if (status != PaymentIntentStatus.CAPTURED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be refunded from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_REFUNDABLE, "PaymentIntent cannot be refunded from status " + status);
         }
         if (refundAmount != amount) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
+            throw new PublicApiException(PublicApiErrorDescriptor.REFUND_AMOUNT_INVALID, "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         }
         this.status = PaymentIntentStatus.REFUNDED;
         this.updatedAt = Instant.now();
@@ -268,8 +259,7 @@ public class PaymentIntent {
 
     public void dispute() {
         if (status != PaymentIntentStatus.CAPTURED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be disputed from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_DISPUTABLE, "PaymentIntent cannot be disputed from status " + status);
         }
         this.status = PaymentIntentStatus.DISPUTED;
         this.updatedAt = Instant.now();
@@ -278,8 +268,7 @@ public class PaymentIntent {
     private void requireConfirmable(String transition) {
         if (status != PaymentIntentStatus.REQUIRES_CONFIRMATION
                 && status != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot " + transition + " from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_TRANSITION_NOT_ALLOWED, "PaymentIntent cannot " + transition + " from status " + status);
         }
     }
 }

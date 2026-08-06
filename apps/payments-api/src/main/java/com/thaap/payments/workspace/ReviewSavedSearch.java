@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -86,10 +88,10 @@ public class ReviewSavedSearch {
 
     private void requireActiveAndVersion(long expectedVersion) {
         if (lifecycleStatus != SavedSearchLifecycleStatus.ACTIVE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Saved search is disabled");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_DISABLED, "Saved search is disabled");
         }
         if (lifecycleVersion != expectedVersion) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Saved search version is stale");
+            throw new PublicApiException(PublicApiErrorDescriptor.SAVED_SEARCH_VERSION_STALE, "Saved search version is stale");
         }
     }
 

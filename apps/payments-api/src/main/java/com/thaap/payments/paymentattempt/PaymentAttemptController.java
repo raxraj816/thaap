@@ -1,5 +1,7 @@
 package com.thaap.payments.paymentattempt;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -40,7 +42,7 @@ public class PaymentAttemptController {
     public PaymentAttemptResponse getPaymentAttempt(MerchantContext merchantContext, @PathVariable UUID id) {
         return paymentAttemptRepository.findByIdAndMerchantId(id, merchantContext.merchantId())
                 .map(PaymentAttemptResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentAttempt was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_FOUND, "PaymentAttempt was not found"));
     }
 
     @GetMapping("/{id}/authorization")
@@ -50,7 +52,7 @@ public class PaymentAttemptController {
                 .map(authorization -> PaymentAttemptAuthorizationResponse.from(authorization,
                         authorizationVoidRepository.findByAuthorizationIdAndMerchantId(authorization.getId(),
                                 merchantContext.merchantId()).orElse(null)))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Authorization was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.AUTHORIZATION_NOT_FOUND, "Authorization was not found"));
     }
 
     public record PaymentAttemptAuthorizationResponse(UUID paymentAttemptId, String processor,

@@ -1,5 +1,7 @@
 package com.thaap.payments.fraud;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.tenant.MerchantContext;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -37,7 +39,7 @@ public class FraudDecisionController {
     @GetMapping("/fraud/decisions/{id}")
     public FraudDecisionDetailResponse getDecision(MerchantContext merchantContext, @PathVariable UUID id) {
         FraudDecision decision = fraudDecisionRepository.findByIdAndMerchantId(id, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "FraudDecision was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.FRAUD_DECISION_NOT_FOUND, "FraudDecision was not found"));
         FeatureSnapshotResponse featureSnapshot = featureSnapshotRepository
                 .findByFraudDecisionIdAndMerchantId(decision.getId(), merchantContext.merchantId())
                 .map(FeatureSnapshotResponse::from)

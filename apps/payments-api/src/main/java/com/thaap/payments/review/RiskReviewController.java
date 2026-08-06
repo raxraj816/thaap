@@ -1,5 +1,7 @@
 package com.thaap.payments.review;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.authorization.AuthorizationStatus;
 import com.thaap.payments.authentication.AuthenticationNextAction;
@@ -50,14 +52,13 @@ public class RiskReviewController {
             @RequestParam(defaultValue = "25") int limit,
             @RequestParam(name = "starting_after", required = false) UUID startingAfter) {
         if (limit < 1 || limit > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "limit must be between 1 and 100");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAGE_LIMIT_INVALID, "limit must be between 1 and 100");
         }
         Instant cursorCreatedAt = null;
         UUID cursorId = null;
         if (startingAfter != null) {
             ManualReviewCase cursor = reviewCaseRepository.findByIdAndMerchantId(startingAfter, context.merchantId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "ManualReviewCase cursor was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_CASE_CURSOR_NOT_FOUND, "ManualReviewCase cursor was not found"));
             cursorCreatedAt = cursor.getCreatedAt();
             cursorId = cursor.getId();
         }
@@ -72,8 +73,7 @@ public class RiskReviewController {
     public RiskReviewResponse detail(RiskOperatorContext context, @PathVariable UUID id) {
         return reviewCaseRepository.findByIdAndMerchantId(id, context.merchantId())
                 .map(RiskReviewResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "ManualReviewCase was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.MANUAL_REVIEW_CASE_NOT_FOUND, "ManualReviewCase was not found"));
     }
 
     @PostMapping("/{id}/assign")
