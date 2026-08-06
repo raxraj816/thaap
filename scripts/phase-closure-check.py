@@ -59,8 +59,12 @@ def validate_phase(coordinates: tuple[str, ...] = DEFAULT_COORDINATES) -> list[s
                 errors.append(f"{path}: required inherited phase-closure artifact is missing")
         if not matrix.is_file() or not dossier.is_file():
             continue
+        # `--reject-partial` is what makes a phase gate stricter than a chapter gate: a
+        # chapter may close honestly with a `PARTIAL` row that names the debt owning its
+        # unbuilt proof, but a phase cannot be declared complete while one remains.
         invariant_result = subprocess.run(
-            [str(ROOT / "scripts" / "invariant-proof-check.py"), str(matrix)],
+            [str(ROOT / "scripts" / "invariant-proof-check.py"), str(matrix),
+             "--reject-partial"],
             cwd=ROOT, capture_output=True, text=True, check=False)
         if invariant_result.returncode != 0:
             detail = (

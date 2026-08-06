@@ -51,6 +51,7 @@ public class ProjectionRebuildDispatcher {
         if (lease == null) {
             return;
         }
+        recordLease(lease);
         executor.execute(() -> launch(lease));
     }
 
@@ -59,7 +60,12 @@ public class ProjectionRebuildDispatcher {
         if (lease == null) {
             throw new IllegalStateException("Projection rebuild is not claimable");
         }
+        recordLease(lease);
         launch(lease);
+    }
+
+    private void recordLease(ProjectionRebuildLease lease) {
+        metrics.lease(lease.recovered() ? "recovered" : "claimed");
     }
 
     private void launch(ProjectionRebuildLease lease) {

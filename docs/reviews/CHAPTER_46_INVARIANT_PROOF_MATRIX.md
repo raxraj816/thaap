@@ -66,7 +66,7 @@ audit product or reconstructing an actor from a domain event.
 - Implementation: event writers run only after existing controller/service authorization and live actor/credential locking; no event-specific public mutation endpoint is added.
 - Proof: RiskOperationsEventAuthorizationTests, retained role-matrix regressions, forced disable-after-authentication PostgreSQL tests, dual-control tests, and route inventory cover viewer/analyst/manager/runner/merchant/platform partitions. The RiskOperationsEventAuthorizationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Every role, enabled/disabled credential, creator/approver same/different, exact/conflicting replay, foreign tenant, bootstrap/platform credential, stale version, and event writer failure.
-- Status: PASS
+- Status: PARTIAL
 
 ## C46-CON-001
 
@@ -76,7 +76,7 @@ audit product or reconstructing an actor from a domain event.
 - Implementation: producer calls participate in existing transactions after live actor/idempotency/resource locks and before commit; Chapter 44 stream locking follows each domain's frozen global order.
 - Proof: RiskOperationsEventPostgreSqlConcurrencyTests extend forced actor-disable, dual-control, label supersession, review resolution, dispute submit/expire, webhook disable/redelivery, and scenario lease orderings with exact event/audit/source postconditions. The RiskOperationsEventPostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Both conflict orderings, exact/different key, same/different actor, current/stale version/lease/generation, before/exact/after deadline or expiry, rollback, and retry after terminal state.
-- Status: PASS
+- Status: PARTIAL
 
 ## C46-DATA-001
 
@@ -86,7 +86,7 @@ audit product or reconstructing an actor from a domain event.
 - Implementation: typed mappers read immutable source rows and their availability/version/origin fields inside the source transaction; unavailable lineage remains absent with explicit schema semantics.
 - Proof: RiskOperationsEventLineageTests, before/exact/after label and evidence availability, contradictory/superseded partitions, mixed-control reconstruction, live/synthetic separation, run-owned scenario report reconciliation, and golden bytes. The RiskOperationsEventLineageTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Before/at/after availability, labeled/unlabeled/contradictory/superseded, old/current mixed controls, trusted synthetic versus merchant API, simulated versus network dispute outcome, missing optional actor, and restart.
-- Status: PASS
+- Status: PARTIAL
 
 ## C46-SEC-001
 
@@ -94,7 +94,7 @@ audit product or reconstructing an actor from a domain event.
 - Invariant: Risk-operation payloads and fixtures expose only closed safe evidence and references; protected note plaintext, PAN/CVV, PII, raw/HMAC identities, credentials, webhook secrets/tokens/signatures/payloads/URLs, scenario credentials, idempotency material, unrestricted metadata, and exception text never enter event bytes, logs, metrics, audit, API, UI, or reports.
 - Failure sequence: A note or broad entity serializer enters payload, webhook recovery copies callback bytes, dispute/scenario evidence includes a credential, or a validation/database error logs attacker-controlled content.
 - Implementation: typed per-event payload records, reference-only protected evidence, safe bounded enums/reasons, and existing encryption/hash boundaries; no arbitrary map or entity serialization.
-- Proof: RiskOperationsEventPrivacyTests, prohibited-value canaries across exact bytes/database/log/metric/audit/fixture/report sinks, source scans, and safe-error tests. The RiskOperationsEventPrivacyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `RiskOperationsEventPrivacyTests` seeds a distinct canary per prohibited class — full merchant credential, operator credential, merchant name, operator name, PAN, note plaintext and contact address — drives every `RISK_PLATFORM` catalogue fact, and asserts none reaches the canonical payload or event-record bytes, which are what reach Kafka and every downstream consumer. Distinct markers are used so a clean run identifies which sink is clean rather than only that some sink is. The scan is pinned to the catalogue, so a new risk event type fails until it is driven through the fixture. `thePublishedMerchantActorPrefixCannotGrowIntoSecretMaterial` holds the actor identifier to the fixed `thaap_test_` namespace plus at most one character of key entropy, so shortening the namespace or widening `SecretHasher.prefix` fails rather than silently writing secret material into immutable bytes.
 - Adversarial evidence: Note, PAN, CVV, email, phone, IP, device/session HMAC, API/operator/runner key, webhook URL/secret/token/signature/payload, idempotency key, exception text, Unicode/control input, and maximum sizes.
 - Status: PASS
 
@@ -114,7 +114,7 @@ audit product or reconstructing an actor from a domain event.
 - Invariant: Closed signals distinguish committed producer family/type/version, actor class where safe, outcome, and event-write failure after transaction truth without tenant, resource, event, actor ID, request, trace, payload, digest, note, credential, URL, or exception text as tags or raw errors.
 - Failure sequence: Rolled-back control action emits success, event type becomes attacker-controlled cardinality, note/webhook content enters logs, or a missing event silently accompanies successful source mutation.
 - Implementation: transaction-aware `RiskOperationsEventMetrics`, catalogue-derived closed dimensions, safe structured logs, Chapter 44 backlog/readiness, and no duplicate operational success metric before commit.
-- Proof: RiskOperationsEventObservabilityTests, rollback-safe counts, cardinality and privacy canaries, missing-schema readiness, and every producer family/outcome partition. The RiskOperationsEventObservabilityTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `RiskOperationsEventObservabilityTests` asserts that a committed operation is invisible before commit, that a rolled-back operation is reported as `rolled_back` rather than disappearing, that all eight frozen mutation families report under one bounded `operation`/`outcome`/`transaction` tag set with no merchant, actor, review, label, credential or note canary reachable, and that an operation outside a transaction still reports rather than vanishing.
 - Adversarial evidence: Commit/rollback, human/automated, each event family, schema/writer failure, sensitive input, dependency error, high-volume unique resource IDs, producer enabled/disabled, and repeated replay.
 - Status: PASS
 
@@ -126,7 +126,7 @@ audit product or reconstructing an actor from a domain event.
 - Implementation: producer-version readiness and schema-neutral integration unless the matrix reopens before a capability-named migration; Kafka remains outside transactions and Chapters 47–51 retain downstream ownership.
 - Proof: RiskOperationsEventDeploymentPostgreSqlTests, fresh/retained schema reconciliation, mixed-version enable/disable/restart, Kafka-unavailable non-interference, component scans, and source-count checks around replay attempts. The RiskOperationsEventDeploymentPostgreSqlTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Populated V64 domains, producer off/on/off, old/new application order, unsupported catalogue, broker absent, pending event, repeated startup, direct SQL/demo shortcut, and event replay.
-- Status: PASS
+- Status: PARTIAL
 
 ## Frozen Risk-Operations Catalogue
 

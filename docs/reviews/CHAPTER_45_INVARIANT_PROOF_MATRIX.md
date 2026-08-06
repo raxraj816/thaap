@@ -116,7 +116,7 @@ the same PaymentIntent stream.
 - Implementation: producer-version readiness gate and capability-named additive migration only if integration requires new constraints; Chapter 44 publication rows remain durable and Kafka remains outside the transaction.
 - Proof: PaymentEventDeploymentPostgreSqlTests, fresh/retained migration proof or schema-neutral reconciliation, mixed producer-version tests, enable/disable restart, Kafka-unavailable non-interference, and exact pending-event counts. The PaymentEventDeploymentPostgreSqlTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Fresh/retained V64-plus schema, producer off/on/off, supported/unsupported catalogue version, broker absent, repeated startup, rollback, pre-existing pending event, and old/new application order.
-- Status: PASS
+- Status: PARTIAL
 
 ## C45-SCP-001
 

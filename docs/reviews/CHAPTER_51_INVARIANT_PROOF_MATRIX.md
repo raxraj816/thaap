@@ -39,7 +39,7 @@ export and model fitting remain outside Phase 5.
 - Implementation: dataset reader/processor/writer dependencies will be restricted to immutable event, bootstrap, decision-time feature, decision, outcome, and label-lineage reads plus dataset-owned writes; the existing simulation gate remains the sole activation authority.
 - Proof: OfflineReplayDatasetSourceNonInterferencePostgreSqlTests will snapshot payment, fraud, label, rule/control, webhook, audit, and balanced ledger truth before create/resume/read/equivalence and assert no change and zero processor/webhook invocation. The OfflineReplayDatasetSourceNonInterferencePostgreSqlTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Successful, failed, restarted, canceled, duplicate, contradictory-label, and equivalence-mismatch dataset runs are covered.
-- Status: PASS
+- Status: PARTIAL
 
 ## C51-TEN-001
 
@@ -67,9 +67,9 @@ export and model fitting remain outside Phase 5.
 - Invariant: One stable dataset identity exists for the same merchant, immutable manifest, evaluator, and cutoff; chunk results and checkpoint commit atomically, restart resumes after committed work, exact API replay returns the same dataset, and stale or concurrent workers cannot duplicate aggregate effects or alter manifest bytes.
 - Failure sequence: A response is lost after create commit, two creators race, a worker crashes after rows but before checkpoint, or a stale worker resumes after takeover and changes output digest.
 - Implementation: platform idempotency, immutable manifest identity/digest uniqueness, leased/fenced dataset execution, generation-qualified result upserts or append-only chunk evidence, and Spring Batch restart metadata will serialize work.
-- Proof: OfflineReplayDatasetPostgreSqlConcurrencyTests will force creator and worker orderings, crash on both sides of chunk commit, lease takeover, exact/conflicting replay, and finalizer races; manifest and output digests will be compared. The OfflineReplayDatasetPostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `OfflineReplayDatasetIntegrationTests` drives the interleavings through the `OfflineReplayDatasetExecutionProbe` seam production already carries, and `OfflineReplayDatasetPostgreSqlTests` re-runs every one against real PostgreSQL, which is what makes the lock and fencing claims mean anything. `aCrashBetweenChunkEvidenceAndCheckpointResumesWithoutDoubleCounting` fails once in the window between chunk evidence and checkpoint advance, then resumes and asserts exactly one processed item and one evidence row, which is the window where a resumed worker can count a page twice. `aStaleWorkerCannotAdvanceADatasetAfterItsLeaseIsTakenOver` proves a superseded worker returns `STALE` and writes no chunk at its own fencing epoch, while the recovering worker completes. `aCrashBeforeFinalizationLeavesNoPartiallyFinalizedDataset` asserts no partially finalised dataset is observable and that recovery still reaches `SUCCEEDED`. The planned separate concurrency class was folded into the existing contract/PostgreSQL pair because that pairing is what supplies the real-database run. Creator-side ordering and digest comparison across concurrent creators remain unproven and stay with TD-0007.
 - Adversarial evidence: Empty/one/full/final chunk, exact/different request, active/expired lease, current/stale epoch, pre/post-commit crash, and duplicate finalization partitions are covered.
-- Status: PASS
+- Status: PARTIAL
 
 ## C51-DATA-001
 
@@ -117,7 +117,7 @@ export and model fitting remain outside Phase 5.
 - Invariant: Operators and tenant users can distinguish dataset queued/running/resumed/succeeded/failed states, point-in-time exclusions, coverage, compatibility pass/fail, checkpoint age, and dependency failure using bounded signals without sensitive or high-cardinality labels.
 - Failure sequence: Rollback emits success, a current-context access attempt is invisible, dataset/merchant/event IDs become metric labels, or incompatible data appears as a zero-sized successful cohort.
 - Implementation: after-commit metrics, closed lifecycle/exclusion/compatibility tags, bounded health details, safe audit of human creation, and structured logs without payloads or exception messages will expose outcomes.
-- Proof: OfflineReplayDatasetObservabilityTests will inspect metrics/logs/health across commit/rollback, restart, corrupt lineage, no-Redis guard, empty/partial data, compatibility mismatch, and success. The OfflineReplayDatasetObservabilityTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `OfflineReplayDatasetObservabilityTests` asserts that no dispatch, lease, job or chunk signal is visible before commit and that a rolled-back dataset transaction publishes none at all, that a recovered lease is distinguishable from a first claim, that every refusal reason and failure outcome stays its own series including `retry_exhausted`, and that every dataset meter carries only a bounded `result` tag with no merchant, dataset, actor, lease or feature canary reachable.
 - Adversarial evidence: Committed/rolled-back, current/stale checkpoint, known/unknown dependency exception, every closed exclusion family, multiple tenants/datasets, and secret canaries are covered.
 - Status: PASS
 
@@ -129,7 +129,7 @@ export and model fitting remain outside Phase 5.
 - Implementation: bounded Spring Batch job, durable queued-work scan, lease recovery, keyset reader, chunk and cohort limits, compatibility readiness, retained immutable manifests/results, and explicit worker switch will constrain operation.
 - Proof: OfflineReplayDatasetRestartIntegrationTests, migration tests, query-plan/index proof, and configuration/readiness tests will cover restart, backlog, large bounded cohort, worker disabled, schema mismatch, and source drift. The OfflineReplayDatasetRestartIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Fresh and retained schemas, empty/max-sized cohorts, queued/running/expired/terminal work, database outage, configuration rollback, handler mismatch, and cleanup attempt are covered.
-- Status: PASS
+- Status: PARTIAL
 
 ### Frozen Chapter 51 Boundary Table
 

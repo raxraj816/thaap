@@ -185,6 +185,59 @@ class InvariantProofCheckTests(unittest.TestCase):
 
         self.assertEqual([], errors)
 
+    def test_partial_status_with_a_debt_citation_passes_at_chapter_closure(self):
+        matrix = valid_matrix().replace("- Status: PASS", "- Status: PARTIAL", 1).replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: The adversarial suite is unbuilt and registered as TD-0007.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertEqual([], errors)
+
+    def test_partial_status_without_a_debt_citation_fails(self):
+        # A partial row with no owner is the exact state ER-0099 was raised about.
+        matrix = valid_matrix().replace("- Status: PASS", "- Status: PARTIAL", 1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertTrue(any("must cite the TD-NNNN" in error for error in errors))
+
+    def test_partial_status_is_rejected_at_phase_closure(self):
+        matrix = valid_matrix().replace("- Status: PASS", "- Status: PARTIAL", 1).replace(
+            "- Proof: Named automated test asserts the postcondition.",
+            "- Proof: The adversarial suite is unbuilt and registered as TD-0007.",
+            1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set(), reject_partial=True)
+
+        self.assertTrue(any("a phase cannot close on partial proof" in error
+                            for error in errors))
+        self.assertTrue(any("TD-0007" in error for error in errors))
+
+    def test_passing_rows_are_unaffected_by_phase_closure_strictness(self):
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), valid_matrix(), artifacts=set(),
+            reject_partial=True)
+
+        self.assertEqual([], errors)
+
+    def test_an_unknown_status_still_fails(self):
+        matrix = valid_matrix().replace("- Status: PASS", "- Status: PENDING", 1)
+
+        errors = checker.validate_matrix(
+            pathlib.Path("matrix.md"), matrix, artifacts=set())
+
+        self.assertTrue(any("Status must be one of" in error for error in errors))
+
+    def test_the_reject_partial_flag_is_not_treated_as_a_matrix_path(self):
+        self.assertEqual(
+            checker.matrix_paths(["--reject-partial"]),
+            checker.matrix_paths([]))
+
     def test_the_repository_index_finds_a_real_committed_suite(self):
         artifacts = checker.repository_artifacts(checker.ROOT)
 

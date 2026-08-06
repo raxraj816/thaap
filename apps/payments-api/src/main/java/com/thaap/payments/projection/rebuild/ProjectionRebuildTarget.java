@@ -25,6 +25,8 @@ public record ProjectionRebuildTarget(
                 projectionGenerationId, cutoffManifestId, projectionName, handlerVersion,
                 "operator-catch-up", new UUID(0, 0), fencingEpoch,
                 processedInputCount, expectedInputCount, null,
-                java.time.Instant.MAX);
+                java.time.Instant.MAX,
+                // An operator catch-up target is synthesised, never claimed or recovered.
+                false);
     }
 }

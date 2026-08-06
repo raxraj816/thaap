@@ -57,7 +57,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Rebuild APIs, events, logs, metrics, reconciliation evidence, and errors expose only bounded safe metadata; they never disclose canonical event payloads, bootstrap bytes, credentials, note plaintext, PAN/CVV, contact data, raw device/session/IP values, idempotency material, exception text, or unrestricted tenant identifiers.
 - Failure sequence: A corrupt event reaches an exception message, a mismatch report copies payload bytes, a metric tags a tenant/rebuild/event ID, or a platform credential appears in an audit or response.
 - Implementation: closed reason/invariant enums, count-and-digest reconciliation records, bounded DTOs, sanitizer checks, and closed metric tags will keep payload resolution inside the worker and exclude raw values from operator surfaces.
-- Proof: ProjectionRebuildPrivacyContractTests will inject prohibited canaries into source-adjacent values and failures, then scan database operational rows, audit, API JSON, logs, metrics, reports, and generated evidence. The ProjectionRebuildPrivacyContractTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `ProjectionRebuildPrivacyContractTests` seeds a merchant-name, contact and PAN canary into the source rows a rebuild reads, runs the full start/reconcile/activate lifecycle, and asserts no canary appears in any serialised control-plane view, in any row of `projection_rebuilds`, `projection_rebuild_events`, `projection_generations` or `projection_reconciliations`, or in the message or reason of a forbidden-role refusal and an unreconciled-activation refusal. `theRebuildFixtureActuallyCarriesTheCanariesItClaimsToScanFor` asserts the fixture is not empty, because every other assertion would pass equally well against a clean scan of nothing.
 - Adversarial evidence: Invalid digest, unsupported event version, malformed bootstrap fact, SQL failure, lease loss, reconciliation mismatch, foreign resource, and operator error partitions are scanned.
 - Status: PASS
 
@@ -69,7 +69,7 @@ clock is never treated as the rebuild authority.
 - Implementation: `projection_rebuilds` lease owner/token/epoch, generation-qualified chunk writes, compare-and-update checkpoint, Spring Batch execution metadata, and append-only `projection_rebuild_events` will fence every state transition and preserve takeover evidence.
 - Proof: ProjectionRebuildLeasePostgreSqlConcurrencyTests will force A-first and B-first row-lock schedules, crash before and after a 100-row chunk commit, lease expiry at the exact boundary, and stale finalization; durable rows and event history will be asserted. The ProjectionRebuildLeasePostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Chunk sizes 0, 1, 99, 100, 101, and multiple full chunks; crash before write, during write, before checkpoint, and after commit; active and expired lease; current and stale epoch are covered.
-- Status: PASS
+- Status: PARTIAL
 
 ## C50-CON-002
 
@@ -79,7 +79,7 @@ clock is never treated as the rebuild authority.
 - Implementation: active-generation pointer, shadow lifecycle state machine, definition-first lock order, snapshot-visible stream-position comparison, compatibility version, terminal cancellation fence, and retained-generation eligibility constraint will make the switch atomic.
 - Proof: ProjectionGenerationActivationPostgreSqlConcurrencyTests will force live-write-before-snapshot and after-snapshot orders, activate-versus-cancel, activate-versus-activate, and rollback-versus-live-activation; concurrent readers will assert one generation per response. The ProjectionGenerationActivationPostgreSqlConcurrencyTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: BUILDING, CATCHING_UP, RECONCILED, ACTIVE, RETIRED, CANCELED, and FAILED generations; matching/missing/ahead stream positions; compatible/incompatible handlers; current/foreign rollback targets are partitioned.
-- Status: PASS
+- Status: PARTIAL
 
 ## C50-DATA-001
 
@@ -117,7 +117,7 @@ clock is never treated as the rebuild authority.
 - Invariant: Operators can distinguish rebuild queued/running/resumed/canceled/failed/reconciled/activated/rolled-back states, lease recovery, progress, duration, and reconciliation mismatch family through bounded metrics, health, audit, and append-only events without high-cardinality or sensitive labels.
 - Failure sequence: A worker stalls with health still green, rollback success is emitted before commit, tenant/event/rebuild IDs become metric tags, or every mismatch collapses into one unactionable failure.
 - Implementation: `projection_rebuild_events`, after-commit metrics, checkpoint-age/lease health, closed outcome and invariant-family tags, safe structured logs, and audited human mutations will separate operational states.
-- Proof: ProjectionRebuildObservabilityTests will inspect Micrometer meters and captured logs across commit/rollback, lease expiry, mismatch, cancellation, activation, rollback, and dependency failure. The ProjectionRebuildObservabilityTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
+- Proof: `ProjectionRebuildObservabilityTests` asserts that all nine lifecycle states an operator must distinguish hold their own series, that no signal is visible before commit and a rolled-back activation is never reported as having happened, that lease recovery is distinguishable from a fresh claim and is not deferred to a transaction that already committed, that job duration is timed separately for completion and failure, that reconciliation mismatch is attributed to its family, and that no meter carries tenant, generation, rebuild, actor or checkpoint identity. `ProjectionRebuildMetrics.lease` and `.jobDuration` were added with this suite because production did not emit the lease-recovery and duration signals the row promised.
 - Adversarial evidence: Committed versus rolled-back transitions, active versus stalled worker, known mismatch families, unknown exception classes, multiple tenants/rebuilds, and secret-shaped canaries are covered.
 - Status: PASS
 
@@ -129,7 +129,7 @@ clock is never treated as the rebuild authority.
 - Implementation: durable queue scan, expired-lease recovery, Spring Batch restart identity, 100-row chunks, 60-second lease, bounded executor/queue, explicit worker kill switch, compatibility readiness, and forward-only schema protections will govern recovery.
 - Proof: ProjectionRebuildRestartIntegrationTests, fresh/retained `PostgreSqlMigrationTests`, and readiness tests will stop/restart the application between chunk and activation boundaries and verify resumption, no duplicate effect, and retained active service. The ProjectionRebuildRestartIntegrationTests suite this row promised was never written; the unbuilt assertions are registered as TD-0007.
 - Adversarial evidence: Fresh schema, realistic V64-plus-analytics upgrade, queued/running/expired/canceled jobs, database outage, worker disabled, incompatible handler, storage/backlog threshold, and configuration rollback are covered.
-- Status: PASS
+- Status: PARTIAL
 
 ### Frozen Chapter 50 Boundary Table
 

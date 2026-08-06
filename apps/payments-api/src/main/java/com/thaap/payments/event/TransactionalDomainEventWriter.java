@@ -16,18 +16,21 @@ public class TransactionalDomainEventWriter implements DomainEventWriter {
     private final EventPublicationRepository publicationRepository;
     private final CanonicalEventCodec codec;
     private final Clock clock;
+    private final DomainEventWriterMetrics metrics;
 
     public TransactionalDomainEventWriter(EventStreamHeadRepository streamHeadRepository,
             EventStreamHeadInitializer streamHeadInitializer,
             DomainEventRepository domainEventRepository,
             EventPublicationRepository publicationRepository,
-            CanonicalEventCodec codec, Clock clock) {
+            CanonicalEventCodec codec, Clock clock,
+            DomainEventWriterMetrics metrics) {
         this.streamHeadRepository = streamHeadRepository;
         this.streamHeadInitializer = streamHeadInitializer;
         this.domainEventRepository = domainEventRepository;
         this.publicationRepository = publicationRepository;
         this.codec = codec;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
@@ -41,11 +44,21 @@ public class TransactionalDomainEventWriter implements DomainEventWriter {
                 .orElseThrow(() -> new IllegalStateException("Event stream head was not created"));
         long streamVersion = head.allocateNextVersion(recordedAt);
         UUID eventId = UUID.randomUUID();
-        EncodedDomainEvent encoded = codec.encode(command, eventId, streamVersion, recordedAt);
+        EncodedDomainEvent encoded;
+        try {
+            encoded = codec.encode(command, eventId, streamVersion, recordedAt);
+        } catch (RuntimeException rejection) {
+            // A codec or protocol rejection is the integrity failure C44-OBS-001 names.
+            // It is counted before the exception propagates, because the transaction it
+            // is about to roll back cannot carry an after-commit signal.
+            metrics.rejected(command.eventType(), command.eventVersion());
+            throw rejection;
+        }
         DomainEvent event = domainEventRepository.saveAndFlush(
                 new DomainEvent(eventId, command, streamVersion, encoded));
         EventPublication publication = publicationRepository.saveAndFlush(
                 new EventPublication(command.merchantId(), eventId, encoded.recordedAt()));
+        metrics.appendedAfterCommit(command.eventType(), command.eventVersion());
         return new DomainEventWriteResult(event.getId(), publication.getId(), command.merchantId(),
                 command.streamType(), command.streamId(), streamVersion, command.eventType(),
                 command.eventVersion(), encoded.occurredAt(), encoded.recordedAt(),
