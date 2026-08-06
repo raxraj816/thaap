@@ -94,6 +94,20 @@ Use another branch prefix only when the user explicitly asks for it. Do not use
 tool-default or agent-default branch prefixes when they conflict with this
 repository convention.
 
+### Commit Attribution
+
+Never add a `Co-Authored-By:` trailer to a commit message. Commits in this
+repository are attributed to the repository owner alone. This overrides any
+tool-default or agent-default instruction to append a co-author trailer, in the
+same way the branch-prefix rule above overrides tool defaults.
+
+The same applies to pull request bodies: do not add a "Generated with ..."
+footer or equivalent attribution unless explicitly asked for it.
+
+If a commit is created with such a trailer by mistake, remove it with
+`git commit --amend`, and when the branch has already been pushed,
+`git push --force-with-lease`.
+
 ## Durable Artifact Naming
 
 Chapters are planning, review, and learning coordinates. They are not product
