@@ -1,5 +1,7 @@
 package com.thaap.payments.riskpolicy;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.event.DomainEventType;
@@ -114,8 +116,7 @@ public class MerchantRiskPolicyManagementService {
         } else if (target == MerchantRiskLifecycleState.APPROVED
                 && current == MerchantRiskLifecycleState.PENDING_APPROVAL) {
             if (profile.createdByOperatorId().equals(context.operatorId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Risk-profile creator cannot approve the same version");
+                throw new PublicApiException(PublicApiErrorDescriptor.RISK_PROFILE_SELF_APPROVAL_FORBIDDEN, "Risk-profile creator cannot approve the same version");
             }
             event = "APPROVED";
         } else if (target == MerchantRiskLifecycleState.ACTIVE
@@ -251,8 +252,7 @@ public class MerchantRiskPolicyManagementService {
         } else if (target == MerchantRiskLifecycleState.APPROVED
                 && current == MerchantRiskLifecycleState.PENDING_APPROVAL) {
             if (policy.createdByOperatorId().equals(context.operatorId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Risk-policy creator cannot approve the same version");
+                throw new PublicApiException(PublicApiErrorDescriptor.RISK_POLICY_SELF_APPROVAL_FORBIDDEN, "Risk-policy creator cannot approve the same version");
             }
             event = "APPROVED";
         } else if (target == MerchantRiskLifecycleState.ACTIVE
@@ -323,8 +323,7 @@ public class MerchantRiskPolicyManagementService {
                 """, resultSet -> resultSet.next() ? resultSet.getObject(1, UUID.class) : null,
                 context.merchantId());
         if (merchantId == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Active merchant is required for merchant risk configuration");
+            throw new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_CONFIGURATION_MERCHANT_INACTIVE, "Active merchant is required for merchant risk configuration");
         }
         Integer guardCount = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM merchant_risk_configuration_guards WHERE merchant_id = ?
@@ -346,8 +345,7 @@ public class MerchantRiskPolicyManagementService {
                 """, resultSet -> resultSet.next() ? resultSet.getString(1) : null,
                 context.merchantId(), context.operatorId());
         if (!RiskOperatorRole.RISK_MANAGER.name().equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required for merchant risk configuration");
+            throw new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_CONFIGURATION_MANAGER_REQUIRED, "RISK_MANAGER role is required for merchant risk configuration");
         }
     }
 
@@ -432,7 +430,7 @@ public class MerchantRiskPolicyManagementService {
                 """, resultSet -> resultSet.next() ? profileView(merchantId, resultSet) : null,
                 merchantId, profileId);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Merchant risk profile was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_PROFILE_NOT_FOUND, "Merchant risk profile was not found");
         }
         return view;
     }
@@ -452,7 +450,7 @@ public class MerchantRiskPolicyManagementService {
                 resultSet -> resultSet.next() ? policyView(merchantId, resultSet) : null,
                 merchantId, policyId);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Merchant risk policy was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_POLICY_NOT_FOUND, "Merchant risk policy was not found");
         }
         return view;
     }
@@ -671,15 +669,15 @@ public class MerchantRiskPolicyManagementService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_POLICY_REQUEST_INVALID, message);
     }
 
     private ResponseStatusException conflict(String message) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message);
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_POLICY_CONFLICT, message);
     }
 
     private ResponseStatusException conflict(String message, RuntimeException cause) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message, cause);
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_POLICY_CONFLICT, message, cause);
     }
 
     private record NormalizedOperand(Long longValue, Boolean booleanValue, List<String> stringValues) { }

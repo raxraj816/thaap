@@ -60,6 +60,10 @@ spring:
       ack-mode: manual_immediate
       concurrency: 6
 
+springdoc:
+  api-docs:
+    version: OPENAPI_3_0
+
 server:
   port: ${THAAP_PAYMENTS_API_PORT:8080}
   shutdown: graceful
@@ -84,7 +88,7 @@ management:
       show-details: never
       group:
         readiness:
-          include: readinessState,db,velocityRedis,merchantRiskPolicy,merchantRiskMonitoring,analystWorkspace,riskSimulation,governedControl,disputeOperations,developerScenarios,webhookOperations,eventPublication,paymentRiskProjection,projectionRebuild,offlineReplayDataset
+          include: readinessState,db,velocityRedis,merchantRiskPolicy,merchantRiskMonitoring,analystWorkspace,riskSimulation,governedControl,disputeOperations,developerScenarios,webhookOperations,eventPublication,paymentRiskProjection,projectionRebuild,offlineReplayDataset,decisionIntelligence
   health:
     db:
       enabled: true

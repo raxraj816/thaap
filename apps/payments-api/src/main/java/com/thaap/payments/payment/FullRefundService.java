@@ -1,5 +1,7 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
 import com.thaap.payments.authorization.AuthorizationStatus;
@@ -37,12 +39,10 @@ public class FullRefundService {
                     && existing.getCurrency().equals(paymentIntent.getCurrency())) {
                 return new Result(existing, null, null, true);
             }
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent already has a recorded Refund");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_REFUND_EXISTS, "PaymentIntent already has a recorded Refund");
         }
         if (paymentIntent.getStatus() != PaymentIntentStatus.CAPTURED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be refunded from status " + paymentIntent.getStatus());
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_REFUNDABLE, "PaymentIntent cannot be refunded from status " + paymentIntent.getStatus());
         }
         Authorization authorization = latestApprovedAuthorization(merchantId, paymentIntent.getId());
         requireAuthorizationMatchesPaymentIntent(authorization, paymentIntent);
@@ -61,16 +61,14 @@ public class FullRefundService {
         return authorizationRepository.findApprovedAuthorizationsForPaymentIntent(merchantId,
                         paymentIntentId, PaymentAttemptStatus.AUTHORIZED, AuthorizationStatus.APPROVED)
                 .stream().findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent does not have approved authorization evidence for Refund"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_REFUND_AUTHORIZATION_MISSING, "PaymentIntent does not have approved authorization evidence for Refund"));
     }
 
     private void requireAuthorizationMatchesPaymentIntent(Authorization authorization,
             PaymentIntent paymentIntent) {
         if (!authorization.getCurrency().equals(paymentIntent.getCurrency())
                 || authorization.getAuthorizedAmount() != paymentIntent.getAmount()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Approved authorization does not match PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHORIZATION_PAYMENT_MISMATCH, "Approved authorization does not match PaymentIntent");
         }
     }
 

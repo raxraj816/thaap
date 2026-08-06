@@ -43,11 +43,13 @@ public class ProjectionDefinitionStore {
                         resultSet.getObject(2, java.util.UUID.class),
                         resultSet.getLong(3), resultSet.getString(4)), projectionName);
         if (matches.size() != 1) {
-            throw new IllegalStateException("Projection has no compatible active generation");
+            throw new ProjectionGenerationUnavailableException(
+                    "Projection has no compatible active generation");
         }
         ActiveProjectionGeneration generation = matches.getFirst();
         if (!ProjectionNames.HANDLER_VERSION.equals(generation.handlerVersion())) {
-            throw new IllegalStateException("Active projection handler version is incompatible");
+            throw new ProjectionGenerationUnavailableException(
+                    "Active projection handler version is incompatible");
         }
         return generation;
     }

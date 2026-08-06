@@ -120,6 +120,43 @@ Chapter 45 is complete. Chapter 46 is complete. Chapter 47 is complete. Chapter
 48 is complete. Chapter 49 is complete. Chapter 50 is complete. Chapter 51 is
 complete. Chapter 52 is complete. Every dossier is `READY_TO_MERGE`/`MERGE`.
 Phase 5 implementation status: COMPLETE
+Chapter 53 is complete: the payment investigation and decision explanation
+surface is proven at its real HTTP, PostgreSQL, browser, and demo boundaries,
+and its dossier is `READY_TO_MERGE`/`MERGE`.
+Chapter 54 is complete: the canonical payment timeline and safe same-merchant
+related-payment pivots are proven by thirteen named artifacts, including append
+safety, history immutability, relationship-anchor lineage, and V86–V87 durable
+constraints exercised on real PostgreSQL, and its dossier is
+`READY_TO_MERGE`/`MERGE`.
+Chapter 55 is complete: typed payment investigation saved views and bounded
+bulk review assignment are proven across all thirteen invariants, including
+fenced single-transaction item atomicity, forced PostgreSQL lock contention,
+restart from durable item truth, V88–V90 constraint and retained-history
+evidence, and a public demo whose bulk run ends `PARTIAL` with per-item
+`SUCCEEDED`/`STALE`/`NOT_FOUND` truth, and its dossier is
+`READY_TO_MERGE`/`MERGE`.
+Chapter 57 is complete: the `Thaap-Version` resolver, stable public error
+catalogue, and generated `2026-08-01` OpenAPI contract (125 paths, 133
+operations) are proven, with the published credential boundary derived from the
+handlers that enforce it rather than from a path prefix, and its dossier is
+`READY_TO_MERGE`/`MERGE`.
+Chapter 58 is complete: the supported Python sandbox SDK regenerates byte-stably
+from the committed contract, installs offline into a clean environment, and
+completes the published zero-source-reading merchant journey as an executed test
+rather than a claim, and its dossier is `READY_TO_MERGE`/`MERGE`.
+Chapter 59 is complete: the integrated workspace and developer journeys, the
+phase-wide contract inventory, fresh `V1→V91` and retained `V85→V91` migrations,
+accessibility, observability, and recovery are reconciled, and its dossier is
+`READY_TO_MERGE`/`MERGE`.
+Phase 6 implementation status: COMPLETE
+Chapter 56 is complete: queue-productivity and decision/business insights are
+proven across all twelve invariants, with the published distribution and money
+reconciled directly against the projection, review activity reconciled against
+durable assignment events, an empty denominator reported as not computable rather
+than zero, currency-separated money with no blended total, a tenant-free
+drill-through that reproduces exactly the segment it came from, and V91 index
+reachability measured on real PostgreSQL, and its dossier is
+`READY_TO_MERGE`/`MERGE`.
 The
 [Phase 6 detailed implementation plan](docs/PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md)
 was founder-confirmed on 2026-08-02. It freezes Chapters 53–59 for a source-reconciled
@@ -127,11 +164,14 @@ payment investigation and complete decision explanation, canonical lifecycle
 timeline, HMAC-safe same-merchant pivots, investigation saved views, bounded
 restart-safe review assignment, denominator-honest insights, a routed and
 accessibility-tested workspace, date-versioned generated OpenAPI, stable error
-contracts, and one supported Python sandbox SDK. Implementation has not
-started. The twenty decisions are confirmed, and all Chapter 53–59
-`PRE_IMPLEMENTATION` matrices are frozen proof contracts with open
-`IN_PROGRESS` / `DO_NOT_MERGE` dossiers. Chapter 53 and Chapter 57 are the
-dependency-ready implementation entries; all evidence remains pending.
+contracts, and one supported Python sandbox SDK. Chapters 53–59 are implemented
+and complete. The twenty decisions are confirmed, every Chapter 53–59
+`PRE_IMPLEMENTATION` matrix is `VERIFIED` with all rows `PASS`, and every dossier
+recommends `MERGE`. The temporally later hostile pass recorded `ER-0096`,
+`ER-0097` and `ER-0098`; all three are resolved with product evidence and a
+process correction, and the correction shared by two of them — that a gate which
+has never been executed is not evidence — is now enforced by wiring both OpenAPI
+gates into `scripts/commit-readiness-check.sh`.
 The vision matrix registers 23 `VP-NNN` promises and rebaselines Phases 6–10
 around unified decision/analyst product, developer contracts, governed ML and
 drift, privacy-safe network/graph intelligence, merchant underwriting and

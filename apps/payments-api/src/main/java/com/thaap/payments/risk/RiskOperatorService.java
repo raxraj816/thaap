@@ -1,5 +1,7 @@
 package com.thaap.payments.risk;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.security.SensitiveValueHasher;
@@ -77,8 +79,7 @@ public class RiskOperatorService {
     public RiskOperator disable(MerchantContext merchantContext, UUID operatorId, String requestId) {
         RiskOperator operator = operatorRepository.findByIdAndMerchantIdForUpdate(
                         operatorId, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Risk operator was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_NOT_FOUND, "Risk operator was not found"));
         if (!operator.isActive()) {
             return operator;
         }
@@ -130,12 +131,10 @@ public class RiskOperatorService {
         String expectedHash = requestHash(role, credential.getCreationHashKeyVersion());
         if (!MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.UTF_8),
                 credential.getCreationRequestHash().getBytes(StandardCharsets.UTF_8))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Idempotency key was already used with a different risk operator request");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_IDEMPOTENCY_KEY_CONFLICT, "Idempotency key was already used with a different risk operator request");
         }
         if (!credential.getReplayExpiresAt().isAfter(clock.instant())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Risk operator creation replay window has expired");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_REPLAY_WINDOW_EXPIRED, "Risk operator creation replay window has expired");
         }
         RiskOperator operator = operatorRepository.findByIdAndMerchantId(
                         credential.getRiskOperatorId(), merchantContext.merchantId())
@@ -161,11 +160,10 @@ public class RiskOperatorService {
 
     private void requireIdempotencyKey(String key) {
         if (key == null || key.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_REQUIRED, "Missing Idempotency-Key header");
         }
         if (key.length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Idempotency-Key must contain at most 255 characters");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_INVALID, "Idempotency-Key must contain at most 255 characters");
         }
     }
 

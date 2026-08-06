@@ -1,5 +1,7 @@
 package com.thaap.payments.idempotency;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.authentication.AuthenticationReplayCipher;
@@ -89,11 +91,10 @@ public class IdempotencyService {
             Object request, Class<T> responseType, Runnable replayAuthorization,
             Supplier<ResponseEntity<T>> operationSupplier) {
         if (key == null || key.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_REQUIRED, "Missing Idempotency-Key header");
         }
         if (key.length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Idempotency-Key must contain at most 255 characters");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_INVALID, "Idempotency-Key must contain at most 255 characters");
         }
 
         String serializedRequest = write(request);
@@ -178,11 +179,10 @@ public class IdempotencyService {
 
     private void requireKey(String key) {
         if (key == null || key.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing Idempotency-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_REQUIRED, "Missing Idempotency-Key header");
         }
         if (key.length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Idempotency-Key must contain at most 255 characters");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_INVALID, "Idempotency-Key must contain at most 255 characters");
         }
     }
 
@@ -210,8 +210,7 @@ public class IdempotencyService {
             String serializedRequest, String currentRequestHash,
             String currentRequestHashKeyVersion) {
         IdempotencyRecord record = findPrincipalRecord(principal, key)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Idempotency key reservation could not be completed"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_RESERVATION_FAILED, "Idempotency key reservation could not be completed"));
         return handleExisting(record, operation, serializedRequest,
                 currentRequestHash, currentRequestHashKeyVersion);
     }
@@ -238,13 +237,11 @@ public class IdempotencyService {
                 serializedRequest, record.getRequestHashKeyVersion());
         if (!record.getOperation().equals(operation)
                 || !record.getRequestHash().equals(expectedRequestHash)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Idempotency key was already used with a different request");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_CONFLICT, "Idempotency key was already used with a different request");
         }
         if (record.getStatus() != IdempotencyStatus.COMPLETED) {
             if (record.hasActiveLease(now)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Idempotency key is already in progress");
+                throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_IN_PROGRESS, "Idempotency key is already in progress");
             }
             UUID leaseToken = UUID.randomUUID();
             record.reclaim(leaseToken, now, now.plus(reservationLease));

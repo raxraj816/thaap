@@ -1,5 +1,7 @@
 package com.thaap.payments.developer;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -82,8 +84,7 @@ public class DeveloperScenarioService {
             String seed, String requestId) {
         requireSynthetic(context);
         if (!creationEnabled) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Developer scenario creation is disabled");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_CREATION_DISABLED, "Developer scenario creation is disabled");
         }
         String seedDigest = SecretHasher.sha256(seed);
         String specificationJson = canonical(Map.of(
@@ -158,8 +159,7 @@ public class DeveloperScenarioService {
                 && !run.leaseOwner().equals(workerId)
                 && run.leaseExpiresAt() != null && run.leaseExpiresAt().isAfter(now);
         if (liveForeignLease) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Developer scenario run is leased by another worker");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_RUN_LEASED, "Developer scenario run is leased by another worker");
         }
         boolean renewal = run.leaseOwner() != null && run.leaseOwner().equals(workerId)
                 && run.leaseExpiresAt() != null && run.leaseExpiresAt().isAfter(now)
@@ -193,15 +193,13 @@ public class DeveloperScenarioService {
         StepRow step = requireStep(context.merchantId(), runId, stepIndex);
         if ("COMPLETED".equals(step.lifecycleStatus())) {
             if (!resourceId.equals(step.resourceId())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Developer scenario step was completed with a different resource");
+                throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_STEP_RESOURCE_MISMATCH, "Developer scenario step was completed with a different resource");
             }
             return requireRun(context.merchantId(), runId, false);
         }
         requireLease(run, workerId, leaseEpoch);
         if (stepIndex != run.nextStepIndex()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Developer scenario steps must complete in plan order");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_STEP_ORDER_INVALID, "Developer scenario steps must complete in plan order");
         }
         verifyResource(context.merchantId(), run, step, resourceId);
         Instant now = clock.instant();
@@ -287,8 +285,7 @@ public class DeveloperScenarioService {
         RunView run = requireRun(context.merchantId(), runId, false);
         if (run.lifecycleStatus() != DeveloperScenarioLifecycleStatus.SUCCEEDED
                 || run.reportDigest() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Developer scenario report is not available until the run succeeds");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_REPORT_UNAVAILABLE, "Developer scenario report is not available until the run succeeds");
         }
         String reportJson = jdbcTemplate.queryForObject("""
                 SELECT report_json FROM developer_scenario_runs
@@ -422,8 +419,7 @@ public class DeveloperScenarioService {
                  WHERE merchant_id = ? AND id = ?
                 """ + lockClause, (resultSet, rowNumber) -> mapRun(merchantId, resultSet), merchantId, runId);
         if (runs.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Developer scenario run was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_RUN_NOT_FOUND, "Developer scenario run was not found");
         }
         return runs.getFirst();
     }
@@ -538,8 +534,7 @@ public class DeveloperScenarioService {
                         resultSet.getString("lifecycle_status"),
                         resultSet.getObject("resource_id", UUID.class)), merchantId, runId, stepIndex);
         if (steps.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Developer scenario step was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_STEP_NOT_FOUND, "Developer scenario step was not found");
         }
         return steps.getFirst();
     }
@@ -549,8 +544,7 @@ public class DeveloperScenarioService {
         if (run.lifecycleStatus() != DeveloperScenarioLifecycleStatus.RUNNING
                 || !workerId.equals(run.leaseOwner()) || leaseEpoch != run.leaseEpoch()
                 || run.leaseExpiresAt() == null || !run.leaseExpiresAt().isAfter(now)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Developer scenario lease is stale or unavailable");
+            throw new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_LEASE_STALE, "Developer scenario lease is stale or unavailable");
         }
     }
 
@@ -676,13 +670,12 @@ public class DeveloperScenarioService {
 
     private static void requireSynthetic(MerchantContext context) {
         if (context.trafficOrigin() != TrafficOrigin.SYNTHETIC_SCENARIO) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Trusted scenario runner credential is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.SCENARIO_RUNNER_CREDENTIAL_REQUIRED, "Trusted scenario runner credential is required");
         }
     }
 
     private static ResponseStatusException conflict(String message) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message);
+        return new PublicApiException(PublicApiErrorDescriptor.DEVELOPER_SCENARIO_CONFLICT, message);
     }
 
     public record CatalogueView(String catalogueVersion, String processor,

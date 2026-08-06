@@ -1,5 +1,7 @@
 package com.thaap.payments.risk;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.security.SensitiveValueHasher;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,8 +45,7 @@ public class RiskOperatorContextArgumentResolver implements HandlerMethodArgumen
         HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
         String rawKey = request == null ? null : request.getHeader(RISK_KEY_HEADER);
         if (rawKey == null || rawKey.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Missing X-Risk-Operator-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_KEY_REQUIRED, "Missing X-Risk-Operator-Key header");
         }
         List<String> identities = sensitiveValueHasher.hmacSha256Keyring(
                         "risk.operator.credential", rawKey)
@@ -52,18 +53,15 @@ public class RiskOperatorContextArgumentResolver implements HandlerMethodArgumen
         List<RiskOperatorCredential> credentials = credentialRepository
                 .findBySecretIdentityHmacInAndDisabledAtIsNull(identities);
         if (credentials.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Invalid risk operator credential");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_CREDENTIAL_INVALID, "Invalid risk operator credential");
         }
         RiskOperatorCredential credential = credentials.getFirst();
         RiskOperator operator = operatorRepository.findByIdAndMerchantId(
                         credential.getRiskOperatorId(), credential.getMerchantId())
                 .filter(RiskOperator::isActive)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                        "Invalid risk operator credential"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_CREDENTIAL_INVALID, "Invalid risk operator credential"));
         if (!merchantRepository.findById(operator.getMerchantId()).filter(merchant -> merchant.isActive()).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Invalid risk operator credential");
+            throw new PublicApiException(PublicApiErrorDescriptor.RISK_OPERATOR_CREDENTIAL_INVALID, "Invalid risk operator credential");
         }
         return new RiskOperatorContext(operator.getMerchantId(), operator.getId(), operator.getOperatorCode(),
                 operator.getRole(), credential.getSecretPrefix());

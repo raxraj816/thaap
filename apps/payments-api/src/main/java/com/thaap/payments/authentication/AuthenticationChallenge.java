@@ -1,5 +1,7 @@
 package com.thaap.payments.authentication;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.tenant.TrafficOrigin;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -153,7 +155,6 @@ public class AuthenticationChallenge {
     }
 
     private ResponseStatusException conflict(String message) {
-        return new ResponseStatusException(HttpStatus.CONFLICT,
-                "Authentication challenge " + message);
+        return new PublicApiException(PublicApiErrorDescriptor.AUTHENTICATION_CHALLENGE_CONFLICT, "Authentication challenge " + message);
     }
 }

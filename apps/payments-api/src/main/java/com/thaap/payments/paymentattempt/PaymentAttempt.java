@@ -1,5 +1,7 @@
 package com.thaap.payments.paymentattempt;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -151,11 +153,10 @@ public class PaymentAttempt {
 
     public void attachFraudDecision(UUID fraudDecisionId) {
         if (status != PaymentAttemptStatus.CREATED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot attach fraud decision from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_DECIDABLE, "PaymentAttempt cannot attach fraud decision from status " + status);
         }
         if (this.fraudDecisionId != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentAttempt already has a fraud decision");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_FRAUD_DECISION_EXISTS, "PaymentAttempt already has a fraud decision");
         }
         this.fraudDecisionId = fraudDecisionId;
         this.updatedAt = Instant.now();
@@ -163,8 +164,7 @@ public class PaymentAttempt {
 
     public void markReadyForProcessor() {
         if (status != PaymentAttemptStatus.CREATED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot be made processor-ready from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_PROCESSOR_READY, "PaymentAttempt cannot be made processor-ready from status " + status);
         }
         this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
         this.updatedAt = Instant.now();
@@ -191,8 +191,7 @@ public class PaymentAttempt {
 
     public void cancelFromReview() {
         if (status != PaymentAttemptStatus.IN_REVIEW) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot be canceled from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_CANCELABLE, "PaymentAttempt cannot be canceled from status " + status);
         }
         this.status = PaymentAttemptStatus.CANCELED;
         this.updatedAt = Instant.now();
@@ -200,8 +199,7 @@ public class PaymentAttempt {
 
     public void markReadyForProcessorAfterReview() {
         if (status != PaymentAttemptStatus.IN_REVIEW) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot continue after review from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_RESUMABLE_AFTER_REVIEW, "PaymentAttempt cannot continue after review from status " + status);
         }
         this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
         this.updatedAt = Instant.now();
@@ -231,8 +229,7 @@ public class PaymentAttempt {
 
     public void markReadyForProcessorAfterAuthentication() {
         if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot continue authentication from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_AUTHENTICATION_NOT_CONTINUABLE, "PaymentAttempt cannot continue authentication from status " + status);
         }
         status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
         threeDsStatus = ThreeDsStatus.COMPLETED;
@@ -241,8 +238,7 @@ public class PaymentAttempt {
 
     public void markAuthenticationFailed(boolean expired) {
         if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot fail authentication from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_AUTHENTICATION_NOT_FAILABLE, "PaymentAttempt cannot fail authentication from status " + status);
         }
         status = expired ? PaymentAttemptStatus.AUTHENTICATION_EXPIRED
                 : PaymentAttemptStatus.AUTHENTICATION_FAILED;
@@ -252,8 +248,7 @@ public class PaymentAttempt {
 
     public void cancelFromAuthentication() {
         if (status != PaymentAttemptStatus.REQUIRES_ACTION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot cancel authentication from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_AUTHENTICATION_NOT_CANCELABLE, "PaymentAttempt cannot cancel authentication from status " + status);
         }
         status = PaymentAttemptStatus.CANCELED;
         threeDsStatus = ThreeDsStatus.FAILED;
@@ -262,15 +257,13 @@ public class PaymentAttempt {
 
     private void requireProcessorReady(String targetStatus) {
         if (status != PaymentAttemptStatus.READY_FOR_PROCESSOR) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot be marked " + targetStatus + " from status " + status);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_MARKABLE, "PaymentAttempt cannot be marked " + targetStatus + " from status " + status);
         }
     }
 
     private void requireCreatedWithFraudDecision(String targetStatus) {
         if (status != PaymentAttemptStatus.CREATED || fraudDecisionId == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentAttempt cannot be marked " + targetStatus + " before a fraud decision");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_FRAUD_DECISION_MISSING, "PaymentAttempt cannot be marked " + targetStatus + " before a fraud decision");
         }
     }
 }

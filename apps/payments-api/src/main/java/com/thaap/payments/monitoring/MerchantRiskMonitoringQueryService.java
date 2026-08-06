@@ -1,5 +1,7 @@
 package com.thaap.payments.monitoring;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.risk.RiskOperatorContext;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -524,7 +526,7 @@ public class MerchantRiskMonitoringQueryService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.MERCHANT_RISK_MONITORING_QUERY_REQUEST_INVALID, message);
     }
 
     public record MonitoringRequest(Instant windowStart, Instant windowEnd, Instant asOf,

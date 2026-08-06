@@ -1,5 +1,7 @@
 package com.thaap.payments.developer;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.tenant.MerchantContext;
@@ -42,6 +44,7 @@ public class DeveloperScenarioController {
     }
 
     @PostMapping("/scenario-runs")
+    @RequiresScenarioRunner
     public ResponseEntity<DeveloperScenarioService.RunView> create(MerchantContext context,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateRunRequest request, HttpServletRequest servletRequest) {
@@ -52,11 +55,13 @@ public class DeveloperScenarioController {
     }
 
     @GetMapping("/scenario-runs/{runId}")
+    @RequiresScenarioRunner
     public DeveloperScenarioService.RunView get(MerchantContext context, @PathVariable UUID runId) {
         return service.get(context, runId);
     }
 
     @PostMapping("/scenario-runs/{runId}/claims")
+    @RequiresScenarioRunner
     public ResponseEntity<DeveloperScenarioService.RunView> claim(MerchantContext context,
             @PathVariable UUID runId,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
@@ -70,6 +75,7 @@ public class DeveloperScenarioController {
     }
 
     @PostMapping("/scenario-runs/{runId}/steps/{stepIndex}/complete")
+    @RequiresScenarioRunner
     public ResponseEntity<DeveloperScenarioService.RunView> completeStep(MerchantContext context,
             @PathVariable UUID runId, @PathVariable @Min(0) int stepIndex,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
@@ -84,6 +90,7 @@ public class DeveloperScenarioController {
     }
 
     @PostMapping("/scenario-runs/{runId}/fail")
+    @RequiresScenarioRunner
     public ResponseEntity<DeveloperScenarioService.RunView> fail(MerchantContext context,
             @PathVariable UUID runId,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
@@ -97,6 +104,7 @@ public class DeveloperScenarioController {
     }
 
     @GetMapping("/scenario-runs/{runId}/report")
+    @RequiresScenarioRunner
     public DeveloperScenarioService.ReportView report(MerchantContext context,
             @PathVariable UUID runId) {
         return service.report(context, runId);
@@ -109,8 +117,7 @@ public class DeveloperScenarioController {
 
     private static void requireScenarioRunner(MerchantContext context) {
         if (context.trafficOrigin() != TrafficOrigin.SYNTHETIC_SCENARIO) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Trusted scenario runner credential is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.SCENARIO_RUNNER_CREDENTIAL_REQUIRED, "Trusted scenario runner credential is required");
         }
     }
 

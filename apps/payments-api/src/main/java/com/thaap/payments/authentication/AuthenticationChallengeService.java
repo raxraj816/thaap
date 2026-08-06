@@ -1,5 +1,7 @@
 package com.thaap.payments.authentication;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
@@ -162,8 +164,7 @@ public class AuthenticationChallengeService {
                         paymentIntent.getCurrency(), paymentMethod.getCardBin(), paymentMethod.getCardLast4(), true));
         if (processorResult.status() == AuthorizationStatus.REQUIRES_ACTION) {
             authenticationMetrics.recordDenial("SECOND_CHALLENGE_LOOP");
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Authenticated processor continuation requested another challenge");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHENTICATION_CONTINUATION_RECHALLENGED, "Authenticated processor continuation requested another challenge");
         }
         Authorization authorization = persistOrCompleteAuthorization(
                 context.merchantId(), challenge, paymentAttempt, processorResult);
@@ -243,8 +244,7 @@ public class AuthenticationChallengeService {
                         ThreeDsResult.AUTHENTICATED);
                 authorizationRepository.flush();
             } else {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Authenticated processor continuation did not approve");
+                throw new PublicApiException(PublicApiErrorDescriptor.AUTHENTICATION_CONTINUATION_DECLINED, "Authenticated processor continuation did not approve");
             }
             return authorization;
         }
@@ -266,8 +266,7 @@ public class AuthenticationChallengeService {
             attempt.markDeclined(authorization.getProcessorReferenceId());
             intent.markRequiresPaymentMethodAfterProcessorDecline();
         } else {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Authenticated processor result is unsupported");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHENTICATION_RESULT_UNSUPPORTED, "Authenticated processor result is unsupported");
         }
     }
 
@@ -375,8 +374,7 @@ public class AuthenticationChallengeService {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND,
-                "Authentication challenge was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.AUTHENTICATION_CHALLENGE_NOT_FOUND, "Authentication challenge was not found");
     }
 
     public enum CompletionOutcome { SUCCESS, FAILURE }

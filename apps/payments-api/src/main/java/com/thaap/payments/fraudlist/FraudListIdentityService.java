@@ -1,5 +1,7 @@
 package com.thaap.payments.fraudlist;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.customer.Customer;
 import com.thaap.payments.payment.PaymentIntent;
 import com.thaap.payments.paymentmethod.PaymentMethod;
@@ -215,7 +217,7 @@ public class FraudListIdentityService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_REQUEST_INVALID, message);
     }
 
     public record EntryIdentity(String canonicalValue, String valueHmac, String hmacKeyVersion) {

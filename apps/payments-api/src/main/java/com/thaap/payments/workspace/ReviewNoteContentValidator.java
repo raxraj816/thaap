@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import java.net.URI;
 import java.text.Normalizer;
 import java.util.regex.Matcher;
@@ -96,7 +98,7 @@ public class ReviewNoteContentValidator {
     }
 
     private ResponseStatusException invalid(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOTE_REQUEST_INVALID, message);
     }
 
     public record ValidatedNote(String normalizedContent, int codePoints) {

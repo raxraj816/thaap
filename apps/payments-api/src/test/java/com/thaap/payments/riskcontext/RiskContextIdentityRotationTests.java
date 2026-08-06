@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.thaap.payments.security.SensitiveValueHasher;
+import com.thaap.payments.investigation.InvestigationRelationAnchorWriter;
 import com.thaap.payments.tenant.TrafficOrigin;
 import java.time.Clock;
 import java.time.Instant;
@@ -24,7 +25,7 @@ class RiskContextIdentityRotationTests {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         RiskContextService service = new RiskContextService(repository, hasher,
                 Clock.fixed(Instant.parse("2026-07-25T00:00:00Z"), ZoneOffset.UTC),
-                mock(RiskContextMetrics.class));
+                mock(RiskContextMetrics.class), mock(InvestigationRelationAnchorWriter.class));
         UUID merchantId = UUID.randomUUID();
         RiskContextRequest request = new RiskContextRequest(
                 "203.0.113.21", "US", null, "device-21", "session-21", "US",

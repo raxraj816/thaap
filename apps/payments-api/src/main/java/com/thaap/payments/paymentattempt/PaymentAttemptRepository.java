@@ -2,6 +2,7 @@ package com.thaap.payments.paymentattempt;
 
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -24,4 +25,7 @@ public interface PaymentAttemptRepository extends JpaRepository<PaymentAttempt, 
               AND attempt.paymentIntentId = :paymentIntentId
             """)
     int maxAttemptNumber(@Param("merchantId") UUID merchantId, @Param("paymentIntentId") UUID paymentIntentId);
+
+    List<PaymentAttempt> findByMerchantIdAndPaymentIntentIdOrderByAttemptNumberAsc(
+            UUID merchantId, UUID paymentIntentId);
 }

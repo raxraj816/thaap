@@ -1,5 +1,7 @@
 package com.thaap.payments.incident;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -141,18 +143,15 @@ public class CardTestingIncidentService {
                         context.operatorId(), context.merchantId())
                 .filter(RiskOperator::isActive)
                 .filter(operator -> operator.getRole() == RiskOperatorRole.RISK_MANAGER)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Risk resource was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.RISK_RESOURCE_NOT_FOUND, "Risk resource was not found"));
         CardTestingIncident incident = incidentRepository.findByIdAndMerchantIdForUpdate(
                         incidentId, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "CardTestingIncident was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CARD_TESTING_INCIDENT_NOT_FOUND, "CardTestingIncident was not found"));
         CardTestingIncidentResolution existing = resolutionRepository
                 .findByMerchantIdAndIncidentId(context.merchantId(), incidentId).orElse(null);
         if (existing != null) {
             if (existing.getMitigationCode() != mitigationCode) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "CardTestingIncident already has a different terminal mitigation");
+                throw new PublicApiException(PublicApiErrorDescriptor.CARD_TESTING_INCIDENT_MITIGATION_CONFLICT, "CardTestingIncident already has a different terminal mitigation");
             }
             metrics.recordAfterCompletion("resolve", "TERMINAL_REPLAY");
             return new ResolutionResult(incident, existing);

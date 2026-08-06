@@ -94,10 +94,10 @@ class PaymentIntentLifecycleContractTests {
                 .getContentAsString();
         var error = objectMapper.readTree(response);
 
-        assertStandardError(error, 409, "conflict", "req_capture_invalid_state",
+        assertStandardError(error, 409, "payment_intent_not_capturable", "req_capture_invalid_state",
                 "/payment_intents/" + paymentIntent + "/capture");
         assertThat(error.get("message").asText())
-                .isEqualTo("PaymentIntent cannot be captured from status REQUIRES_CONFIRMATION");
+                .isEqualTo("PaymentIntent cannot be captured from its current status");
         assertThat(statusFor(paymentIntent)).isEqualTo("REQUIRES_CONFIRMATION");
     }
 
@@ -142,9 +142,9 @@ class PaymentIntentLifecycleContractTests {
                 .getContentAsString();
         var error = objectMapper.readTree(response);
 
-        assertStandardError(error, 409, "conflict", "req_refund_invalid_state", "/refunds");
+        assertStandardError(error, 409, "payment_intent_not_refundable", "req_refund_invalid_state", "/refunds");
         assertThat(error.get("message").asText())
-                .isEqualTo("PaymentIntent cannot be refunded from status REQUIRES_CONFIRMATION");
+                .isEqualTo("PaymentIntent cannot be refunded from its current status");
         assertThat(statusFor(paymentIntent)).isEqualTo("REQUIRES_CONFIRMATION");
     }
 
@@ -201,7 +201,7 @@ class PaymentIntentLifecycleContractTests {
                 .getContentAsString();
         var error = objectMapper.readTree(response);
 
-        assertStandardError(error, 409, "conflict", "req_refund_partial", "/refunds");
+        assertStandardError(error, 409, "refund_amount_invalid", "req_refund_partial", "/refunds");
         assertThat(error.get("message").asText())
                 .isEqualTo("Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         assertThat(statusFor(paymentIntent)).isEqualTo("CAPTURED");

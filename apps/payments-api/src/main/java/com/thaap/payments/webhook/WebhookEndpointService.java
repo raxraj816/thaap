@@ -1,5 +1,7 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.risk.RiskOperationsEventProducer;
 import com.thaap.payments.security.SensitiveValueHasher;
@@ -105,8 +107,7 @@ public class WebhookEndpointService {
         } catch (DataIntegrityViolationException exception) {
             releaseCreationReservation(reservation.recordId(), reservation.leaseToken());
             if (isDuplicateEndpointUrl(exception)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "A webhook endpoint already exists for this URL", exception);
+                throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_URL_CONFLICT, "A webhook endpoint already exists for this URL", exception);
             }
             throw exception;
         } catch (RuntimeException | Error exception) {
@@ -196,8 +197,7 @@ public class WebhookEndpointService {
         WebhookEndpointCreationRecord record =
                 findExistingCreationRecord(merchantId, keyIdentities);
         if (record == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook endpoint creation reservation could not be completed");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_RESERVATION_FAILED, "Webhook endpoint creation reservation could not be completed");
         }
         if (record.isExpired(clock.instant())) {
             deleteExpiredCreationRecord(record);
@@ -223,15 +223,13 @@ public class WebhookEndpointService {
         if (!MessageDigest.isEqual(
                 record.getRequestHash().getBytes(StandardCharsets.UTF_8),
                 requestHash.getBytes(StandardCharsets.UTF_8))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Idempotency key was already used with a different webhook endpoint request");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_IDEMPOTENCY_KEY_CONFLICT, "Idempotency key was already used with a different webhook endpoint request");
         }
         ensureCreationIdentityAliases(record, keyIdentities);
         if (record.getStatus() != WebhookEndpointCreationStatus.COMPLETED) {
             Instant now = clock.instant();
             if (record.hasActiveLease(now)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Webhook endpoint creation is already in progress");
+                throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_CREATION_IN_PROGRESS, "Webhook endpoint creation is already in progress");
             }
             UUID leaseToken = UUID.randomUUID();
             record.reclaim(leaseToken, now, now.plus(CREATION_RESERVATION_LEASE));
@@ -303,8 +301,7 @@ public class WebhookEndpointService {
     private EndpointSecretResult replayCreation(MerchantContext merchantContext,
             WebhookEndpointCreationRecord record) {
         if (record.getExpiresAt().isBefore(clock.instant())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook endpoint creation replay window has expired");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_REPLAY_WINDOW_EXPIRED, "Webhook endpoint creation replay window has expired");
         }
         UUID endpointId = record.getWebhookEndpointId();
         WebhookEndpoint endpoint = endpointRepository.findByIdAndMerchantId(
@@ -313,8 +310,7 @@ public class WebhookEndpointService {
                         "Completed webhook endpoint creation lost endpoint lineage"));
         if (!endpoint.getSigningSecretGeneration().equals(
                 record.getSigningSecretGeneration())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook endpoint creation response was superseded by secret rotation");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_CREATION_SUPERSEDED, "Webhook endpoint creation response was superseded by secret rotation");
         }
         String rawSecret = secretCipher.decrypt(
                 record.encryptedSecret(), merchantContext.merchantId(), endpointId);
@@ -345,12 +341,10 @@ public class WebhookEndpointService {
 
     private void requireIdempotencyKey(String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Missing Idempotency-Key header");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_REQUIRED, "Missing Idempotency-Key header");
         }
         if (idempotencyKey.length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Idempotency-Key must contain at most 255 characters");
+            throw new PublicApiException(PublicApiErrorDescriptor.IDEMPOTENCY_KEY_INVALID, "Idempotency-Key must contain at most 255 characters");
         }
     }
 
@@ -365,14 +359,12 @@ public class WebhookEndpointService {
     public EndpointSecretResult rotateSecret(MerchantContext merchantContext, UUID endpointId, String requestId) {
         WebhookEndpoint endpoint = loadEndpointForUpdate(merchantContext, endpointId);
         if (endpoint.getOperationalStatus() == WebhookEndpointStatus.DISABLED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Disabled webhook endpoints cannot rotate secrets");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_DISABLED_FOR_ROTATION, "Disabled webhook endpoints cannot rotate secrets");
         }
         WebhookEndpointStatus beforeStatus = endpoint.getOperationalStatus();
         Instant rotatedAt = clock.instant();
         if (endpoint.hasActivePreviousSecret(rotatedAt)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Webhook endpoint already has an active previous-secret overlap");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_SECRET_OVERLAP_ACTIVE, "Webhook endpoint already has an active previous-secret overlap");
         }
         String beforePrefix = endpoint.getSigningSecretPrefix();
         String rawSecret = WebhookSigningSecret.generate();
@@ -441,15 +433,13 @@ public class WebhookEndpointService {
 
     public WebhookEndpoint loadEndpoint(MerchantContext merchantContext, UUID endpointId) {
         return endpointRepository.findByIdAndMerchantId(endpointId, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Webhook endpoint was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_NOT_FOUND, "Webhook endpoint was not found"));
     }
 
     private WebhookEndpoint loadEndpointForUpdate(MerchantContext merchantContext, UUID endpointId) {
         return endpointRepository.findByIdAndMerchantIdForUpdate(
                         endpointId, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Webhook endpoint was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENDPOINT_NOT_FOUND, "Webhook endpoint was not found"));
     }
 
     private void recordDisableMetricsAfterCommit(List<DisableMetricObservation> counts) {
@@ -474,8 +464,7 @@ public class WebhookEndpointService {
             return new LinkedHashSet<>(Arrays.asList(WebhookEventType.values()));
         }
         if (enabledEvents.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "enabledEvents must contain at least one supported event type");
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_ENABLED_EVENTS_INVALID, "enabledEvents must contain at least one supported event type");
         }
         Set<WebhookEventType> normalized = new LinkedHashSet<>();
         try {
@@ -483,7 +472,7 @@ public class WebhookEndpointService {
                 normalized.add(WebhookEventType.fromWireValue(enabledEvent));
             }
         } catch (IllegalArgumentException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+            throw new PublicApiException(PublicApiErrorDescriptor.WEBHOOK_REQUEST_INVALID, exception.getMessage(), exception);
         }
         return normalized;
     }

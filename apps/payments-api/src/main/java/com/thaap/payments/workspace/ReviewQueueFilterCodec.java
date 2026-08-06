@@ -1,5 +1,7 @@
 package com.thaap.payments.workspace;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -247,7 +249,7 @@ public class ReviewQueueFilterCodec {
     }
 
     private ResponseStatusException invalid(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.REVIEW_QUEUE_FILTER_INVALID, message);
     }
 
     public record NormalizedFilter(ReviewQueueFilter filter, String canonicalJson) {

@@ -1,5 +1,7 @@
 package com.thaap.payments.analytics;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.security.SensitiveValueHasher;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -174,8 +176,7 @@ public class AnalyticsCursorCodec {
     }
 
     private ResponseStatusException invalidCursor() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Analytics cursor is invalid or stale");
+        return new PublicApiException(PublicApiErrorDescriptor.ANALYTICS_CURSOR_INVALID, "Analytics cursor is invalid or stale");
     }
 
     public record Cursor(Instant recordedAt, UUID paymentIntentId) {

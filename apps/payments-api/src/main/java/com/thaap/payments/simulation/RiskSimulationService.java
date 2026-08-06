@@ -1,5 +1,7 @@
 package com.thaap.payments.simulation;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -62,8 +64,7 @@ public class RiskSimulationService {
             UUID candidateVersionId, Instant cohortStart, Instant cohortEnd, Instant asOf,
             Instant labelCutoff, RiskSimulationTrafficOriginPolicy originPolicy, String requestId) {
         if (!creationEnabled) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Historical simulation creation is disabled");
+            throw new PublicApiException(PublicApiErrorDescriptor.HISTORICAL_SIMULATION_CREATION_DISABLED, "Historical simulation creation is disabled");
         }
         authorizeManagerForUpdate(context);
         if (candidateType == null || candidateVersionId == null || originPolicy == null) {
@@ -127,8 +128,7 @@ public class RiskSimulationService {
         SimulationView view = requireView(context.merchantId(), runId);
         if (view.lifecycleStatus() != RiskSimulationLifecycleStatus.SUCCEEDED
                 && !canReadProgress(context, runId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only the creator or a risk manager can read simulation progress");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_PROGRESS_ACCESS_FORBIDDEN, "Only the creator or a risk manager can read simulation progress");
         }
         return view;
     }
@@ -137,8 +137,7 @@ public class RiskSimulationService {
     public SimulationReportView report(RiskOperatorContext context, UUID runId) {
         SimulationView run = requireView(context.merchantId(), runId);
         if (run.lifecycleStatus() != RiskSimulationLifecycleStatus.SUCCEEDED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Simulation report is available only after success");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_REPORT_UNAVAILABLE, "Simulation report is available only after success");
         }
         return jdbcTemplate.query("""
                 SELECT report_digest, canonical_report_json, created_at, expires_at
@@ -163,8 +162,7 @@ public class RiskSimulationService {
         }
         if (run.lifecycleStatus() != RiskSimulationLifecycleStatus.QUEUED
                 && run.lifecycleStatus() != RiskSimulationLifecycleStatus.RUNNING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Only a queued or running simulation can be canceled");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_NOT_CANCELABLE, "Only a queued or running simulation can be canceled");
         }
         Instant now = micros(clock.instant());
         int changed = jdbcTemplate.update("""
@@ -175,8 +173,7 @@ public class RiskSimulationService {
                  WHERE merchant_id = ? AND id = ? AND lifecycle_status IN ('QUEUED', 'RUNNING')
                 """, Timestamp.from(now), context.merchantId(), runId);
         if (changed != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Simulation state changed before cancellation");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_STATE_CHANGED, "Simulation state changed before cancellation");
         }
         insertEvent(context.merchantId(), runId, "CANCELED", context.operatorId(), null,
                 "OPERATOR_CANCELED", now);
@@ -205,8 +202,7 @@ public class RiskSimulationService {
                 """, resultSet -> resultSet.next() ? resultSet.getString(1) : null,
                 context.merchantId(), context.operatorId());
         if (!RiskOperatorRole.RISK_MANAGER.name().equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required for historical simulation");
+            throw new PublicApiException(PublicApiErrorDescriptor.HISTORICAL_SIMULATION_MANAGER_REQUIRED, "RISK_MANAGER role is required for historical simulation");
         }
     }
 
@@ -226,7 +222,7 @@ public class RiskSimulationService {
         SimulationView view = jdbcTemplate.query(viewSql(false),
                 resultSet -> resultSet.next() ? mapView(resultSet) : null, merchantId, runId);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_NOT_FOUND, "Simulation was not found");
         }
         return view;
     }
@@ -235,7 +231,7 @@ public class RiskSimulationService {
         SimulationView view = jdbcTemplate.query(viewSql(true),
                 resultSet -> resultSet.next() ? mapView(resultSet) : null, merchantId, runId);
         if (view == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Simulation was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIMULATION_NOT_FOUND, "Simulation was not found");
         }
         return view;
     }
@@ -302,7 +298,7 @@ public class RiskSimulationService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.RISK_SIMULATION_REQUEST_INVALID, message);
     }
 
     public record SimulationView(UUID id, RiskSimulationCandidateType candidateType,

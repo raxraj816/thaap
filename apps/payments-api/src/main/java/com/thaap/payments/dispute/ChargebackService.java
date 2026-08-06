@@ -1,5 +1,7 @@
 package com.thaap.payments.dispute;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authorization.Authorization;
 import com.thaap.payments.authorization.AuthorizationRepository;
@@ -86,15 +88,14 @@ public class ChargebackService {
     public ResponseEntity<ChargebackController.ChargebackResponse> create(MerchantContext context,
             ChargebackController.CreateChargebackRequest request, String requestId) {
         merchantRepository.findByIdForMoneyMutation(context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Merchant was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.MERCHANT_NOT_FOUND, "Merchant was not found"));
         String fingerprint = fingerprint(request);
         Chargeback duplicate = chargebackRepository
                 .findByMerchantIdAndExternalEventKey(context.merchantId(), request.externalEventKey())
                 .orElse(null);
         if (duplicate != null) {
             if (!duplicate.getRequestFingerprint().equals(fingerprint)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "External chargeback event key was already used with different content");
+                throw new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_EVENT_KEY_CONFLICT, "External chargeback event key was already used with different content");
             }
             metrics.recordIngestion(duplicate.getReasonCode(), duplicate.getStatus(), "DEDUPLICATED");
             return ResponseEntity.ok(ChargebackController.ChargebackResponse.from(duplicate));
@@ -102,23 +103,19 @@ public class ChargebackService {
 
         PaymentIntent paymentIntent = paymentIntentRepository
                 .findByIdAndMerchantIdForUpdate(request.paymentIntentId(), context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "PaymentIntent was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_FOUND, "PaymentIntent was not found"));
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (startingStatus != PaymentIntentStatus.CAPTURED && startingStatus != PaymentIntentStatus.REFUNDED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot receive a chargeback from status " + startingStatus);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CHARGEBACKABLE, "PaymentIntent cannot receive a chargeback from status " + startingStatus);
         }
         if (paymentIntent.getCaptureMethod() != CaptureMethod.AUTOMATIC) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Chargebacks require an automatically captured PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_REQUIRES_AUTOMATIC_CAPTURE, "Chargebacks require an automatically captured PaymentIntent");
         }
         if (!paymentIntent.getCurrency().equals(request.currency().toUpperCase())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Chargeback currency does not match capture");
+            throw new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_CURRENCY_MISMATCH, "Chargeback currency does not match capture");
         }
         if (request.amount() > paymentIntent.getAmount()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Chargeback amount exceeds captured PaymentIntent amount");
+            throw new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_AMOUNT_EXCEEDS_CAPTURE, "Chargeback amount exceeds captured PaymentIntent amount");
         }
         requireTimeOrder(request);
 
@@ -127,17 +124,14 @@ public class ChargebackService {
                         com.thaap.payments.paymentattempt.PaymentAttemptStatus.AUTHORIZED,
                         AuthorizationStatus.APPROVED)
                 .stream().findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent does not have approved capture authorization evidence"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_CAPTURE_AUTHORIZATION_EVIDENCE_MISSING, "PaymentIntent does not have approved capture authorization evidence"));
         if (authorization.getAuthorizedAmount() != paymentIntent.getAmount()
                 || !authorization.getCurrency().equals(paymentIntent.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Authorization does not match captured PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.CAPTURE_AUTHORIZATION_MISMATCH, "Authorization does not match captured PaymentIntent");
         }
         FraudDecision decision = fraudDecisionRepository
                 .findByMerchantIdAndPaymentAttemptId(context.merchantId(), authorization.getPaymentAttemptId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentAttempt does not have fraud decision lineage"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_FRAUD_LINEAGE_MISSING, "PaymentAttempt does not have fraud decision lineage"));
 
         Refund refund = refundRepository.findByPaymentIntentIdAndMerchantId(
                 paymentIntent.getId(), context.merchantId()).orElse(null);
@@ -166,8 +160,7 @@ public class ChargebackService {
             java.util.List<FraudLabel> currentLabels = fraudLabelRepository.findCurrentForPaymentIntent(
                     context.merchantId(), paymentIntent.getId());
             if (currentLabels.size() > 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent has contradictory current fraud-label lineage");
+                throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_FRAUD_LABEL_LINEAGE_CONFLICT, "PaymentIntent has contradictory current fraud-label lineage");
             }
             UUID supersededLabelId = currentLabels.isEmpty() ? null : currentLabels.getFirst().getId();
             label = fraudLabelRepository.saveAndFlush(new FraudLabel(chargeback, supersededLabelId));
@@ -201,23 +194,20 @@ public class ChargebackService {
             UUID chargebackId, ChargebackController.CreateEvidencePacketRequest request, String requestId) {
         Chargeback chargeback = chargebackRepository.findByIdAndMerchantIdForUpdate(chargebackId,
                         context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chargeback was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_NOT_FOUND, "Chargeback was not found"));
         DisputeEvidencePacket existing = evidenceRepository
                 .findByMerchantIdAndChargebackId(context.merchantId(), chargebackId).orElse(null);
         if (existing != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Chargeback already has a DisputeEvidencePacket");
+            throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_EVIDENCE_PACKET_EXISTS, "Chargeback already has a DisputeEvidencePacket");
         }
         Instant now = now();
         if (now.isAfter(chargeback.getEvidenceDueAt())) {
             metrics.recordEvidence("DEADLINE_EXPIRED");
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Dispute evidence deadline has passed");
+            throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_EVIDENCE_DEADLINE_PASSED, "Dispute evidence deadline has passed");
         }
         Authorization authorization = authorizationRepository
                 .findByIdAndMerchantId(chargeback.getAuthorizationId(), context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Chargeback authorization evidence is unavailable"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_AUTHORIZATION_EVIDENCE_MISSING, "Chargeback authorization evidence is unavailable"));
         DisputeEvidencePacket packet = evidenceRepository.saveAndFlush(new DisputeEvidencePacket(chargeback,
                 mapVerification(authorization.getAvsPostalCodeCheck()),
                 mapVerification(authorization.getCvcCheck()),
@@ -266,16 +256,13 @@ public class ChargebackService {
 
     private void requireTimeOrder(ChargebackController.CreateChargebackRequest request) {
         if (request.evidenceOccurredAt().isAfter(request.receivedAt())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "evidenceOccurredAt must not be after receivedAt");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIGNAL_EVIDENCE_OCCURRED_AT_INVALID, "evidenceOccurredAt must not be after receivedAt");
         }
         if (request.receivedAt().isAfter(request.evidenceDueAt())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "evidenceDueAt must not be before receivedAt");
+            throw new PublicApiException(PublicApiErrorDescriptor.DISPUTE_EVIDENCE_DUE_AT_INVALID, "evidenceDueAt must not be before receivedAt");
         }
         if (request.receivedAt().isAfter(now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "receivedAt must not be in the future");
+            throw new PublicApiException(PublicApiErrorDescriptor.RECEIVED_AT_IN_FUTURE, "receivedAt must not be in the future");
         }
     }
 

@@ -1,5 +1,7 @@
 package com.thaap.payments.fraudlist;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.risk.RiskOperatorContext;
@@ -71,8 +73,7 @@ public class FraudListManagementService {
         Integer listCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM fraud_lists WHERE merchant_id = ?", Integer.class, context.merchantId());
         if (listCount != null && listCount >= MAX_LISTS_PER_MERCHANT) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Merchant has reached its 64 fraud-list limit");
+            throw new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_LIMIT_REACHED, "Merchant has reached its 64 fraud-list limit");
         }
         Instant now = clock.instant();
         UUID listId = UUID.randomUUID();
@@ -144,8 +145,7 @@ public class FraudListManagementService {
                  WHERE merchant_id = ? AND fraud_list_version_id = ?
                 """, Integer.class, context.merchantId(), version.id());
         if (count != null && count >= MAX_ENTRIES_PER_VERSION) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Fraud-list version has reached its 1000-entry limit");
+            throw new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_ENTRY_LIMIT_REACHED, "Fraud-list version has reached its 1000-entry limit");
         }
         Instant now = clock.instant();
         Instant starts = effectiveFrom == null ? now : effectiveFrom;
@@ -236,8 +236,7 @@ public class FraudListManagementService {
                 """, resultSet -> resultSet.next() ? resultSet.getObject(1, UUID.class) : null,
                 context.merchantId());
         if (merchantLock == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Active merchant is required for fraud-list mutation");
+            throw new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_MERCHANT_INACTIVE, "Active merchant is required for fraud-list mutation");
         }
         String role = jdbcTemplate.query("""
                 SELECT role FROM risk_operators
@@ -246,8 +245,7 @@ public class FraudListManagementService {
                 """, resultSet -> resultSet.next() ? resultSet.getString(1) : null,
                 context.merchantId(), context.operatorId());
         if (!RiskOperatorRole.RISK_MANAGER.name().equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "RISK_MANAGER role is required for fraud-list mutation");
+            throw new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_MANAGER_REQUIRED, "RISK_MANAGER role is required for fraud-list mutation");
         }
     }
 
@@ -276,8 +274,7 @@ public class FraudListManagementService {
                 """, (resultSet, rowNumber) -> new VersionRow(resultSet.getObject(1, UUID.class),
                         resultSet.getInt(2), resultSet.getTimestamp(3).toInstant()), merchantId, listId);
         if (versions.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Fraud list must have exactly one active version");
+            throw new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_ACTIVE_VERSION_CONFLICT, "Fraud list must have exactly one active version");
         }
         return versions.getFirst();
     }
@@ -339,15 +336,15 @@ public class FraudListManagementService {
     }
 
     private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        return new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_REQUEST_INVALID, message);
     }
 
     private ResponseStatusException notFound(String message) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, message);
+        return new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_NOT_FOUND, message);
     }
 
     private ResponseStatusException conflict(String message, RuntimeException cause) {
-        return new ResponseStatusException(HttpStatus.CONFLICT, message, cause);
+        return new PublicApiException(PublicApiErrorDescriptor.FRAUD_LIST_CONFLICT, message, cause);
     }
 
     private record ListRow(UUID id, String code, String displayName, FraudListIdentityType identityType,

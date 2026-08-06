@@ -103,6 +103,9 @@ public class RiskContext {
     public String getIpIdentityHmac() { return ipIdentityHmac; }
     public String getDeviceIdentityHmac() { return deviceIdentityHmac; }
     public String getSessionIdentityHmac() { return sessionIdentityHmac; }
+    public String getIpIdentityHmacAliases() { return ipIdentityHmacAliases; }
+    public String getDeviceIdentityHmacAliases() { return deviceIdentityHmacAliases; }
+    public String getSessionIdentityHmacAliases() { return sessionIdentityHmacAliases; }
 
     public String getIpIdentityHmac(String keyVersion) {
         return identityForVersion(ipIdentityHmac, ipIdentityHmacAliases, keyVersion);

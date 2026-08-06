@@ -157,7 +157,7 @@ class MerchantAdminContractTests {
 
         assertThat(error.get("requestId").asText()).isEqualTo("req_day5_merchant_bootstrap");
         assertThat(error.get("status").asInt()).isEqualTo(403);
-        assertThat(error.get("error").asText()).isEqualTo("client_error");
+        assertThat(error.get("error").asText()).isEqualTo("forbidden");
         assertThat(error.get("message").asText()).isEqualTo("Invalid merchant admin bootstrap token");
         assertThat(error.get("path").asText()).isEqualTo("/admin/merchants");
     }

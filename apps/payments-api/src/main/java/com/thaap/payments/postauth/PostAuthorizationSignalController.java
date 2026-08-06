@@ -1,5 +1,7 @@
 package com.thaap.payments.postauth;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.review.ManualReviewCase;
@@ -54,8 +56,7 @@ public class PostAuthorizationSignalController {
     @GetMapping("/{id}")
     public SignalResponse get(MerchantContext context, @PathVariable UUID id) {
         PostAuthorizationSignal signal = repository.findByIdAndMerchantId(id, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "PostAuthorizationSignal was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.POST_AUTHORIZATION_SIGNAL_NOT_FOUND, "PostAuthorizationSignal was not found"));
         ManualReviewCase reviewCase = signal.getRecommendation() == PostAuthorizationSignalRecommendation.REVIEW
                 ? reviewCaseRepository.findByPaymentIntentIdAndMerchantIdAndReviewStage(
                         signal.getPaymentIntentId(), context.merchantId(),

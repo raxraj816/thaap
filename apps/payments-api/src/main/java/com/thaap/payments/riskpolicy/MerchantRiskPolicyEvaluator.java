@@ -1,5 +1,7 @@
 package com.thaap.payments.riskpolicy;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.fraud.FeatureValue;
@@ -46,8 +48,7 @@ public class MerchantRiskPolicyEvaluator {
     public MerchantRiskConfiguration loadConfiguration(UUID merchantId, Instant evaluatedAt) {
         Merchant merchant = merchantRepository.findByIdForRiskControlRead(merchantId)
                 .filter(Merchant::isActive)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                        "Active merchant is required for risk evaluation"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.RISK_EVALUATION_MERCHANT_INACTIVE, "Active merchant is required for risk evaluation"));
         List<ProfileRow> profiles = jdbcTemplate.query("""
                 SELECT profile.id, profile.risk_tier
                   FROM merchant_risk_profile_versions profile

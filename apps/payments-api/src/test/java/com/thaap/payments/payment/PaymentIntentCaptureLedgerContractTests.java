@@ -156,8 +156,9 @@ class PaymentIntentCaptureLedgerContractTests {
         JsonNode error = capturePaymentIntentExpectingConflict(merchant, paymentIntentId,
                 "capture-invalid-state", "req-capture-invalid-state");
 
+        assertThat(error.get("error").asText()).isEqualTo("payment_intent_not_capturable");
         assertThat(error.get("message").asText())
-                .isEqualTo("PaymentIntent cannot be captured from status REQUIRES_CONFIRMATION");
+                .isEqualTo("PaymentIntent cannot be captured from its current status");
         assertThat(statusFor(paymentIntentId)).isEqualTo("REQUIRES_CONFIRMATION");
         assertThat(countRows("ledger_entries")).isZero();
     }
@@ -180,10 +181,12 @@ class PaymentIntentCaptureLedgerContractTests {
         JsonNode threeDsError = capturePaymentIntentExpectingConflict(merchant, threeDsPaymentIntentId,
                 "capture-3ds", "req-capture-3ds");
 
+        assertThat(declinedError.get("error").asText()).isEqualTo("payment_intent_not_capturable");
+        assertThat(threeDsError.get("error").asText()).isEqualTo("payment_intent_not_capturable");
         assertThat(declinedError.get("message").asText())
-                .isEqualTo("PaymentIntent cannot be captured from status REQUIRES_PAYMENT_METHOD");
+                .isEqualTo("PaymentIntent cannot be captured from its current status");
         assertThat(threeDsError.get("message").asText())
-                .isEqualTo("PaymentIntent cannot be captured from status REQUIRES_ACTION");
+                .isEqualTo("PaymentIntent cannot be captured from its current status");
         assertThat(countRows("ledger_entries")).isZero();
     }
 

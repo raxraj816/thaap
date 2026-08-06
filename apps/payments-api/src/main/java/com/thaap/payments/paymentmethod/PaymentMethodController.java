@@ -1,5 +1,7 @@
 package com.thaap.payments.paymentmethod;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.customer.CustomerRepository;
 import com.thaap.payments.idempotency.IdempotencyService;
 import com.thaap.payments.security.CorrelationValueHasher;
@@ -57,11 +59,11 @@ public class PaymentMethodController {
         requestRateLimitService.enforce(RateLimitOperation.PAYMENT_METHOD_CREATE,
                 merchantContext, idempotencyKey, clientIp);
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
+            throw new PublicApiException(PublicApiErrorDescriptor.CUSTOMER_NOT_FOUND, "Customer was not found for merchant");
         }
         String normalizedCard = request.cardNumber().replace(" ", "");
         if (!normalizedCard.matches("[0-9]{12,19}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Card number must contain 12 to 19 digits");
+            throw new PublicApiException(PublicApiErrorDescriptor.CARD_NUMBER_INVALID, "Card number must contain 12 to 19 digits");
         }
         PaymentMethod paymentMethod = paymentMethodRepository.save(new PaymentMethod(merchantContext.merchantId(),
                 request.customerId(), "pm_tok_" + UUID.randomUUID().toString().replace("-", ""),

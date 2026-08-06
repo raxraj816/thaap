@@ -93,6 +93,22 @@ echo "Checking durable executable artifact naming..."
 scripts/executable-artifact-naming-check.py
 
 echo
+echo "Checking typed public API error boundaries..."
+scripts/public-api-error-contract-check.py
+
+echo
+echo "Checking public contract route, credential and schema boundaries..."
+scripts/openapi-contract-check.py
+
+echo
+echo "Checking public contract backward compatibility..."
+scripts/openapi-compatibility-check.py
+
+echo
+echo "Checking supported Python SDK scope boundaries..."
+scripts/python-sdk-scope-check.py
+
+echo
 echo "Checking chapter invariant-to-proof traceability..."
 if [[ -n "$invariant_matrix" ]]; then
   scripts/invariant-proof-check.py "$invariant_matrix"

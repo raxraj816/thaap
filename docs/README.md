@@ -37,19 +37,14 @@ one product set. All Chapter 44–52 pre-implementation contracts are
 plan, and all dossiers recommend `MERGE`.
 Phase 5 implementation status: COMPLETE
 The Phase 6 detailed plan was founder-confirmed on 2026-08-02 and freezes
-Chapters 53–59. Its source-reconciled investigation, timeline/relationship,
+Chapters 53-59. Its source-reconciled investigation, timeline/relationship,
 saved-view/bulk-workflow, insight, API contract, SDK, and integrated-trust
-decisions are now the implementation promise. All Chapter 53–59
-`PRE_IMPLEMENTATION` matrices are frozen and all matching closure dossiers are
-open as `IN_PROGRESS` / `DO_NOT_MERGE`. Chapter 53 and Chapter 57 are the
-dependency-ready implementation entries; implementation evidence is not yet
-complete.
-The
-vision coverage matrix registers 23 product promises and rebaselines Phases
-6–10 so later work extends current product truth rather than duplicating Phase
-4.5 capabilities. The founder-confirmed destination is a hosted merchant-facing
-fraud/risk platform integrating initially with existing PSPs; the V1 simulator
-remains its honest proving ground and permanent regression environment.
+decisions are implemented and proven. Every Chapter 53-59 matrix is
+`FROZEN`/`VERIFIED`/all-`PASS`, every dossier recommends `MERGE`, and the public
+contract, generated client, migrations, routed workspace, and both public
+journeys are reconciled.
+
+Phase 6 implementation status: COMPLETE
 
 ## Companion Docs
 

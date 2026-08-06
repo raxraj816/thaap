@@ -3580,10 +3580,27 @@ typed saved views, restart-safe bounded bulk review assignment, denominator-
 honest insights, routed/accessibility-tested UI, date-versioned OpenAPI, stable
 errors, and one supported Python sandbox SDK. Its twenty decisions were
 founder-confirmed as one coherent product set before production code or V86.
-All Chapter 53–59 matrices are now frozen `PRE_IMPLEMENTATION` proof contracts
-with open `IN_PROGRESS` / `DO_NOT_MERGE` dossiers; implementation evidence
-remains pending. Chapter 53 and Chapter 57 are the first dependency-ready
-entries.
+All Chapter 53–59 matrices are frozen `PRE_IMPLEMENTATION` proof contracts, and
+every one of them is now `VERIFIED` with every row `PASS`. Chapter 53 is
+complete. Chapter 54 is complete. Chapter 55 is complete. Chapter 56 is
+complete. Chapter 57 is complete: the `Thaap-Version` resolver, stable error
+catalogue, and generated 125-path/133-operation contract hold on executed
+evidence, with the published credential boundary derived from the handlers that
+enforce it. Chapter 58 is complete: the supported Python sandbox SDK regenerates
+byte-stably from the committed contract, installs offline into a clean
+environment, and completes the published zero-source-reading journey as an
+executed test. Chapter 59 is complete: the integrated journeys, phase-wide
+contract inventory, fresh `V1→V91` and retained `V85→V91` migrations,
+accessibility, observability, and recovery are reconciled. Every dossier
+recommends `MERGE`.
+
+The temporally later hostile pass recorded three escaped findings — `ER-0096`,
+`ER-0097` and `ER-0098` — all resolved. Two shared one root cause worth naming:
+a gate that existed, had never been executed, and was red. Both OpenAPI gates are
+now invoked by `scripts/commit-readiness-check.sh` and covered by fixture tests
+that fail if either is removed.
+
+Phase 6 implementation status: COMPLETE
 
 Frozen chapter proof contracts:
 
@@ -3624,7 +3641,12 @@ it may not spend a phase rebuilding them under “dashboard MVP” names.
 Named owner slices:
 
 1. Chapter 53: Unified Payment Investigation And Decision Explanation
-   - Status: dependency-ready; frozen matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all rows `PASS`, dossier `MERGE`.
+   Proven by eleven named artifacts plus scope scans and a public demo. The
+   proof build found and fixed `ER-0089`, `ER-0090`, and an in-chapter
+   declared-cutoff defect in `RelatedPaymentService.related`.
+
    - Product DRI: Fraud/Risk Product.
    - Technical DRI: Risk Platform.
    - Compose one bounded repeatable-read source snapshot with Phase 5
@@ -3632,8 +3654,14 @@ Named owner slices:
      precedence winner, dependency state, and explicit model-not-configured
      truth.
 2. Chapter 54: Canonical Timeline And Safe Related-Payment Pivots
-   - Status: dependency-blocked on Chapter 53 merge-ready evidence; frozen
-     matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all rows `PASS`, dossier `MERGE`.
+   Proven by twelve named artifacts across contract, privacy, cursor, durable
+   append, relationship, tenant-isolation, HMAC, lineage, migration, API,
+   observability, and UI boundaries. The proof build promoted two previously
+   unproven durable guards and registered `TD-0006` for the navigation page
+   envelope naming split.
+
    - Product DRI: Fraud/Risk Product and Risk Operations.
    - Technical DRI: Risk Platform.
    - Security DRI: Security/Platform.
@@ -3641,9 +3669,19 @@ Named owner slices:
      pagination, separately labelled webhook evidence, V86–V87 normalized HMAC
      relationship anchors, and bounded same-merchant pivots with no raw or
      cross-tenant identity exposure.
+   - Known debt: `TD-0006` — the timeline and webhook-activity routes name their
+     row collection `entries` while the related-payment route names it `data`.
+     Uniformity is deferred to the Chapter 59 public contract freeze.
 3. Chapter 55: Investigation Saved Views And Bounded Bulk Review Assignment
-   - Status: dependency-blocked on Chapters 53–54 merge-ready evidence; frozen
-     matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all thirteen rows `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`. Typed saved views and bounded bulk assignment are
+   proven by fenced single-transaction item atomicity, forced PostgreSQL lock
+   contention observed through `pg_stat_activity`, restart from durable item
+   truth without reapplying a completed assignment, V88–V90 constraint and
+   retained-history evidence, a stuck-lease backlog signal, and a public demo
+   whose run ends `PARTIAL` with per-item `SUCCEEDED`/`STALE`/`NOT_FOUND`. The
+   proof build filed `ER-0095` after a second container-exhaustion recurrence.
    - Product DRI: Risk Operations.
    - Technical DRI: Risk Platform.
    - Supporting DRIs: Product Design and Security/Platform.
@@ -3652,8 +3690,14 @@ Named owner slices:
      per-item truth, live-actor checks, fencing, partial completion, and no
      bulk resolution, label, money, dispute, or control action.
 4. Chapter 56: Queue Productivity And Decision/Business Insights
-   - Status: dependency-blocked on Chapter 55 merge-ready evidence; frozen
-     matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all twelve rows `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`. Distribution and money reconcile against the
+   projection, review activity against durable assignment events, and a
+   tenant-free drill-through reproduces exactly its own segment. V91 adds only
+   tenant-leading indexes whose reachability is measured on real PostgreSQL. The
+   proof build recorded one honest limit: plans are measured on fixture-sized
+   data, so they prove reachability rather than latency at scale.
    - Product DRI: Risk Operations and Product Design.
    - Technical DRI: Risk Platform and Data Platform.
    - Use active Phase 5 projections for outcome insights and authoritative
@@ -3661,7 +3705,16 @@ Named owner slices:
      exact numerator/denominator/unknown partitions, origin policy, partial
      coverage, role filtering, and currency-separated money.
 5. Chapter 57: Versioned OpenAPI And Stable Error Contract
-   - Status: dependency-ready; frozen matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all twelve rows `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`. The generated `2026-08-01` contract publishes 125
+   paths and 133 operations, is byte-identical to what the server serves, and
+   passes lint, semantic diff, and a breaking-change negative fixture. The later
+   hostile pass filed `ER-0098`: `openapi-contract-check.sh` had never been wired
+   into the readiness gate and was red, because both the contract and the check
+   generalised over a path prefix instead of the enforcement point. The published
+   credential requirement is now derived from `@RequiresScenarioRunner` on the
+   handlers.
    - Product DRI: Developer Experience.
    - Technical DRI: Payments Core.
    - Supporting DRIs: Risk Platform and Security/Platform.
@@ -3669,8 +3722,15 @@ Named owner slices:
      guidance, generated/committed OpenAPI, public/internal route partition,
      safe examples, and mature lint/regeneration/semantic-diff gates.
 6. Chapter 58: Supported Python SDK And Sandbox Onboarding
-   - Status: dependency-blocked on Chapter 57 merge-ready evidence; frozen
-     matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all twelve rows `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`. The SDK regenerates byte-stably from the committed
+   contract, installs offline into a clean environment with `--no-index`, and runs
+   its suite from the installed package. The published quickstart executes as a
+   test, so documentation cannot drift from the client. The later hostile pass
+   filed `ER-0096` (a never-executed regeneration gate hiding a stale client that
+   silently dropped the synthetic-traffic qualifier) and `ER-0097` (a safe
+   exception still reaching the raw response body through `__context__`).
    - Product DRI: Developer Experience.
    - Technical DRI: Payments Core.
    - Security DRI: Security/Platform.
@@ -3678,14 +3738,24 @@ Named owner slices:
      transport/auth/webhook wrapper, and prove a clean-install, zero-source-
      reading payment-risk/webhook/analytics journey.
 7. Chapter 59: Workspace Trust And Integrated Phase 6 Closure
-   - Status: dependency-blocked on Chapters 53–58 merge-ready evidence; frozen
-     matrix; implementation not started.
+
+   Status: complete. Matrix `VERIFIED`, all thirteen rows `PASS`, dossier
+   `READY_TO_MERGE`/`MERGE`. Both public journeys run from published artifacts
+   alone, the phase-wide contract inventory ties the shipped client's stamped
+   digest to the committed contract, fresh `V1→V91` and retained `V85→V91` are
+   green, and `scripts/phase-closure-check.py --phase-6` reconciles every matrix,
+   dossier, artifact and completion marker. `TD-0006` was resolved at the trigger
+   it named rather than deferred again.
    - Primary DRI: Founding Staff Engineering.
    - Supporting DRIs: all Phase 6 product and technical owners.
    - Prove role/accessibility, memory-only credentials, loading/empty/partial/
      stale/permission/dependency/conflict states, safe routing/links, tenant
      isolation, fresh/retained V91, OpenAPI/SDK drift protection, and both
      public workflows together.
+   - Inherited debt: `TD-0006` is `RESOLVED`. Every cursor-paged investigation
+     surface publishes its rows as `data` with a nullable `nextCursor`, a
+     contract test asserts the single name rather than tolerating either, and
+     `thaap_sdk.iterate_rows` pages every route unmodified.
 
 Proposed dependency sequence:
 

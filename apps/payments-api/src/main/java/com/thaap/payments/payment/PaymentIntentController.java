@@ -1,5 +1,7 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.authentication.AuthenticationChallengeService;
 import com.thaap.payments.authentication.AuthenticationChallengeSource;
@@ -214,7 +216,7 @@ public class PaymentIntentController {
     protected ResponseEntity<PaymentIntentResponse> createPaymentIntentOnce(MerchantContext merchantContext,
             CreatePaymentIntentRequest request, String requestId) {
         if (!customerRepository.existsByIdAndMerchantId(request.customerId(), merchantContext.merchantId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer was not found for merchant");
+            throw new PublicApiException(PublicApiErrorDescriptor.CUSTOMER_NOT_FOUND, "Customer was not found for merchant");
         }
         PaymentIntent paymentIntent = paymentIntentRepository.save(new PaymentIntent(merchantContext.merchantId(),
                 request.customerId(), request.amount(), request.currency(), request.normalizedCaptureMethod(),
@@ -252,13 +254,13 @@ public class PaymentIntentController {
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_CONFIRMATION
                 && paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_PAYMENT_METHOD) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "PaymentIntent is not confirmable");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CONFIRMABLE, "PaymentIntent is not confirmable");
         }
         PaymentMethod paymentMethod = paymentMethodRepository
                 .findByIdAndMerchantId(request.paymentMethodId(), merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentMethod was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_METHOD_NOT_FOUND, "PaymentMethod was not found"));
         if (!paymentMethod.getCustomerId().equals(paymentIntent.getCustomerId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentMethod was not found for PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_PAYMENT_METHOD_NOT_FOUND, "PaymentMethod was not found for PaymentIntent");
         }
 
         int attemptNumber = paymentAttemptRepository.maxAttemptNumber(merchantContext.merchantId(), id) + 1;
@@ -497,8 +499,7 @@ public class PaymentIntentController {
             paymentAttempt.markRequiresAction(authorization.getProcessorReferenceId());
             paymentIntent.markRequiresActionAfterProcessorStepUp();
         } else {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Processor authorization status is not supported: " + authorization.getStatus());
+            throw new PublicApiException(PublicApiErrorDescriptor.PROCESSOR_AUTHORIZATION_STATUS_UNSUPPORTED, "Processor authorization status is not supported: " + authorization.getStatus());
         }
         log.info("payment_intents.confirm processor result applied merchantId={} paymentIntentId={} "
                         + "paymentAttemptId={} authorizationId={} status={} responseCode={}",
@@ -541,12 +542,10 @@ public class PaymentIntentController {
         PaymentIntent paymentIntent = loadPaymentIntentForUpdate(merchantContext, id);
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (startingStatus != PaymentIntentStatus.REQUIRES_CAPTURE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be captured from status " + startingStatus);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CAPTURABLE, "PaymentIntent cannot be captured from status " + startingStatus);
         }
         if (paymentIntent.getCaptureMethod() != CaptureMethod.MANUAL) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Only MANUAL PaymentIntents can use the capture endpoint");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_CAPTURE_METHOD_INVALID, "Only MANUAL PaymentIntents can use the capture endpoint");
         }
         Authorization authorization = latestApprovedAuthorization(merchantContext, id);
         DomainEventActor eventActor = paymentDomainEventService.merchantActor(merchantContext);
@@ -560,20 +559,17 @@ public class PaymentIntentController {
             DomainEventActor eventActor, UUID causationEventId) {
         PaymentIntentStatus startingStatus = paymentIntent.getStatus();
         if (startingStatus != PaymentIntentStatus.REQUIRES_CAPTURE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent cannot be captured from status " + startingStatus);
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CAPTURABLE, "PaymentIntent cannot be captured from status " + startingStatus);
         }
         if (authorizationVoidRepository.existsByAuthorizationIdAndMerchantId(authorization.getId(),
                 merchantContext.merchantId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Approved authorization has been voided");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHORIZATION_VOIDED, "Approved authorization has been voided");
         }
         if (!authorization.getCurrency().equals(paymentIntent.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Approved authorization currency does not match PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHORIZATION_CURRENCY_MISMATCH, "Approved authorization currency does not match PaymentIntent");
         }
         if (authorization.getAuthorizedAmount() != paymentIntent.getAmount()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Approved authorization amount does not match PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.AUTHORIZATION_AMOUNT_MISMATCH, "Approved authorization amount does not match PaymentIntent");
         }
         LedgerService.CaptureLedgerResult ledgerResult = ledgerService.recordCapture(merchantContext.merchantId(),
                 paymentIntent.getId(), authorization.getAuthorizedAmount(), authorization.getCurrency());
@@ -622,16 +618,13 @@ public class PaymentIntentController {
                             merchantContext.merchantId(), ManualReviewCaseStatus.OPEN)
                     .or(() -> manualReviewCaseRepository.findByPaymentIntentIdAndMerchantIdAndStatus(
                             paymentIntent.getId(), merchantContext.merchantId(), ManualReviewCaseStatus.ASSIGNED))
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                            "PaymentIntent review case is not active"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_REVIEW_CASE_INACTIVE, "PaymentIntent review case is not active"));
             PaymentAttempt reviewAttempt = paymentAttemptRepository.findByIdAndMerchantIdForUpdate(
                             reviewCandidate.getPaymentAttemptId(), merchantContext.merchantId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                            "PaymentIntent review attempt was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_REVIEW_ATTEMPT_MISSING, "PaymentIntent review attempt was not found"));
             reviewCase = manualReviewCaseRepository.findByIdAndMerchantIdForUpdate(
                             reviewCandidate.getId(), merchantContext.merchantId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                            "PaymentIntent review case was not found"));
+                    .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_REVIEW_CASE_MISSING, "PaymentIntent review case was not found"));
             reviewAttempt.cancelFromReview();
             canceledReviewAttempt = reviewAttempt;
             reviewCase.cancelByMerchant();
@@ -686,8 +679,7 @@ public class PaymentIntentController {
                         paymentIntentId, PaymentAttemptStatus.AUTHORIZED, AuthorizationStatus.APPROVED)
                 .stream()
                 .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                        "PaymentIntent does not have an approved authorization to capture"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_CAPTURE_AUTHORIZATION_MISSING, "PaymentIntent does not have an approved authorization to capture"));
     }
 
     private void recordCaptureAuditLog(MerchantContext merchantContext, String requestId,
@@ -746,12 +738,12 @@ public class PaymentIntentController {
 
     private PaymentIntent loadPaymentIntent(MerchantContext merchantContext, UUID id) {
         return paymentIntentRepository.findByIdAndMerchantId(id, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentIntent was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_FOUND, "PaymentIntent was not found"));
     }
 
     private PaymentIntent loadPaymentIntentForUpdate(MerchantContext merchantContext, UUID id) {
         return paymentIntentRepository.findByIdAndMerchantIdForUpdate(id, merchantContext.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PaymentIntent was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_FOUND, "PaymentIntent was not found"));
     }
 
     public record CreatePaymentIntentRequest(

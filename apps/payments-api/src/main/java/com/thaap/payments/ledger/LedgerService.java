@@ -1,5 +1,7 @@
 package com.thaap.payments.ledger;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -20,8 +22,7 @@ public class LedgerService {
         List<LedgerEntry> existingEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(merchantId,
                 LedgerSourceType.PAYMENT_INTENT_CAPTURE, paymentIntentId);
         if (!existingEntries.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Capture ledger entries already exist for PaymentIntent");
+            throw new PublicApiException(PublicApiErrorDescriptor.CAPTURE_LEDGER_ALREADY_POSTED, "Capture ledger entries already exist for PaymentIntent");
         }
 
         UUID transactionGroupId = UUID.randomUUID();
@@ -43,8 +44,7 @@ public class LedgerService {
         List<LedgerEntry> existingRefundEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(
                 merchantId, LedgerSourceType.REFUND, refundId);
         if (!existingRefundEntries.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Refund ledger entries already exist for Refund");
+            throw new PublicApiException(PublicApiErrorDescriptor.REFUND_LEDGER_ALREADY_POSTED, "Refund ledger entries already exist for Refund");
         }
 
         List<LedgerEntry> captureEntries = ledgerEntryRepository.findByMerchantIdAndPaymentIntentIdAndSourceType(
@@ -70,8 +70,7 @@ public class LedgerService {
         List<LedgerEntry> existingEntries = ledgerEntryRepository.findByMerchantIdAndSourceTypeAndSourceId(
                 merchantId, LedgerSourceType.CHARGEBACK, chargebackId);
         if (!existingEntries.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Chargeback ledger entries already exist for Chargeback");
+            throw new PublicApiException(PublicApiErrorDescriptor.CHARGEBACK_LEDGER_ALREADY_POSTED, "Chargeback ledger entries already exist for Chargeback");
         }
         List<LedgerEntry> captureEntries = ledgerEntryRepository.findByMerchantIdAndPaymentIntentIdAndSourceType(
                 merchantId, paymentIntentId, LedgerSourceType.PAYMENT_INTENT_CAPTURE);
@@ -91,17 +90,16 @@ public class LedgerService {
 
     private void requirePositiveAmountAndCurrency(long amount, String currency, String operation) {
         if (amount <= 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, operation + " amount must be positive");
+            throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_AMOUNT_INVALID, operation + " amount must be positive");
         }
         if (currency == null || currency.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, operation + " currency is required");
+            throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_CURRENCY_REQUIRED, operation + " currency is required");
         }
     }
 
     private UUID requireValidCaptureLedger(List<LedgerEntry> entries, long amount, String currency) {
         if (entries.size() != 2) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent does not have complete capture ledger evidence");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_CAPTURE_LEDGER_EVIDENCE_MISSING, "PaymentIntent does not have complete capture ledger evidence");
         }
         requireBalanced(entries);
         UUID transactionGroupId = entries.get(0).getTransactionGroupId();
@@ -110,8 +108,7 @@ public class LedgerService {
         boolean merchantPayableCredit = false;
         for (LedgerEntry entry : entries) {
             if (entry.getAmount() != amount || !entry.getCurrency().equals(normalizedCurrency)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Capture ledger amount or currency does not match Refund");
+                throw new PublicApiException(PublicApiErrorDescriptor.REFUND_CAPTURE_LEDGER_MISMATCH, "Capture ledger amount or currency does not match Refund");
             }
             if (entry.getAccount() == LedgerAccount.CUSTOMER_RECEIVABLE
                     && entry.getDirection() == LedgerDirection.DEBIT) {
@@ -123,15 +120,14 @@ public class LedgerService {
             }
         }
         if (!customerReceivableDebit || !merchantPayableCredit) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "PaymentIntent capture ledger postings are incomplete");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_CAPTURE_LEDGER_INCOMPLETE, "PaymentIntent capture ledger postings are incomplete");
         }
         return transactionGroupId;
     }
 
     private void requireBalanced(List<LedgerEntry> entries) {
         if (entries.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ledger transaction group cannot be empty");
+            throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_TRANSACTION_GROUP_EMPTY, "Ledger transaction group cannot be empty");
         }
         String currency = entries.get(0).getCurrency();
         UUID merchantId = entries.get(0).getMerchantId();
@@ -140,16 +136,14 @@ public class LedgerService {
         long credits = 0L;
         for (LedgerEntry entry : entries) {
             if (entry.getAmount() <= 0) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Ledger entry amount must be positive");
+                throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_ENTRY_AMOUNT_INVALID, "Ledger entry amount must be positive");
             }
             if (!entry.getCurrency().equals(currency)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Ledger transaction group must use one currency");
+                throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_TRANSACTION_GROUP_CURRENCY_MISMATCH, "Ledger transaction group must use one currency");
             }
             if (!entry.getMerchantId().equals(merchantId)
                     || !entry.getTransactionGroupId().equals(transactionGroupId)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Ledger transaction group must share merchant and transaction group");
+                throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_TRANSACTION_GROUP_SCOPE_MISMATCH, "Ledger transaction group must share merchant and transaction group");
             }
             if (entry.getDirection() == LedgerDirection.DEBIT) {
                 debits += entry.getAmount();
@@ -158,7 +152,7 @@ public class LedgerService {
             }
         }
         if (debits != credits) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ledger transaction group is not balanced");
+            throw new PublicApiException(PublicApiErrorDescriptor.LEDGER_TRANSACTION_GROUP_UNBALANCED, "Ledger transaction group is not balanced");
         }
     }
 

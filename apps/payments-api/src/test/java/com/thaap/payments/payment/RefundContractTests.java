@@ -438,8 +438,16 @@ class RefundContractTests {
 
     private void assertRefundStateConflict(MerchantAccess merchant, UUID paymentIntentId, long amount,
             String idempotencyKey, String statusName) throws Exception {
+        // The public message no longer echoes the status, so the precondition is proven
+        // against durable state rather than against prose the client must not parse.
+        String persistedStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM payment_intents WHERE id = ?", String.class, paymentIntentId);
+        assertThat(persistedStatus).isEqualTo(statusName);
         assertRefundConflict(merchant, paymentIntentId, amount, idempotencyKey,
-                "PaymentIntent cannot be refunded from status " + statusName);
+                "PaymentIntent cannot be refunded from its current status");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM payment_intents WHERE id = ?", String.class, paymentIntentId))
+                .isEqualTo(statusName);
     }
 
     private void assertRefundResponse(JsonNode refund, UUID merchantId, UUID paymentIntentId, UUID paymentAttemptId,

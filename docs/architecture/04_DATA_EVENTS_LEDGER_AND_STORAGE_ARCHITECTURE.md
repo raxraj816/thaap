@@ -962,8 +962,15 @@ V86–V87 are frozen to normalize only already-safe same-merchant correlation
 HMAC aliases into tenant/source-qualified investigation anchors. These rows are
 an immutable lookup child of the original payment/risk lineage, never a fraud
 input or cross-merchant graph. The API returns relation reason codes, not HMACs
-or raw values. V88–V90 are proposed for typed investigation saved views and
+or raw values. V88–V90 add typed investigation saved views and
 restart-safe bounded bulk-assignment evidence; V91 is limited to measured query
-support. The 2026-08-02 founder promise freeze has a pre-implementation proof
-contract for every Chapter 53–59 slice; Chapters 53 and 57 are the first
-dependency-ready implementation entries.
+support. All six are applied, and fresh `V1→V91` and retained `V85→V91` paths are
+proven against real PostgreSQL with repeated startup. Migrations are forward-only:
+no reverse migration exists for V86–V91, so a rollback plan that assumes Flyway can
+undo them is not a plan.
+
+The 2026-08-02 founder promise freeze had a pre-implementation proof contract for
+every Chapter 53–59 slice, and every one of them is now `VERIFIED` with all rows
+`PASS`.
+
+Phase 6 implementation status: COMPLETE

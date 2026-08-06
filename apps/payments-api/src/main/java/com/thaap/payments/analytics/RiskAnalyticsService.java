@@ -1,5 +1,7 @@
 package com.thaap.payments.analytics;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.analytics.AnalyticsCursorCodec.Cursor;
 import com.thaap.payments.analytics.AnalyticsCursorCodec.CurrencyCursor;
 import com.thaap.payments.analytics.AnalyticsCursorCodec.GenerationCursor;
@@ -127,12 +129,19 @@ public class RiskAnalyticsService {
                 """, (resultSet, rowNumber) -> paymentView(resultSet),
                 context.merchantId(), generation.generationId(), paymentIntentId);
         if (rows.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Payment analytics record was not found");
+            throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ANALYTICS_RECORD_NOT_FOUND, "Payment analytics record was not found");
         }
         return new PaymentDetail(rows.getFirst(),
                 freshness(context.merchantId(), ProjectionNames.PAYMENT_RISK,
                         generation, "ALL"));
+    }
+
+    public AnalyticsFreshness currentPaymentFreshness(RiskOperatorContext context,
+            String originPolicy) {
+        ActiveProjectionGeneration generation = definitionStore.requireActive(
+                ProjectionNames.PAYMENT_RISK);
+        return freshness(context.merchantId(), ProjectionNames.PAYMENT_RISK,
+                generation, requireOriginPolicy(originPolicy));
     }
 
     public MerchantSummary merchantSummary(RiskOperatorContext context, Instant from,
@@ -500,15 +509,13 @@ public class RiskAnalyticsService {
         try {
             return Enum.valueOf(type, normalized).name();
         } catch (IllegalArgumentException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Analytics " + label + " filter is invalid");
+            throw new PublicApiException(PublicApiErrorDescriptor.ANALYTICS_FILTER_INVALID, "Analytics " + label + " filter is invalid");
         }
     }
 
     private int requireLimit(int limit) {
         if (limit < 1 || limit > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Analytics page size must be between 1 and 100");
+            throw new PublicApiException(PublicApiErrorDescriptor.ANALYTICS_PAGE_SIZE_INVALID, "Analytics page size must be between 1 and 100");
         }
         return limit;
     }
@@ -524,8 +531,7 @@ public class RiskAnalyticsService {
                 || (!defaultTo && normalizedTo.isAfter(now))
                 || !normalizedFrom.equals(normalizedFrom.truncatedTo(unit))
                 || !normalizedTo.equals(normalizedTo.truncatedTo(unit))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Analytics time range is invalid, unaligned, or exceeds 90 days");
+            throw new PublicApiException(PublicApiErrorDescriptor.ANALYTICS_TIME_RANGE_INVALID, "Analytics time range is invalid, unaligned, or exceeds 90 days");
         }
         return new TimeRange(normalizedFrom, normalizedTo);
     }
@@ -533,8 +539,7 @@ public class RiskAnalyticsService {
     private String requireOriginPolicy(String policy) {
         String normalized = policy == null ? "ALL" : policy.trim().toUpperCase();
         if (!List.of("ALL", "LIVE_ONLY", "SYNTHETIC_ONLY").contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Traffic-origin policy is invalid");
+            throw new PublicApiException(PublicApiErrorDescriptor.TRAFFIC_ORIGIN_POLICY_INVALID, "Traffic-origin policy is invalid");
         }
         return normalized;
     }
@@ -542,8 +547,7 @@ public class RiskAnalyticsService {
     private String requireInterval(String interval) {
         String normalized = interval == null ? "HOUR" : interval.trim().toUpperCase();
         if (!"HOUR".equals(normalized) && !"DAY".equals(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Analytics interval must be HOUR or DAY");
+            throw new PublicApiException(PublicApiErrorDescriptor.ANALYTICS_INTERVAL_INVALID, "Analytics interval must be HOUR or DAY");
         }
         return normalized;
     }

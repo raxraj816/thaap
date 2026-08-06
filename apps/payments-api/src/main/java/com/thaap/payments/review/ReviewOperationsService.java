@@ -1,5 +1,7 @@
 package com.thaap.payments.review;
 
+import com.thaap.payments.api.PublicApiErrorDescriptor;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.authentication.AuthenticationChallengeService;
 import com.thaap.payments.authentication.AuthenticationChallengeSource;
@@ -125,8 +127,7 @@ public class ReviewOperationsService {
         RiskOperator target = operatorRepository.findByIdAndMerchantIdForUpdate(targetOperatorId, context.merchantId())
                 .filter(RiskOperator::isActive)
                 .filter(operator -> operator.getRole() != RiskOperatorRole.VIEWER)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Review or target operator was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.REVIEW_OR_OPERATOR_NOT_FOUND, "Review or target operator was not found"));
         ManualReviewCase reviewCase = lockReview(context, reviewCaseId);
         if (reviewCase.getStatus() == ManualReviewCaseStatus.ASSIGNED
                 && actor.getRole() != RiskOperatorRole.RISK_MANAGER) {
@@ -179,8 +180,7 @@ public class ReviewOperationsService {
         requireRole(actor, RiskOperatorRole.ANALYST, RiskOperatorRole.RISK_MANAGER);
         ManualReviewCase reviewCase = lockReview(context, reviewCaseId);
         if (reviewCase.getStatus() != ManualReviewCaseStatus.ASSIGNED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Review must be assigned before annotation");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_NOT_ASSIGNED, "Review must be assigned before annotation");
         }
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER
                 && !actor.getId().equals(reviewCase.getAssignedOperatorId())) {
@@ -203,8 +203,7 @@ public class ReviewOperationsService {
         requireRole(actor, RiskOperatorRole.ANALYST, RiskOperatorRole.RISK_MANAGER);
         ManualReviewCaseRepository.PaymentLineage candidate = reviewCaseRepository
                 .findPaymentLineageByIdAndMerchantId(reviewCaseId, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "ManualReviewCase was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.MANUAL_REVIEW_CASE_NOT_FOUND, "ManualReviewCase was not found"));
         PaymentIntent paymentIntent = paymentIntentRepository.findByIdAndMerchantIdForUpdate(
                         candidate.getPaymentIntentId(), context.merchantId())
                 .orElseThrow(() -> lineageConflict("PaymentIntent"));
@@ -241,14 +240,12 @@ public class ReviewOperationsService {
         if (reviewCase.getReviewStage() == ReviewStage.PRE_AUTHORIZATION
                 && (paymentIntent.getStatus() != PaymentIntentStatus.REQUIRES_REVIEW
                     || paymentAttempt.getStatus() != PaymentAttemptStatus.IN_REVIEW)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Review payment lineage is no longer resolvable");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_PAYMENT_LINEAGE_UNRESOLVABLE, "Review payment lineage is no longer resolvable");
         }
         if (reviewCase.getReviewStage() == ReviewStage.POST_AUTHORIZATION
                 && paymentIntent.getStatus() != PaymentIntentStatus.CAPTURED
                 && paymentIntent.getStatus() != PaymentIntentStatus.REFUNDED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Post-authorization review payment lineage is no longer resolvable");
+            throw new PublicApiException(PublicApiErrorDescriptor.POST_AUTHORIZATION_REVIEW_LINEAGE_UNRESOLVABLE, "Post-authorization review payment lineage is no longer resolvable");
         }
         if (actor.getRole() != RiskOperatorRole.RISK_MANAGER
                 && !actor.getId().equals(reviewCase.getAssignedOperatorId())) {
@@ -388,14 +385,12 @@ public class ReviewOperationsService {
     private RiskOperator requireMutableActor(RiskOperatorContext context) {
         return operatorRepository.findByIdAndMerchantIdForUpdate(context.operatorId(), context.merchantId())
                 .filter(RiskOperator::isActive)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Risk resource was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.RISK_RESOURCE_NOT_FOUND, "Risk resource was not found"));
     }
 
     private ManualReviewCase lockReview(RiskOperatorContext context, UUID reviewCaseId) {
         return reviewCaseRepository.findByIdAndMerchantIdForUpdate(reviewCaseId, context.merchantId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "ManualReviewCase was not found"));
+                .orElseThrow(() -> new PublicApiException(PublicApiErrorDescriptor.MANUAL_REVIEW_CASE_NOT_FOUND, "ManualReviewCase was not found"));
     }
 
     private void requireRole(RiskOperator operator, RiskOperatorRole... roles) {
@@ -408,12 +403,11 @@ public class ReviewOperationsService {
     }
 
     private void forbidden() {
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Risk resource was not found");
+        throw new PublicApiException(PublicApiErrorDescriptor.RISK_RESOURCE_NOT_FOUND, "Risk resource was not found");
     }
 
     private ResponseStatusException lineageConflict(String resource) {
-        return new ResponseStatusException(HttpStatus.CONFLICT,
-                "Review " + resource + " lineage was not found");
+        return new PublicApiException(PublicApiErrorDescriptor.REVIEW_LINEAGE_MISSING, "Review " + resource + " lineage was not found");
     }
 
     private void validateResolutionSemantics(ManualReviewCase reviewCase, RiskOperator actor,
@@ -462,32 +456,28 @@ public class ReviewOperationsService {
         if (outcome == ReviewResolutionOutcome.CANCEL
                 && (classification != ReviewClassification.INCONCLUSIVE || fraudType != null
                     || reasonCode != ReviewResolutionReasonCode.RISK_TOO_HIGH)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "CANCEL requires INCONCLUSIVE classification, no fraudType, and RISK_TOO_HIGH reason");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_CANCEL_OUTCOME_INVALID, "CANCEL requires INCONCLUSIVE classification, no fraudType, and RISK_TOO_HIGH reason");
         }
         if (outcome == ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD
                 && (classification != ReviewClassification.CONFIRMED_FRAUD || fraudType == null
                     || !reasonMatchesFraudType(fraudType, reasonCode))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "CANCEL_AND_REPORT_FRAUD requires matching confirmed fraud type and reason");
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_FRAUD_CANCELLATION_OUTCOME_INVALID, "CANCEL_AND_REPORT_FRAUD requires matching confirmed fraud type and reason");
         }
         if (outcome == ReviewResolutionOutcome.APPROVE
                 && ((classification != ReviewClassification.INCONCLUSIVE
                         && classification != ReviewClassification.CONFIRMED_LEGITIMATE)
                     || fraudType != null
                     || reasonCode != ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "APPROVE requires INCONCLUSIVE or CONFIRMED_LEGITIMATE, no fraudType, "
+            throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_APPROVE_OUTCOME_INVALID, "APPROVE requires INCONCLUSIVE or CONFIRMED_LEGITIMATE, no fraudType, "
                             + "and MANUAL_REVIEW_APPROVED reason");
         }
         if (evidenceOccurredAt == null || evidenceOccurredAt.isAfter(clock.instant())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "evidenceOccurredAt must not be in the future");
+            throw new PublicApiException(PublicApiErrorDescriptor.SIGNAL_EVIDENCE_OCCURRED_AT_IN_FUTURE, "evidenceOccurredAt must not be in the future");
         }
     }
 
     private void badRequest(String message) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        throw new PublicApiException(PublicApiErrorDescriptor.REVIEW_REQUEST_INVALID, message);
     }
 
     private boolean reasonMatchesFraudType(FraudType fraudType, ReviewResolutionReasonCode reasonCode) {
@@ -527,8 +517,7 @@ public class ReviewOperationsService {
             paymentAttempt.markRequiresAction(authorization.getProcessorReferenceId());
             paymentIntent.markRequiresActionAfterProcessorStepUp();
         } else {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Processor authorization status is not supported: " + authorization.getStatus());
+            throw new PublicApiException(PublicApiErrorDescriptor.PROCESSOR_AUTHORIZATION_STATUS_UNSUPPORTED, "Processor authorization status is not supported: " + authorization.getStatus());
         }
     }
 
