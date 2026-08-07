@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Extended-regex search that does not require ripgrep.
+#
+# This gate used to call `rg` directly and exited 1 wherever ripgrep was absent — including
+# development shells where `rg` exists only as a shell function, which a non-interactive script
+# never inherits. The failure looked like a readiness violation and was really a missing tool,
+# which is worse than useless: a gate that cannot run reports the same red as a gate that caught
+# something. POSIX grep can answer this question, so it is the fallback rather than a hard
+# dependency.
+search_extended() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$file"
+  else
+    grep -nE "$pattern" "$file"
+  fi
+}
+
 date_arg=""
 deep_dive_required=false
 run_tests=false
@@ -68,9 +86,10 @@ done
 
 echo
 echo "Checking for obviously stale root README status..."
-if rg -n "Chapter 2 is complete|Chapter 3 is complete" README.md >/dev/null; then
+stale_status_pattern="Chapter 2 is complete|Chapter 3 is complete"
+if search_extended "$stale_status_pattern" README.md >/dev/null; then
   echo "STALE README.md status found:"
-  rg -n "Chapter 2 is complete|Chapter 3 is complete" README.md
+  search_extended "$stale_status_pattern" README.md
   missing=1
 else
   echo "OK README.md does not advertise stale Chapter 2/Chapter 3 status."
