@@ -289,6 +289,62 @@ class OfflineReplayDatasetSourceNonInterferencePostgreSqlTests {
     }
 
     /**
+     * The contradictory-label cohort. Two chargebacks on one payment attempt produce two labels
+     * that disagree about the fraud type, which is the shape a dataset builder is most tempted to
+     * "fix" — picking a winner and writing it back so the cohort reads cleanly. It must instead
+     * read the disagreement and leave it exactly where it found it.
+     */
+    @Test
+    void aContradictoryLabelCohortIsReadWithoutResolvingItInTheSource() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("non-interference-contradictory");
+        UUID paymentIntentId = jdbcTemplate.queryForObject("""
+                SELECT id FROM payment_intents WHERE merchant_id = ?
+                """, UUID.class, fixture.merchant().id());
+        // The contradiction that actually occurs: the decision-time judgment and the post-hoc
+        // label disagree about the same attempt. This is the ordinary shape of a fraud label —
+        // an approval that later turns out to be fraud — and it is exactly the disagreement a
+        // dataset builder must carry rather than reconcile.
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT decision.action FROM fraud_decisions decision
+                JOIN payment_attempts attempt ON attempt.id = decision.payment_attempt_id
+                WHERE attempt.payment_intent_id = ?
+                """, String.class, paymentIntentId)).isEqualTo("ALLOW");
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT label_value FROM fraud_labels WHERE merchant_id = ?
+                """, String.class, fixture.merchant().id()))
+                .describedAs("the fixture does not actually contradict its own decision")
+                .containsExactly("FRAUD");
+
+        // The other route to contradiction is closed by the product: a payment carries one
+        // chargeback, so a second contradicting chargeback label cannot be introduced at all.
+        Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        mockMvc.perform(post("/chargebacks").header(API_KEY, fixture.merchant().apiKey())
+                        .header(IDEMPOTENCY_KEY, "contradictory-second-chargeback")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"externalEventKey\":\"contradictory.second\","
+                                + "\"paymentIntentId\":\"" + paymentIntentId
+                                + "\",\"amount\":1200,\"currency\":\"USD\","
+                                + "\"reasonCode\":\"FRAUDULENT_CARD_TESTING\","
+                                + "\"evidenceOccurredAt\":\"" + receivedAt.minusSeconds(30)
+                                + "\",\"receivedAt\":\"" + receivedAt
+                                + "\",\"evidenceDueAt\":\""
+                                + receivedAt.plus(1, ChronoUnit.DAYS) + "\"}"))
+                .andExpect(status().isConflict());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM fraud_labels WHERE merchant_id = ?
+                """, Integer.class, fixture.merchant().id())).isEqualTo(1);
+
+        Map<String, String> before = quiesce();
+        UUID datasetId = createDataset(fixture, fixture.labelAvailableAt(), null,
+                "non-interference-contradictory");
+        complete(datasetId);
+        assertThat(service.get(fixture.manager().context(), datasetId).lifecycleStatus())
+                .isEqualTo(ReplayDatasetLifecycleStatus.SUCCEEDED);
+
+        assertNoSourceInterference(before, 1);
+    }
+
+    /**
      * Captures source truth and silences the fixture's own processor and webhook activity, so
      * that what is verified afterwards is what the dataset did and nothing else.
      */

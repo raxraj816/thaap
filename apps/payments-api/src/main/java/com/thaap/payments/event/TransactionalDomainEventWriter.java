@@ -17,13 +17,14 @@ public class TransactionalDomainEventWriter implements DomainEventWriter {
     private final CanonicalEventCodec codec;
     private final Clock clock;
     private final DomainEventWriterMetrics metrics;
+    private final DomainEventProducerGate producerGate;
 
     public TransactionalDomainEventWriter(EventStreamHeadRepository streamHeadRepository,
             EventStreamHeadInitializer streamHeadInitializer,
             DomainEventRepository domainEventRepository,
             EventPublicationRepository publicationRepository,
             CanonicalEventCodec codec, Clock clock,
-            DomainEventWriterMetrics metrics) {
+            DomainEventWriterMetrics metrics, DomainEventProducerGate producerGate) {
         this.streamHeadRepository = streamHeadRepository;
         this.streamHeadInitializer = streamHeadInitializer;
         this.domainEventRepository = domainEventRepository;
@@ -31,11 +32,15 @@ public class TransactionalDomainEventWriter implements DomainEventWriter {
         this.codec = codec;
         this.clock = clock;
         this.metrics = metrics;
+        this.producerGate = producerGate;
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public DomainEventWriteResult append(DomainEventCommand command) {
+        // Checked before anything is allocated or durable, so a refused emission leaves no
+        // stream head, no version burned and nothing for a consumer to see.
+        producerGate.requireEmissionAllowed(command.eventType(), command.eventVersion());
         Instant recordedAt = EventTimePrecision.toPostgreSqlMicroseconds(clock.instant());
         streamHeadInitializer.createIfAbsent(command.merchantId(), command.streamType(),
                 command.streamId(), recordedAt);

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
@@ -1251,6 +1252,159 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                   "evidenceOccurredAt":"%s"
                 }
                 """.formatted(Instant.now().minusSeconds(5));
+    }
+
+    /**
+     * Proof for the {@code C46-CON-001} remainder: the forced review-resolution ordering above
+     * proves one source truth, and this proves the event boundary underneath it tells the same
+     * story. The losing transition must leave no event, and the winning one must leave exactly
+     * the facts it actually performed, on a gap-free stream.
+     */
+    @Test
+    void forcedCompetingResolutionsEmitOneEventSequenceAndNothingFromTheLoser() throws Exception {
+        Fixture fixture = createFixture("competing-resolution-events");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "competing-events-assign");
+        OperatorAccess manager = createOperator(
+                fixture.merchant(), "competing-events-manager", "RISK_MANAGER");
+        CountDownLatch firstResolutionOwnsPaymentLock = new CountDownLatch(1);
+        CountDownLatch releaseFirstResolution = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<ReviewOperationsService.ResolutionResult> firstResolution = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).execute(transactionStatus -> {
+                        ReviewOperationsService.ResolutionResult result =
+                                reviewOperationsService.resolve(fixture.analyst().context(),
+                                        fixture.review().reviewCaseId(),
+                                        ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
+                                        ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
+                                        ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
+                                        Instant.now().minusSeconds(5), "competing-events-first");
+                        firstResolutionOwnsPaymentLock.countDown();
+                        await(releaseFirstResolution);
+                        return result;
+                    }));
+            assertThat(firstResolutionOwnsPaymentLock.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitRowLockConflict("payment_intents", fixture.review().paymentIntentId());
+            Future<ReviewOperationsService.ResolutionResult> secondResolution = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).execute(transactionStatus ->
+                            reviewOperationsService.resolve(manager.context(),
+                                    fixture.review().reviewCaseId(),
+                                    ReviewResolutionOutcome.CANCEL,
+                                    ReviewClassification.INCONCLUSIVE, null,
+                                    ReviewResolutionReasonCode.RISK_TOO_HIGH,
+                                    Instant.now().minusSeconds(5), "competing-events-second")));
+            awaitDatabaseLockWait("payment_intents");
+
+            releaseFirstResolution.countDown();
+            firstResolution.get(5, TimeUnit.SECONDS);
+            secondResolution.get(5, TimeUnit.SECONDS);
+        }
+
+        // One resolution committed, so exactly one resolved fact and one label fact exist — not
+        // two of either, and neither attributed to the operator whose transition lost. The
+        // payment lifecycle facts that precede them are the stream this review belongs to.
+        List<String> emitted = eventTypesFor(fixture.review().paymentIntentId());
+        assertThat(emitted).containsSubsequence("manual_review.assigned",
+                "manual_review.resolved", "fraud_label.recorded");
+        assertThat(emitted.stream().filter("manual_review.resolved"::equals).count()).isEqualTo(1);
+        assertThat(emitted.stream().filter("fraud_label.recorded"::equals).count()).isEqualTo(1);
+        assertThat(actorIdsFor(fixture.review().paymentIntentId(), "manual_review.resolved"))
+                .containsExactly(fixture.analyst().id().toString())
+                .doesNotContain(manager.id().toString());
+
+        // The losing transition took a stream version and rolled it back, so the surviving
+        // sequence must still be contiguous from one.
+        List<Long> versions = streamVersionsFor(fixture.review().paymentIntentId());
+        assertThat(versions).isEqualTo(java.util.stream.LongStream
+                .rangeClosed(1, versions.size()).boxed().toList());
+        assertThat(publicationCountFor(fixture.review().paymentIntentId()))
+                .isEqualTo(versions.size());
+    }
+
+    /**
+     * Proof for the {@code C46-AUTH-001} remainder. A role that may not resolve must be refused
+     * by the existing guard, and the refusal must leave no event behind — event insertion sits
+     * after authorization, so a refused mutation has nothing to emit.
+     */
+    @Test
+    void aViewerCannotResolveAndTheRefusalEmitsNoEvent() throws Exception {
+        Fixture fixture = createFixture("viewer-cannot-resolve");
+        OperatorAccess viewer = createOperator(fixture.merchant(), "viewer-resolve", "VIEWER");
+        long eventsBefore = count("domain_events");
+
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status ->
+                reviewOperationsService.resolve(viewer.context(),
+                        fixture.review().reviewCaseId(), ReviewResolutionOutcome.CANCEL,
+                        ReviewClassification.INCONCLUSIVE, null,
+                        ReviewResolutionReasonCode.RISK_TOO_HIGH,
+                        Instant.now().minusSeconds(5), "viewer-resolve-request")))
+                .isInstanceOf(PublicApiException.class);
+
+        assertThat(count("domain_events")).isEqualTo(eventsBefore);
+        assertThat(count("review_resolutions")).isZero();
+        assertThat(count("fraud_labels")).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM manual_review_cases WHERE id = ?", String.class,
+                fixture.review().reviewCaseId())).isNotEqualTo("RESOLVED");
+    }
+
+    /**
+     * Proof for the {@code C46-AUTH-001} remainder. An operator disabled after their credential
+     * was issued must not be able to resolve, and the refusal must emit nothing — authority is
+     * revalidated against live operator state rather than trusted from the caller's context.
+     */
+    @Test
+    void anOperatorDisabledAfterIssueCannotResolveAndTheRefusalEmitsNoEvent() throws Exception {
+        Fixture fixture = createFixture("disabled-cannot-resolve");
+        assign(fixture.analyst(), fixture.review().reviewCaseId(), "disabled-resolve-assign");
+        long eventsAfterAssign = count("domain_events");
+        assertThat(eventsAfterAssign).isPositive();
+
+        jdbcTemplate.update("""
+                UPDATE risk_operators SET status = 'DISABLED', disabled_at = CURRENT_TIMESTAMP,
+                    lifecycle_epoch = lifecycle_epoch + 1
+                WHERE id = ?
+                """, fixture.analyst().id());
+
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status ->
+                reviewOperationsService.resolve(fixture.analyst().context(),
+                        fixture.review().reviewCaseId(),
+                        ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
+                        ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
+                        ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
+                        Instant.now().minusSeconds(5), "disabled-resolve-request")))
+                .isInstanceOf(PublicApiException.class);
+
+        assertThat(count("domain_events")).isEqualTo(eventsAfterAssign);
+        assertThat(count("review_resolutions")).isZero();
+        assertThat(count("fraud_labels")).isZero();
+    }
+
+    private List<String> eventTypesFor(UUID streamId) {
+        return jdbcTemplate.queryForList("""
+                SELECT event_type FROM domain_events WHERE stream_id = ? ORDER BY stream_version
+                """, String.class, streamId);
+    }
+
+    private List<Long> streamVersionsFor(UUID streamId) {
+        return jdbcTemplate.queryForList("""
+                SELECT stream_version FROM domain_events WHERE stream_id = ?
+                ORDER BY stream_version
+                """, Long.class, streamId);
+    }
+
+    private List<String> actorIdsFor(UUID streamId, String eventType) {
+        return jdbcTemplate.queryForList("""
+                SELECT actor_id FROM domain_events WHERE stream_id = ? AND event_type = ?
+                """, String.class, streamId, eventType);
+    }
+
+    private int publicationCountFor(UUID streamId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM event_publications publication
+                JOIN domain_events event ON event.id = publication.domain_event_id
+                WHERE event.stream_id = ?
+                """, Integer.class, streamId);
     }
 
     private void assertTerminalTruth(ReviewFixture review, String reviewStatus,

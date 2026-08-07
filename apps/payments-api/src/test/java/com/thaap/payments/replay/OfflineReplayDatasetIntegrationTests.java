@@ -22,6 +22,12 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -183,6 +189,128 @@ class OfflineReplayDatasetIntegrationTests {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(safe).doesNotContain("4242424242424242", "point-in-time@example.test",
                 "leaseToken", "checkpointAttemptId", "featureValue");
+    }
+
+    /**
+     * Proof for the creator-side half of {@code C51-CON-001}.
+     *
+     * <p>Two risk managers create over the same cohort at the same moment, under different
+     * idempotency keys. They converge on one dataset rather than forking the cohort into two:
+     * creation serializes on a per-merchant lock and dataset identity is derived from the frozen
+     * cohort, not from who asked or when. Two datasets over one cohort would be two answers to
+     * one question, and nothing downstream could say which was authoritative.
+     */
+    @Test
+    void twoCreatorsRacingOverOneCohortConvergeOnOneWholeDataset() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("creator-race");
+        OperatorAccess second = createOperator(fixture.merchant(), "RISK_MANAGER",
+                "creator-race-second-manager");
+        String body = datasetRequest(fixture, fixture.labelAvailableAt(), null);
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<String> first = executor.submit(() ->
+                    createConcurrently(fixture.manager().secret(), body, "creator-race-a",
+                            ready, start));
+            Future<String> other = executor.submit(() ->
+                    createConcurrently(second.secret(), body, "creator-race-b", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            UUID firstDataset = UUID.fromString(objectMapper.readTree(
+                    first.get(20, TimeUnit.SECONDS)).get("datasetId").asText());
+            UUID otherDataset = UUID.fromString(objectMapper.readTree(
+                    other.get(20, TimeUnit.SECONDS)).get("datasetId").asText());
+            assertThat(otherDataset)
+                    .describedAs("one cohort must not fork into two datasets")
+                    .isEqualTo(firstDataset);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM replay_dataset_manifests", Integer.class)).isEqualTo(1);
+        // Each manifest is whole: the lock released only committed work, never a half-built row.
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM replay_dataset_manifests
+                WHERE cutoff_manifest_id IS NULL OR projection_generation_id IS NULL
+                   OR query_sha256 IS NULL OR lifecycle_status IS NULL
+                """, Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT lifecycle_status) FROM replay_dataset_manifests
+                """, Integer.class)).isEqualTo(1);
+    }
+
+    /**
+     * Proof for the cross-creator digest half of {@code C51-CON-001}.
+     *
+     * <p>A dataset is a function of its cohort and nothing else. Both managers resolve to the
+     * same dataset, and reading it as either one yields the same digest, coverage, aggregates and
+     * item-level membership. If the reader's identity could move any of those, no two datasets
+     * would ever be comparable and the equivalence apparatus would be measuring noise.
+     */
+    @Test
+    void theSameCohortReadByEitherCreatorYieldsTheSameDigestAndMembership() throws Exception {
+        ReplayFixture fixture = capturedChargebackFixture("cross-creator-digest");
+        OperatorAccess second = createOperator(fixture.merchant(), "RISK_MANAGER",
+                "cross-creator-second-manager");
+        String body = datasetRequest(fixture, fixture.labelAvailableAt(), null);
+
+        UUID firstDataset = UUID.fromString(objectMapper.readTree(
+                mockMvc.perform(post("/risk/replay-datasets")
+                                .header(RISK_KEY, fixture.manager().secret())
+                                .header(IDEMPOTENCY_KEY, "cross-creator-first")
+                                .contentType(APPLICATION_JSON).content(body))
+                        .andExpect(status().isCreated()).andReturn().getResponse()
+                        .getContentAsString()).get("datasetId").asText());
+        UUID secondDataset = UUID.fromString(objectMapper.readTree(
+                mockMvc.perform(post("/risk/replay-datasets").header(RISK_KEY, second.secret())
+                                .header(IDEMPOTENCY_KEY, "cross-creator-second")
+                                .contentType(APPLICATION_JSON).content(body))
+                        .andExpect(status().isCreated()).andReturn().getResponse()
+                        .getContentAsString()).get("datasetId").asText());
+        assertThat(secondDataset).isEqualTo(firstDataset);
+
+        complete(firstDataset);
+        ReplayDatasetView first = service.get(fixture.manager().context(), firstDataset);
+        ReplayDatasetView other = service.get(second.context(), secondDataset);
+
+        assertThat(first.lifecycleStatus()).isEqualTo(ReplayDatasetLifecycleStatus.SUCCEEDED);
+        assertThat(other.lifecycleStatus()).isEqualTo(ReplayDatasetLifecycleStatus.SUCCEEDED);
+        assertThat(other.outputSha256())
+                .describedAs("the same dataset read differently for a different creator")
+                .isEqualTo(first.outputSha256());
+        assertThat(other.populationSha256()).isEqualTo(first.populationSha256());
+        assertThat(other.coverage()).isEqualTo(first.coverage());
+        assertThat(other.aggregates()).containsExactlyElementsOf(first.aggregates());
+        // The second creation built nothing of its own: one set of item evidence exists, and the
+        // digests above are over that one set rather than over two cohorts that happen to agree.
+        assertThat(itemDigests(firstDataset)).isNotEmpty();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT replay_dataset_id) FROM replay_dataset_item_evidence
+                """, Integer.class)).isEqualTo(1);
+    }
+
+    private String createConcurrently(String secret, String body, String idempotencyKey,
+            CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown();
+        if (!start.await(10, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("creator race never started");
+        }
+        return mockMvc.perform(post("/risk/replay-datasets").header(RISK_KEY, secret)
+                        .header(IDEMPOTENCY_KEY, idempotencyKey)
+                        .contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+    }
+
+    private List<String> itemDigests(UUID datasetId) {
+        return jdbcTemplate.queryForList("""
+                SELECT item_sha256 FROM replay_dataset_item_evidence
+                WHERE replay_dataset_id = ? ORDER BY item_ordinal
+                """, String.class, datasetId);
     }
 
     private UUID createDataset(ReplayFixture fixture, Instant labelCutoff,

@@ -6,10 +6,14 @@ import static org.mockito.Mockito.verify;
 
 import com.thaap.payments.event.DomainEventActorType;
 import com.thaap.payments.event.DomainEventCommand;
+import com.thaap.payments.event.DomainEventType;
 import com.thaap.payments.event.DomainEventWriter;
+import com.thaap.payments.event.DomainStreamType;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.tenant.MerchantContext;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -25,9 +29,11 @@ import org.mockito.ArgumentCaptor;
  * the producer boundary, which is where they are asserted — the same level at which
  * {@code C46-SEC-001} was paid.
  *
- * <p>What is not proven here: mixed-control reconstruction and run-owned scenario report
- * reconciliation, which the row's evidence line also names, and which depend on reading historical
- * control and simulation state rather than on the producer's mapping.
+ * <p>Mixed-control reconstruction and run-owned scenario reporting are proven here too, at the
+ * same boundary: a control's activate/rollback/activate history is asserted to carry its own
+ * definition version and lifecycle status on each fact rather than restating the current one, and
+ * two scenario runs are asserted to own separate streams so a report cannot be attributed to a run
+ * that did not produce it.
  */
 class RiskOperationsEventLineageTests {
 
@@ -162,6 +168,96 @@ class RiskOperationsEventLineageTests {
         assertThat(command.actor().type()).isEqualTo(DomainEventActorType.SYSTEM);
         assertThat(command.actor().id()).isEqualTo("thaap-risk-operations");
         assertThat(command.actor().id()).doesNotContain(OPERATOR_ID.toString());
+    }
+
+    /**
+     * Mixed-control reconstruction. A control that is activated, rolled back and activated again
+     * must leave three facts that each carry their own definition version and lifecycle status,
+     * so a reader can reconstruct which version was in force at any past instant. The failure
+     * this prevents is a current control replacing the historical evaluation — a decision judged
+     * against a policy that did not exist when it was made.
+     */
+    @Test
+    void aControlHistoryCarriesEachVersionSoThePolicyInForceCanBeReconstructed() {
+        UUID controlId = UUID.fromString("00000000-0000-0000-0000-000000000305");
+        Instant activatedAt = Instant.parse("2026-06-01T08:00:00Z");
+        Instant rolledBackAt = Instant.parse("2026-06-10T08:00:00Z");
+        Instant reactivatedAt = Instant.parse("2026-06-20T08:00:00Z");
+
+        producer.riskControlChanged(context, controlId, DomainEventType.RISK_POLICY_ACTIVATED,
+                activatedAt, "control-activate", 7L, "ACTIVE", null);
+        producer.riskControlChanged(context, controlId, DomainEventType.RISK_POLICY_ROLLED_BACK,
+                rolledBackAt, "control-rollback", 7L, "ROLLED_BACK", "REGRESSION_DETECTED");
+        producer.riskControlChanged(context, controlId, DomainEventType.RISK_POLICY_ACTIVATED,
+                reactivatedAt, "control-reactivate", 8L, "ACTIVE", null);
+
+        List<DomainEventCommand> history = allCaptured(3);
+        assertThat(history).extracting(command -> command.eventType().name())
+                .containsExactly("RISK_POLICY_ACTIVATED", "RISK_POLICY_ROLLED_BACK",
+                        "RISK_POLICY_ACTIVATED");
+        assertThat(history).extracting(DomainEventCommand::occurredAt)
+                .containsExactly(activatedAt, rolledBackAt, reactivatedAt);
+        assertThat(history).extracting(
+                        command -> command.payload().get("definitionVersion").asLong())
+                .describedAs("a later activation must not restate the earlier version")
+                .containsExactly(7L, 7L, 8L);
+        assertThat(history).extracting(
+                        command -> command.payload().get("lifecycleStatus").asText())
+                .containsExactly("ACTIVE", "ROLLED_BACK", "ACTIVE");
+        assertThat(history.get(1).payload().get("reasonCode").asText())
+                .isEqualTo("REGRESSION_DETECTED");
+        // The rollback carries a reason and the activations do not, so absence is meaningful.
+        assertThat(history.get(0).payload().has("reasonCode")).isFalse();
+        assertThat(history.get(2).payload().has("reasonCode")).isFalse();
+        // Every fact belongs to the control it describes, so reconstruction cannot cross controls.
+        assertThat(history).allSatisfy(command -> {
+            assertThat(command.streamType()).isEqualTo(DomainStreamType.RISK_CONTROL);
+            assertThat(command.streamId()).isEqualTo(controlId);
+        });
+    }
+
+    /**
+     * Run-owned scenario reporting. Two scenario runs must produce two independent streams, so a
+     * report can never be attributed to a run that did not produce it. Stream identity is the
+     * ownership, which is why it is asserted rather than the payload.
+     */
+    @Test
+    void eachScenarioRunOwnsItsOwnStreamSoAReportCannotBeBorrowed() {
+        UUID firstRun = UUID.fromString("00000000-0000-0000-0000-000000000306");
+        UUID secondRun = UUID.fromString("00000000-0000-0000-0000-000000000307");
+        MerchantContext merchant = new MerchantContext(MERCHANT_ID, "lineage-merchant",
+                "thaap_test_a", TrafficOrigin.MERCHANT_API);
+
+        producer.developerScenarioCreated(merchant, firstRun, OCCURRED_AT, "scenario-one-create",
+                "CARD_TESTING_BURST");
+        producer.developerScenarioCompleted(merchant, firstRun,
+                OCCURRED_AT.plus(1, ChronoUnit.HOURS), "scenario-one-complete", "SUCCEEDED");
+        producer.developerScenarioFailed(merchant, secondRun,
+                OCCURRED_AT.plus(2, ChronoUnit.HOURS), "scenario-two-fail", "PROCESSOR_TIMEOUT");
+
+        List<DomainEventCommand> history = allCaptured(3);
+        assertThat(history).extracting(DomainEventCommand::streamId)
+                .containsExactly(firstRun, firstRun, secondRun);
+        assertThat(history).allSatisfy(command -> assertThat(command.streamType())
+                .isEqualTo(DomainStreamType.DEVELOPER_SCENARIO));
+        assertThat(history.get(1).payload().get("result").asText()).isEqualTo("SUCCEEDED");
+        assertThat(history.get(2).payload().get("failureCode").asText())
+                .isEqualTo("PROCESSOR_TIMEOUT");
+        // The failing run's outcome never appears on the succeeding run's stream.
+        assertThat(history.get(0).payload().has("failureCode")).isFalse();
+        assertThat(history.get(1).payload().has("failureCode")).isFalse();
+        // A merchant-attributed fact carries the api key prefix, not an operator identity.
+        assertThat(history).allSatisfy(command -> {
+            assertThat(command.actor().type()).isEqualTo(DomainEventActorType.MERCHANT_API_KEY);
+            assertThat(command.actor().id()).isEqualTo("thaap_test_a");
+        });
+    }
+
+    private List<DomainEventCommand> allCaptured(int expected) {
+        ArgumentCaptor<DomainEventCommand> command =
+                ArgumentCaptor.forClass(DomainEventCommand.class);
+        verify(writer, org.mockito.Mockito.times(expected)).append(command.capture());
+        return command.getAllValues();
     }
 
     private DomainEventCommand captured() {
