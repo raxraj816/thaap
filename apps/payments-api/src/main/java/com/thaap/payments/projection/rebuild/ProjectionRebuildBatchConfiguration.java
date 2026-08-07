@@ -32,11 +32,12 @@ public class ProjectionRebuildBatchConfiguration {
     @StepScope
     ProjectionRebuildItemWriter projectionRebuildItemWriter(
             ProjectionRebuildStore store, ProjectionRebuildApplier applier,
+            ProjectionRebuildExecutionProbe probe,
             @Value("#{jobParameters['rebuildId']}") String rebuildId,
             @Value("#{jobParameters['leaseToken']}") String leaseToken,
             @Value("#{jobParameters['fencingEpoch']}") Long fencingEpoch) {
         return new ProjectionRebuildItemWriter(UUID.fromString(rebuildId),
-                UUID.fromString(leaseToken), requiredFence(fencingEpoch), store, applier);
+                UUID.fromString(leaseToken), requiredFence(fencingEpoch), store, applier, probe);
     }
 
     @Bean

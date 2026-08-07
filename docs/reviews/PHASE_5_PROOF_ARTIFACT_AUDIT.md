@@ -171,9 +171,9 @@ cross-cutting rows are `GAP` and carry `TD-0008`.
 
 | | Rows |
 |---|---|
-| GAP rows since proven and returned to `PASS` | 6 |
-| GAP rows with new partial proof, still `PARTIAL` | 1 |
-| GAP rows still wholly unproven | 16 |
+| GAP rows since proven and returned to `PASS` | 8 |
+| GAP rows with new partial proof, still `PARTIAL` | 2 |
+| GAP rows still wholly unproven | 13 |
 
 Proven: `C44-OBS-001`, `C46-OBS-001`, `C50-OBS-001`, `C51-OBS-001`, `C46-SEC-001`,
 `C50-SEC-001`. Partially proven: `C51-CON-001`. Three production changes were required
@@ -182,6 +182,53 @@ production rather than a weaker assertion: `ProjectionRebuildMetrics.lease` and
 `.jobDuration`, a `recovered` flag on `ProjectionRebuildLease` so lease recovery is
 carried rather than inferred from the fencing epoch, and a new
 `DomainEventWriterMetrics`, since the event-foundation writer emitted no signal at all.
+
+#### Second pass (2026-08-07)
+
+Proven and returned to `PASS`: `C50-CON-001` and `C50-CON-002`. Partially proven:
+`C51-PAY-001`, which now compares a twenty-one-family full-content source digest across
+create, complete, read, restart, failure, duplicate create and equivalence comparison and
+asserts zero processor and webhook interaction, but does not exercise the
+contradictory-label cohort its adversarial line promises.
+
+The unlock was a single production seam. `ProjectionRebuildExecutionProbe` is added,
+mirroring the `OfflineReplayDatasetExecutionProbe` that replay had from the start, and
+wired at four instants a rebuild's invariants are only observable from: before a chunk
+takes its lease, after chunk evidence and before its checkpoint, after the checkpoint
+statement, and before the generation switch commits. Replay having that seam and rebuild
+not having it is the whole reason `C51-CON-001` was partially payable in an afternoon and
+these two rows were not — the artifact gap was downstream of a testability gap.
+
+Two of the new assertions record behavior that differs from what the row's prose implied,
+and the rows now say so rather than asserting the prose. A live projection write racing a
+generation switch is not parked and applied to the winner; it is refused with
+`ProjectionGenerationUnavailableException`, left unquarantined, and applied on
+redelivery — which is the invariant holding, since quarantining a valid event because a
+switch happened underneath it would turn a transient race into permanent operator work.
+And an incompatible-handler rollback target cannot be constructed at all, because
+`protect_projection_generation` makes a generation's handler version immutable, so that
+partition is asserted unreachable rather than merely refused.
+
+Three findings came out of writing the tests rather than the code. A lease takeover
+staged with a plain `JdbcTemplate` call inside the victim's chunk transaction is rolled
+back along with the chunk it is meant to fence, so the test asserts nothing while passing;
+the takeover now runs in its own transaction, as another worker would. The rebuild's
+`ck_projection_rebuilds_time` forbids writing an already-expired lease, so expiry is only
+reachable by winding `updated_at` back with it — the same constraint shape that made the
+equivalent replay test flaky. And `ProjectionRebuildFenceException` extended
+`IllegalStateException`, which Spring's Hibernate translator maps to
+`InvalidDataAccessApiUsageException` because JPA treats it as API misuse — so the fence was
+rewrapped on the way out of `ProjectionRebuildStore` and, inconsistently, surfaced raw from
+the applier, control service and reconciliation engine, which are not repositories. Nothing
+caught it either way, so there was no live defect, but `catch (ProjectionRebuildFenceException)`
+would silently never have fired. It now extends `RuntimeException`, matching
+`StaleReplayDatasetWorkerException` on the replay side and surviving translation intact from
+all four throwers; `ProjectionRebuildLeasePostgreSqlConcurrencyTests` asserts the exact type
+through the real repository proxy so the property cannot be undone by a change to the
+supertype. It is deliberately not a `DataAccessException`: losing a fence is a domain
+ownership decision rather than a database access failure, and that hierarchy's
+transient-versus-non-transient split would attach a retry classification that is wrong here,
+since the fenced loser must stop.
 
 ## What this does and does not mean
 
