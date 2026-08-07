@@ -1,0 +1,81 @@
+name: Commit readiness
+
+# The authoritative gate. Every repository check already lives in
+# scripts/commit-readiness-check.sh; until now nothing ran it except a human choosing to, and
+# nothing read its exit code. That is how a merged commit came to claim the gate passed when it
+# had been exiting 1 for a missing tool. CI removes the choice.
+#
+# This workflow deliberately calls the same script a developer runs rather than re-listing its
+# gates here. A duplicated list drifts, and the copy that drifts is always the one nobody reads.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+# A superseded run proves nothing about the tip, so let a newer push cancel it — except on the
+# default branches, where every commit's result is part of the record.
+concurrency:
+  group: commit-readiness-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/master' }}
+
+jobs:
+  commit-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Confirm Docker is available for Testcontainers
+        # The PostgreSQL suites are annotated disabledWithoutDocker, so a runner without Docker
+        # would skip every concurrency, migration and restart proof and still report success.
+        # A silent skip of the adversarial half is the exact condition this repository's proof
+        # audit exists to prevent, so the absence of Docker fails the run instead.
+        run: |
+          docker version
+          docker info >/dev/null
+
+      - name: Resolve the learning day under review
+        # The readiness gate validates the daily learning note for a given date. Using the
+        # runner's clock would fail every push made on a day that has no note yet, for reasons
+        # unrelated to the change. The newest note in the branch is the one this work belongs to.
+        id: learning-day
+        run: |
+          day="$(ls docs/learning/daily \
+            | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' \
+            | sort \
+            | tail -1 \
+            | sed 's/\.md$//')"
+          if [[ -z "$day" ]]; then
+            echo "No daily learning note found under docs/learning/daily" >&2
+            exit 1
+          fi
+          echo "day=$day" >> "$GITHUB_OUTPUT"
+          echo "Reviewing learning day $day"
+
+      - name: Run the commit readiness gate with tests
+        run: bash scripts/commit-readiness-check.sh "${{ steps.learning-day.outputs.day }}" --run-tests
+
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: apps/payments-api/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 14
