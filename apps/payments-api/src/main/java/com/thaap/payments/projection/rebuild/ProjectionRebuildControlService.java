@@ -45,6 +45,7 @@ public class ProjectionRebuildControlService {
     private final ProjectionRebuildMetrics metrics;
     private final AuditLogService auditLogService;
     private final ApplicationEventPublisher eventPublisher;
+    private final ProjectionRebuildExecutionProbe probe;
     private final Clock clock;
     private final TransactionTemplate transaction;
     private final TransactionTemplate serializableTransaction;
@@ -56,7 +57,8 @@ public class ProjectionRebuildControlService {
             ProjectionReconciliationEngine reconciliationEngine,
             ProjectionRebuildStore store, ProjectionRebuildMetrics metrics,
             AuditLogService auditLogService, ApplicationEventPublisher eventPublisher,
-            Clock clock, PlatformTransactionManager transactionManager) {
+            ProjectionRebuildExecutionProbe probe, Clock clock,
+            PlatformTransactionManager transactionManager) {
         this.authenticator = authenticator;
         this.hasher = hasher;
         this.jdbcTemplate = jdbcTemplate;
@@ -67,6 +69,7 @@ public class ProjectionRebuildControlService {
         this.metrics = metrics;
         this.auditLogService = auditLogService;
         this.eventPublisher = eventPublisher;
+        this.probe = probe;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactionManager);
         this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -296,6 +299,7 @@ public class ProjectionRebuildControlService {
                 }
             }
             requireFivePassingCurrentFamilies(rebuildId);
+            probe.beforeGenerationActivation(rebuildId);
             UUID priorActive = definition.activeGenerationId();
             Instant now = now();
             int retired = jdbcTemplate.update("""
