@@ -5,7 +5,8 @@
 - Entry gate: SATISFIED by Phase 6 / Chapter 59 closure and merge
 - Promise freeze: PENDING (Section 17 decisions)
 - Merchant-facing product destination: FOUNDER CONFIRMED 2026-07-27
-- Market destination: FOUNDER CONFIRMED 2026-08-08 — India, cards and UPI both
+- Market destination: FOUNDER CONFIRMED 2026-08-08 — global, multi-rail, with
+  India and its UPI rail a first-class market rather than the sole target
 - Primary deployables: `apps/payments-api`, `apps/analyst-dashboard-ui`
 - Technical DRIs: Payments Core and Security/Platform
 - Operations DRI: Founding Staff Engineering
@@ -16,9 +17,19 @@
 - First dependency-ready chapter after confirmation: Chapter 60
 - Frozen proof artifacts: Chapter 60–66 `PRE_IMPLEMENTATION` matrices under
   `docs/reviews/`
-- Deployment region: `ap-south-1` (Mumbai)
+- Deployment region: `ap-south-1` (Mumbai) first, region-parameterised
 
-Phase 6.5 implementation status: NOT STARTED
+Phase 6.5 implementation status: CHAPTER 60 COMPLETE
+
+THAAP is a global, multi-rail product. India and its UPI rail are a first-class
+market within it rather than the whole of it, and that distinction has two
+consequences here. The first deployment lands in `ap-south-1`, but every region
+reference is a Terraform variable, so standing up a second region is
+configuration rather than a rewrite — an infrastructure that hardcodes one
+region is a global product's first rewrite. And region and data residency are
+treated as future tenant-level properties: RBI localisation and its equivalents
+elsewhere will eventually constrain where a given tenant's data may live, so
+nothing in this phase may assume a single global store.
 
 This plan does not add product capability. It converts six phases of proven
 correctness into a running system that someone other than its author can reach.
@@ -128,7 +139,8 @@ fix is one commit and the phase's entire purpose is build integrity.
 - A production runtime configuration contract with fail-fast validation
 - Terraform-defined AWS topology in `ap-south-1`
 - First deploy, Flyway migration, and smoke proof against the deployed URL
-- A seeded, India-shaped demo tenant with scheduled reset
+- A seeded demo tenant with scheduled reset, spanning more than one currency and
+  merchant geography
 - Operations runbook and `ADR-0012`
 
 ### 4.2 Excluded with exact owner and unblock evidence
@@ -148,7 +160,7 @@ fix is one commit and the phase's entire purpose is build integrity.
 | Decision | Choice | Rationale |
 |---|---|---|
 | Compute | ECS Fargate | ADR-0007 already names it the sanctioned alternative. EKS adds ~$75/mo control plane plus upgrade, addon and IRSA toil for zero product value at this scale. |
-| Region | `ap-south-1` | The market decision is India. Latency for local design partners, and alignment with the direction of RBI data-localisation obligations that Phase 11 will have to satisfy anyway. |
+| Region | `ap-south-1` first, parameterised | Proximity to the first design partners, and alignment with the direction of RBI data-localisation obligations a later phase must satisfy anyway. The product is global, so the region is a variable rather than a constant everywhere it appears; a second region must cost a `terraform apply`, not a refactor. |
 | Kafka | Single KRaft broker on Fargate + EFS | ~$20/mo against MSK Serverless's ~$550/mo floor. Disabling events is not an option: `thaap.event-publication.enabled` defaults true and Phase 5/6 analytics, projections and workspace insights all depend on the stream. |
 | Database | RDS PostgreSQL 16, `db.t4g.micro` | Matches the `postgres:16-alpine` the suites already prove against. Single-AZ with seven-day automated backups. |
 | Cache | ElastiCache `cache.t4g.micro` | Redis is ephemeral risk coordination per ADR-0010; losing it degrades rather than corrupts. |
@@ -343,7 +355,7 @@ Target set 2026-08-08: the whole phase end to end in seven days.
 | 2 | 61, 62 | `1.0.0` tagged with provenance; fail-fast secret contract proven |
 | 3–4 | 63 | Terraform topology complete and applied to a scratch stack |
 | 5 | 64 | First real deploy, migration, sixteen indicators `UP`, demos green against the URL |
-| 6 | 65 | Seeded India-shaped tenant, runbook, ADR-0012, rehearsed rollback and restore |
+| 6 | 65 | Seeded multi-currency tenant, runbook, ADR-0012, rehearsed rollback and restore |
 | 7 | 66 | Integrated matrix, dossier, gates, roadmap updates |
 
 Two things govern whether this holds.
@@ -408,8 +420,15 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
   with locking, and the Section 9 routing-drift check.
 - **Retains:** `infra/kubernetes/`, with its README updated to state that ECS
   Fargate is the current target and EKS remains the scale-trigger path.
-- **Proves:** `terraform apply` from zero produces a working stack and the
-  following `plan` is clean.
+- **Region:** every region, availability-zone and ARN reference is a variable or
+  derived from one. No module hardcodes `ap-south-1`, and a gate rejects a
+  literal region string outside the variable definition. THAAP is a global
+  product; infrastructure that names one region in fifty places is the first
+  thing a second region forces someone to rewrite, and by then it is load-bearing.
+- **Proves:** `terraform apply` from zero produces a working stack, the following
+  `plan` is clean, and `terraform plan` against a second region variable resolves
+  without a code change — proving the parameterisation is real rather than
+  cosmetic, without paying to run a second stack.
 
 ### Chapter 64 — First Deploy, Migration, And Smoke Proof
 
@@ -420,10 +439,11 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 
 ### Chapter 65 — Seeded Demo Tenant And Operations
 
-- **Delivers:** an India-shaped seed (INR, Indian merchant profiles, locally
-  plausible fraud patterns) built by reusing the existing demo scripts rather
-  than new fixtures; an EventBridge-scheduled reset; the operations runbook;
-  `ADR-0012`.
+- **Delivers:** a seed built by reusing the existing demo scripts rather than new
+  fixtures, spanning more than one currency and merchant geography — including
+  INR and an Indian merchant, so the rail and residency work ahead has a
+  believable subject, without implying the product is single-market; an
+  EventBridge-scheduled reset; the operations runbook; `ADR-0012`.
 - **Proves:** a rehearsed rollback and a rehearsed restore-from-backup, both
   recorded. An unrehearsed procedure is not evidence.
 
@@ -460,13 +480,27 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 `cardFingerprint`, `cardBin`, `cardLast4`, `cardFunding` and `cardCountry`
 directly on the entity. ADR-0004 promised the model would "avoid assumptions
 that make later payment methods impossible"; it did not hold. A pure refactor
-behind a rail type, zero behaviour change, all 1387 tests still green. This is
+behind a rail type, zero behaviour change, all 1392 tests still green. This is
 the gate for all UPI work.
 
-**Phase 7 — UPI Rail (~6–8 weeks).** Replaces governed ML at this slot;
-ML moves to Phase 8 and 8/9/10 cascade to 9/10/11. Simulated NPCI/PSP boundary,
-collect and intent/QR flows, VPA identity, UPI-shaped fraud features replacing
+The seam must be genuinely multi-rail rather than a card/UPI branch. THAAP is a
+global product, so SEPA, ACH, PIX and local wallets are all eventual rails, and
+a two-valued abstraction would have to be rebuilt for the third. Anything that
+reads like `if (rail == UPI)` in this refactor is the abstraction failing.
+
+**Phase 7 — UPI Rail (~6–8 weeks).** Replaces governed ML at this slot; ML moves
+to Phase 8 and 8/9/10 cascade to 9/10/11. Simulated NPCI/PSP boundary, collect
+and intent/QR flows, VPA identity, UPI-shaped fraud features replacing
 BIN/last4 ones, and the UPI dispute model alongside card chargebacks.
+
+UPI is first because it is the rail least like cards, not because India outranks
+other markets. It has no authorization/capture split, it is payer-initiated
+rather than merchant-initiated, it offers no BIN, last4 or fingerprint to build
+features on, and its disputes run through NPCI rather than as chargebacks. Every
+one of those breaks an assumption the current model makes. A rail seam proven
+against UPI will absorb SEPA or ACH comfortably; one proven against a second
+card-like rail would teach almost nothing and would still be a card model
+wearing a different name. Hardest rail first is what makes the abstraction real.
 
 **Fraud service topology — decided 2026-08-08: one rail-aware service, not one
 per rail.** The rail-specific surface is narrow: feature extraction, rule
@@ -477,13 +511,15 @@ precedence, immutable decision records, reason codes, feature-snapshot lineage,
 rule governance, simulation, rollback, review cases, labels, tenancy,
 idempotency, audit, outbox, projections and the workspace.
 
-The deciding argument is product, not code organisation. Fraud rings do not
-respect rails, and in India the same actor will probe a merchant by card and by
-UPI. Two services means two decision stores and no practical way to correlate
-that behaviour; one service keeps both in the same decision history and the same
-velocity counters. That cross-rail view is an advantage over card-shaped
-incumbents, and splitting the service would discard it to solve a filing
-problem. Consistent with ADR-0001 and ADR-0009.
+The deciding argument is product, not code organisation. Fraud rings respect
+neither rails nor borders: the same actor will probe a merchant by card and by
+UPI, and the same technique appears against merchants in different countries
+weeks apart. Two services means two decision stores and no practical way to
+correlate either pattern; one service keeps them in the same decision history
+and the same velocity counters. For a global product that cross-rail and
+cross-geography view is the advantage over single-rail incumbents, and splitting
+the service would discard it to solve a filing problem. Consistent with ADR-0001
+and ADR-0009.
 
 The seam goes inside the service: a `RailFraudFeatureProvider` per rail behind
 one interface, rail-tagged rules reusing `controls/` and `rules/` governance
@@ -491,11 +527,21 @@ unchanged, a rail-scoped action set, and `rail` on the decision record so
 analytics, review queues, labels and later per-rail champion/challenger can all
 segment on it.
 
-*Named replacement trigger:* split only when UPI's latency budget measurably
-diverges from card's **and** the two contend for the same resources, or when a
-regulatory boundary forces UPI data into separate storage. RBI localisation may
-eventually force the latter, but that is a storage boundary rather than a
-service boundary, and both already reside in `ap-south-1`.
+*Named replacement trigger:* split only when a rail's latency budget measurably
+diverges from the others' **and** they contend for the same resources, or when a
+regulatory boundary forces a tenant's data into separate storage.
+
+Data residency is the trigger most likely to fire, and it is worth being precise
+about what it does and does not force. RBI localisation, and its equivalents in
+other jurisdictions a global product will meet, constrain **where a tenant's data
+resides** — not how many services process it. That is a storage and placement
+boundary, satisfied by regional data stores under one service topology, and it is
+why region and residency are treated here as future tenant-level properties
+rather than global constants. A regional store still permits one decision model
+and one set of rail-aware controls; what it forbids is a single global table that
+assumes every tenant's rows may sit together. Nothing in this phase may assume
+that, which is the practical reason the region is a variable from the first
+commit rather than the first migration.
 
 **In parallel from Chapter 64.** Publishing and design-partner outreach need
 only the URL. `docs/blog/` has a workflow, an editorial rubric, a topic backlog
@@ -507,8 +553,9 @@ wedge.
 
 Phase 6.5 may not begin Chapter 61 until these are confirmed as one set:
 
-1. Deploy to AWS `ap-south-1` on ECS Fargate, superseding ADR-0007's
-   EKS-primary mapping via ADR-0012.
+1. Deploy to AWS `ap-south-1` first on ECS Fargate, superseding ADR-0007's
+   EKS-primary mapping via ADR-0012, with every region reference parameterised
+   so a second region is configuration rather than a rewrite.
 2. Run Kafka as a single self-managed KRaft broker, superseding ADR-0007's
    "Kafka to MSK" mapping, with MSK as the named Phase 11 replacement trigger.
 3. Accept single-AZ RDS and no NAT Gateway as deliberate cost tradeoffs.
@@ -520,4 +567,7 @@ Phase 6.5 may not begin Chapter 61 until these are confirmed as one set:
    current target and EKS as the scale-trigger path (instructed 2026-08-08).
 7. Renumber the roadmap: UPI becomes Phase 7, ML becomes Phase 8, and the
    current Phases 8/9/10 cascade to 9/10/11.
-8. Build one rail-aware fraud service rather than one service per rail.
+8. Build one rail-aware fraud service rather than one service per rail, with the
+   rail seam designed as genuinely multi-rail rather than a card/UPI branch.
+9. Treat region and data residency as future tenant-level properties, so no
+   phase assumes a single global store for every tenant's data.
