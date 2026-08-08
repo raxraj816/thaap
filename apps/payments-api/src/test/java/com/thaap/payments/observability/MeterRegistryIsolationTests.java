@@ -2,6 +2,8 @@ package com.thaap.payments.observability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.thaap.payments.support.ExclusiveMeterRegistry;
+import com.thaap.payments.support.ExclusiveMeterRegistryContextCustomizerFactory;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -14,6 +16,9 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.support.SpringFactoriesLoader;
+import org.springframework.test.context.ContextCustomizer;
+import org.springframework.test.context.ContextCustomizerFactory;
 
 /**
  * Pins the boundary a whole test suite shares without seeing it: one Micrometer registry.
@@ -35,11 +40,8 @@ import org.junit.jupiter.api.Test;
  */
 class MeterRegistryIsolationTests {
 
-    /**
-     * Marks a test class as owning its registry. It has no binder and no runtime effect; its only
-     * job is to give the class a distinct Spring context cache key.
-     */
-    private static final String EXCLUSIVE_REGISTRY_PROPERTY = "thaap.test.exclusive-meter-registry";
+    /** The declaration a registry-mutating test class must carry. */
+    private static final String OWNERSHIP_DECLARATION = "@ExclusiveMeterRegistry";
 
     /** {@code registry.clear()}, {@code registry.remove(..)} and {@code registry::remove}. */
     private static final Pattern REGISTRY_MUTATION =
@@ -57,7 +59,7 @@ class MeterRegistryIsolationTests {
             String code = withoutComments(Files.readString(source));
             boolean springContextTest = code.contains("@SpringBootTest");
             boolean touchesMeterRegistry = code.contains("MeterRegistry");
-            boolean ownsItsRegistry = code.contains(EXCLUSIVE_REGISTRY_PROPERTY);
+            boolean ownsItsRegistry = code.contains(OWNERSHIP_DECLARATION);
             if (springContextTest && touchesMeterRegistry && !ownsItsRegistry
                     && REGISTRY_MUTATION.matcher(code).find()) {
                 offenders.add(source.toString());
@@ -66,10 +68,61 @@ class MeterRegistryIsolationTests {
 
         assertThat(offenders)
                 .as("these classes empty or prune a MeterRegistry that Spring shares with every "
-                        + "other test of the same configuration; declare \"%s=<name>\" in "
-                        + "@SpringBootTest(properties = ...) so the class gets a registry of its own",
-                        EXCLUSIVE_REGISTRY_PROPERTY)
+                        + "other test of the same configuration; annotate them %s so each gets a "
+                        + "registry of its own", OWNERSHIP_DECLARATION)
                 .isEmpty();
+    }
+
+    /**
+     * The isolation itself, tested rather than trusted.
+     *
+     * <p>{@link ExclusiveMeterRegistry} works because a context's cache key includes its
+     * customizers, so an annotated class contributes a customizer no other class can equal and gets
+     * a context — and a registry — of its own. Those three facts are what this asserts: a customizer
+     * is created only when the annotation is present, and two annotated classes never compare equal.
+     * If any of them stopped holding, the annotation would silently become decoration and the defect
+     * it exists to prevent would return without a single test turning red.
+     */
+    @Test
+    void theOwnershipAnnotationIsWhatSplitsTheContextAndNotSomethingElse() {
+        ExclusiveMeterRegistryContextCustomizerFactory factory =
+                new ExclusiveMeterRegistryContextCustomizerFactory();
+
+        // Constructing the factory by hand proves what it does, not that Spring ever asks it.
+        // That link is META-INF/spring.factories, so it is asserted through Spring's own loader:
+        // delete the registration and the annotation silently becomes a comment.
+        assertThat(SpringFactoriesLoader.forDefaultResourceLocation()
+                .load(ContextCustomizerFactory.class))
+                .as("the customizer factory must be registered in META-INF/spring.factories, or "
+                        + "@ExclusiveMeterRegistry isolates nothing")
+                .anyMatch(ExclusiveMeterRegistryContextCustomizerFactory.class::isInstance);
+
+        ContextCustomizer declared = factory.createContextCustomizer(OwnsItsRegistry.class, List.of());
+        ContextCustomizer alsoDeclared =
+                factory.createContextCustomizer(AlsoOwnsItsRegistry.class, List.of());
+
+        assertThat(factory.createContextCustomizer(SharesTheRegistry.class, List.of()))
+                .as("a class that does not declare ownership must keep sharing the cached context, "
+                        + "or every test class would pay for its own")
+                .isNull();
+        assertThat(declared).as("a declaring class must contribute a customizer").isNotNull();
+        assertThat(declared)
+                .as("two declaring classes must not share a context, which is the whole mechanism")
+                .isNotEqualTo(alsoDeclared);
+        assertThat(declared)
+                .as("the same class must key to the same context, or it would rebuild per run")
+                .isEqualTo(factory.createContextCustomizer(OwnsItsRegistry.class, List.of()));
+    }
+
+    @ExclusiveMeterRegistry
+    private static final class OwnsItsRegistry {
+    }
+
+    @ExclusiveMeterRegistry
+    private static final class AlsoOwnsItsRegistry {
+    }
+
+    private static final class SharesTheRegistry {
     }
 
     /**

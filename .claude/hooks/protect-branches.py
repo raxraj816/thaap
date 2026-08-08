@@ -100,10 +100,19 @@ def git_invocation(tokens):
     return tokens[index], tokens[index + 1:], repository_path
 
 
-def current_branch(repository_path):
+def current_branch(repository_path, working_directory):
+    """The branch checked out where the command would run, or None if that cannot be determined.
+
+    `working_directory` comes from the hook payload rather than from this process's own cwd, which
+    may be somewhere else entirely — or gone. A relative `git -C` path is resolved against it for
+    the same reason.
+    """
+    if repository_path and not os.path.isabs(repository_path):
+        repository_path = os.path.join(working_directory, repository_path)
     try:
         result = subprocess.run(
-            ["git", "-C", repository_path or ".", "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "-C", repository_path or working_directory,
+             "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=5, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -126,12 +135,12 @@ def protected_push_target(arguments):
     return None
 
 
-def inspect(segment):
+def inspect(segment, working_directory):
     invocation = git_invocation(tokenize(segment))
     if invocation is None:
         return None
     subcommand, arguments, repository_path = invocation
-    branch = current_branch(repository_path)
+    branch = current_branch(repository_path, working_directory)
 
     if subcommand == "push":
         target = protected_push_target(arguments)
@@ -164,13 +173,16 @@ def inspect(segment):
 
 
 def main():
-    tool_input = payload().get("tool_input") or {}
+    hook_input = payload()
+    tool_input = hook_input.get("tool_input") or {}
     command = tool_input.get("command")
     if not isinstance(command, str):
         return
 
+    working_directory = hook_input.get("cwd") or os.getcwd()
+
     for segment in segments(command):
-        reason = inspect(segment)
+        reason = inspect(segment, working_directory)
         if reason:
             deny(
                 f"Blocked by .claude/hooks/protect-branches.py: {reason}. "
@@ -181,4 +193,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Fail open, always. This runs before every Bash call, so an unhandled error here would not
+    # protect a branch -- it would take the shell away from whoever is trying to work. A guard
+    # that cannot decide must get out of the way and say so, not veto by crashing.
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as failure:  # noqa: BLE001 - deliberately total
+        print(f"protect-branches: allowing the command, guard failed: {failure}",
+              file=sys.stderr)

@@ -17,6 +17,7 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.fraud.FeatureValue;
 import com.thaap.payments.fraud.FeatureValueRepository;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.support.ExclusiveMeterRegistry;
 import com.thaap.payments.tenant.TrafficOrigin;
 import com.thaap.payments.webhook.WebhookDeliveryService;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -44,13 +45,14 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 @ActiveProfiles("test")
+@SpringBootTest
 // meterRegistry.clear() in the setup below empties the whole registry, and Spring hands the same
 // cached context — and the same registry — to every class with an identical configuration. Today
 // the @MockitoSpyBean below happens to keep this class's context to itself, which is why the clear
 // has never broken a neighbour. That is an accident of one annotation, not a boundary: delete the
-// spy and this becomes the defect that removed the bulk-backlog gauges elsewhere. The property
-// states the requirement instead of inheriting it.
-@SpringBootTest(properties = "thaap.test.exclusive-meter-registry=payment-intent-confirm-contract")
+// spy and this becomes the defect that removed the bulk-backlog gauges elsewhere. This states the
+// requirement instead of inheriting it.
+@ExclusiveMeterRegistry
 class PaymentIntentConfirmContractTests {
 
     private static final String API_KEY = "X-Api-Key";

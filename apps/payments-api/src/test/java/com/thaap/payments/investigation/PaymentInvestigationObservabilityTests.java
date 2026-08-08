@@ -16,6 +16,7 @@ import com.thaap.payments.observability.DecisionIntelligenceMetrics;
 import com.thaap.payments.observability.DecisionIntelligenceObservabilityFilter;
 import com.thaap.payments.projection.PaymentRiskProjectionConsumerService;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.support.ExclusiveMeterRegistry;
 import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
@@ -44,16 +45,12 @@ import org.springframework.web.context.WebApplicationContext;
  * bill and a privacy leak that outlives the request that created it.
  */
 @ActiveProfiles("test")
-@SpringBootTest(properties = {
-        "thaap.review-bulk.worker-enabled=false",
-        // This class deletes meters in setUp, and Spring caches one application context — and so
-        // one MeterRegistry — per distinct test configuration. Without a key of its own, that
-        // deletion reached the thirty other classes sharing this configuration. It did: it removed
-        // the two bulk-backlog gauges ReviewBulkBacklogReadinessTests asserts on, which are
-        // registered once per context and so never returned, and the failure only surfaced in the
-        // orderings that ran this class first. The property below has no binder and no effect on
-        // behaviour; its only job is to make this class's registry its own.
-        "thaap.test.exclusive-meter-registry=payment-investigation-observability"})
+@SpringBootTest(properties = "thaap.review-bulk.worker-enabled=false")
+// This class deletes meters in setUp. Without a context of its own that deletion reached the thirty
+// other classes sharing this configuration, and it did: it removed the two bulk-backlog gauges
+// ReviewBulkBacklogReadinessTests asserts on, which are registered once per context and so never
+// returned. See ER-0101.
+@ExclusiveMeterRegistry
 class PaymentInvestigationObservabilityTests {
 
     private static final String REQUEST_METER = "thaap.decision_intelligence.requests";
@@ -86,9 +83,9 @@ class PaymentInvestigationObservabilityTests {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(requestIdFilter, apiVersionFilter, observabilityFilter).build();
         databaseCleaner.clean();
-        // Safe only because this class owns its registry — see the context property above. The
-        // absolute counts and the "this series must not exist" assertion below both need a clean
-        // slate, so the removal stays; what changed is that it can no longer reach another class.
+        // Safe only because of @ExclusiveMeterRegistry above. The absolute counts and the "this
+        // series must not exist" assertion below both need a clean slate, so the removal stays;
+        // what changed is that it can no longer reach another class.
         registry.getMeters().stream()
                 .filter(meter -> meter.getId().getName().startsWith("thaap.decision_intelligence"))
                 .forEach(registry::remove);
