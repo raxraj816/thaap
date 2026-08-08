@@ -45,14 +45,24 @@ services:
     container_name: thaap-kafka
     restart: unless-stopped
     ports:
-      - "${THAAP_KAFKA_PORT:-9092}:9092"
+      # The host reaches Kafka on its usual port; the container network does not use this mapping
+      # at all. See the dual-listener note below.
+      - "${THAAP_KAFKA_PORT:-9092}:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:${THAAP_KAFKA_PORT:-9092}
+      # Two client listeners, because a Kafka client does not talk to the address it was given —
+      # it asks for metadata and then connects to whatever the broker advertises. A single
+      # `localhost` advertisement works from the host and is unreachable from every container,
+      # which fails only once the API is containerised rather than run from an IDE.
+      #
+      #   PLAINTEXT       kafka:9092       reachable inside the compose network
+      #   PLAINTEXT_HOST  localhost:9092   reachable from the developer's machine, port unchanged
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${THAAP_KAFKA_PORT:-9092}
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -71,6 +81,67 @@ services:
       timeout: 5s
       retries: 20
       start_period: 15s
+
+  payments-api:
+    build:
+      context: ../../apps/payments-api
+      dockerfile: Dockerfile
+    image: thaap/payments-api:local
+    container_name: thaap-payments-api
+    restart: unless-stopped
+    ports:
+      - "${THAAP_PAYMENTS_API_PORT:-8080}:8080"
+    environment:
+      THAAP_POSTGRES_HOST: postgres
+      THAAP_POSTGRES_PORT: 5432
+      THAAP_POSTGRES_DB: ${THAAP_POSTGRES_DB:-thaap_payments}
+      THAAP_POSTGRES_USER: ${THAAP_POSTGRES_USER:-thaap}
+      THAAP_POSTGRES_PASSWORD: ${THAAP_POSTGRES_PASSWORD:-thaap}
+      THAAP_REDIS_HOST: redis
+      THAAP_REDIS_PORT: 6379
+      # The in-network advertisement, not the host one. See the Kafka listener note above.
+      THAAP_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+      # Local development values only.
+      #
+      # These are committed deliberately: a stack that cannot start without a secrets ceremony is
+      # a stack nobody runs, and the alternative is every developer inventing their own keys and
+      # discovering the format by stack trace. They are safe to publish because they protect
+      # nothing — this profile talks to a throwaway database on a laptop.
+      #
+      # Under the `aws` profile the application refuses to start when a secret is absent, so
+      # these defaults cannot silently become production keys by being left unset somewhere that
+      # matters.
+      THAAP_ADMIN_BOOTSTRAP_TOKEN: ${THAAP_ADMIN_BOOTSTRAP_TOKEN:-local-admin-bootstrap-token}
+      THAAP_PLATFORM_BOOTSTRAP_TOKEN: ${THAAP_PLATFORM_BOOTSTRAP_TOKEN:-local-platform-bootstrap-token}
+      THAAP_SCENARIO_RUNNER_TOKEN: ${THAAP_SCENARIO_RUNNER_TOKEN:-local-scenario-runner-token}
+      THAAP_HASH_PEPPER: ${THAAP_HASH_PEPPER:-local-hash-pepper-not-for-production}
+      THAAP_CORRELATION_PEPPER: ${THAAP_CORRELATION_PEPPER:-local-correlation-pepper-not-for-production}
+      THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY: ${THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY:-AXqcQyEyp+PaWc4kNkglchMezuXhDCBnqoQT/BRKEo0=}
+      THAAP_REVIEW_NOTE_ENCRYPTION_KEY: ${THAAP_REVIEW_NOTE_ENCRYPTION_KEY:-qLPaIJTvXW+fHN7xUJTuVzw+BQuCa3zXBsFonNM56Z0=}
+      THAAP_AUTHENTICATION_REPLAY_ENCRYPTION_KEY: ${THAAP_AUTHENTICATION_REPLAY_ENCRYPTION_KEY:-s083f4o4N0LsdH3WLDjeJa/S4Ow+StpqsYeoMs0eCb0=}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  analyst-dashboard-ui:
+    build:
+      context: ../../apps/analyst-dashboard-ui
+      dockerfile: Dockerfile
+    image: thaap/analyst-dashboard-ui:local
+    container_name: thaap-analyst-dashboard-ui
+    restart: unless-stopped
+    ports:
+      - "${THAAP_ANALYST_UI_PORT:-8081}:8081"
+    depends_on:
+      # Started after the API, but not gated on its readiness: nginx resolves the upstream per
+      # request, so the workspace can serve its shell and report an unavailable API rather than
+      # refusing to start at all.
+      - payments-api
 
 volumes:
   thaap-postgres-data:

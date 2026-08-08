@@ -1,0 +1,42 @@
+# Everything the build must not see.
+#
+# This file is a security control, not a build optimisation. A broad `COPY . .` with a developer's
+# working tree behind it is how a live admin bootstrap token ends up in a published image layer,
+# where deleting it in a later layer does not remove it.
+
+# Build output — the image must compile from source, not inherit a warm developer machine.
+target/
+.m2/
+build/
+
+# Credentials and local configuration.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+**/application-local.yml
+**/application-local.yaml
+
+# Version control and tooling state.
+.git/
+.gitignore
+.githooks/
+.github/
+.idea/
+.vscode/
+*.iml
+
+# Anything unrelated to building this service.
+node_modules/
+dist/
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+*~
