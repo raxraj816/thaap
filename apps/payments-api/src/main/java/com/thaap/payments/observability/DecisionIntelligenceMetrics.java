@@ -1,5 +1,6 @@
 package com.thaap.payments.observability;
 
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
@@ -38,8 +39,7 @@ public class DecisionIntelligenceMetrics {
 
     public DecisionIntelligenceMetrics(MeterRegistry registry) {
         this.registry = registry;
-        registry.gauge("thaap.decision_intelligence.bulk.backlog", bulkBacklog);
-        registry.gauge("thaap.decision_intelligence.bulk.oldest_age_seconds", oldestBulkAgeSeconds);
+        publishBacklogGauges();
     }
 
     public void request(String operation, String outcome, long elapsedNanos) {
@@ -85,6 +85,29 @@ public class DecisionIntelligenceMetrics {
     public void bulkBacklog(long count, Duration oldestAge) {
         bulkBacklog.set(Math.max(0, count));
         oldestBulkAgeSeconds.set(Math.max(0, oldestAge.toSeconds()));
+        publishBacklogGauges();
+    }
+
+    /**
+     * Registers the two backlog gauges, and is safe to call repeatedly because Micrometer returns
+     * the existing meter for an id it already holds.
+     *
+     * <p>Registering only in the constructor made these two meters the odd ones out in this class:
+     * every counter and timer here is re-registered on each use, so they reappear on their own if
+     * the registry ever loses them, while a gauge registered once and never again is gone for the
+     * lifetime of the process. A backlog gauge is the entire detection surface for a bulk run whose
+     * worker died — nothing else reports that failure — so a signal that can silently stop existing
+     * is the one signal that must not.
+     *
+     * <p>The reference is deliberately strong. Micrometer's {@code registry.gauge(name, number)}
+     * keeps only a weak one, which reports {@code NaN} once the referent is collected; an operator
+     * alerting on this number cannot distinguish that from a real reading.
+     */
+    private void publishBacklogGauges() {
+        Gauge.builder("thaap.decision_intelligence.bulk.backlog", bulkBacklog,
+                AtomicLong::doubleValue).strongReference(true).register(registry);
+        Gauge.builder("thaap.decision_intelligence.bulk.oldest_age_seconds", oldestBulkAgeSeconds,
+                AtomicLong::doubleValue).strongReference(true).register(registry);
     }
 
     private void require(Set<String> allowed, String value, String field) {
