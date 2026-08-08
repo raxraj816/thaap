@@ -2,6 +2,7 @@ package com.thaap.payments.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.observability.DecisionIntelligenceMetrics;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -100,7 +101,7 @@ public class ApiVersionFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         Object rawRequestId = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
         String requestId = rawRequestId == null ? "unknown" : rawRequestId.toString();
-        ApiErrorResponse body = new ApiErrorResponse(requestId, Instant.now(),
+        ApiErrorResponse body = new ApiErrorResponse(requestId, DatabaseInstant.now(),
                 descriptor.status().value(), descriptor.code(), descriptor.safeMessage(),
                 request.getRequestURI(), List.of(), descriptor.retryable(),
                 descriptor.recoveryAction());

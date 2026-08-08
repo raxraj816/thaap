@@ -23,6 +23,7 @@ import com.thaap.payments.projection.ProjectionNames;
 import com.thaap.payments.support.ApplicationRestartHarness;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -191,7 +192,7 @@ class ProjectionRebuildProcessRestartPostgreSqlTests {
         payload.put("captureMethod", intent.getCaptureMethod().name());
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, intent.getId(),
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 "process-restart-correlation", null, "process-restart-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "process-restart-producer"),
                 TrafficOrigin.MERCHANT_API, payload);

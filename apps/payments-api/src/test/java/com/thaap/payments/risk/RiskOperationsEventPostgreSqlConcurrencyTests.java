@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -89,12 +90,12 @@ class RiskOperationsEventPostgreSqlConcurrencyTests {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         Runnable resolve = () -> producer.manualReviewResolved(fixture.context(),
-                fixture.paymentIntentId(), Instant.now().minusSeconds(1),
+                fixture.paymentIntentId(), DatabaseInstant.now().minusSeconds(1),
                 label + "-resolve", "CONFIRMED_FRAUD", "ACCOUNT_TAKEOVER",
                 TrafficOrigin.MERCHANT_API);
         Runnable recordLabel = () -> producer.fraudLabelRecorded(fixture.context(),
-                fixture.paymentIntentId(), Instant.now().minusSeconds(1),
-                label + "-label", "FRAUD", "MANUAL_REVIEW", Instant.now().minusSeconds(1),
+                fixture.paymentIntentId(), DatabaseInstant.now().minusSeconds(1),
+                label + "-label", "FRAUD", "MANUAL_REVIEW", DatabaseInstant.now().minusSeconds(1),
                 "ACCOUNT_TAKEOVER", TrafficOrigin.MERCHANT_API);
         // Submission order is swapped between the two calls so both arrival orders are
         // exercised deliberately rather than left to the scheduler.
@@ -142,7 +143,7 @@ class RiskOperationsEventPostgreSqlConcurrencyTests {
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(status -> {
             producer.manualReviewResolved(fixture.context(), fixture.paymentIntentId(),
-                    Instant.now().minusSeconds(1), "rollback-request", "CONFIRMED_FRAUD",
+                    DatabaseInstant.now().minusSeconds(1), "rollback-request", "CONFIRMED_FRAUD",
                     "ACCOUNT_TAKEOVER", TrafficOrigin.MERCHANT_API);
             throw new IllegalStateException("operational transition failed after the event");
         })).isInstanceOf(IllegalStateException.class);
@@ -157,7 +158,7 @@ class RiskOperationsEventPostgreSqlConcurrencyTests {
         // The stream is still usable afterwards and starts at version one, so the rollback
         // released its allocation rather than burning it.
         transaction.executeWithoutResult(status -> producer.manualReviewResolved(
-                fixture.context(), fixture.paymentIntentId(), Instant.now().minusSeconds(1),
+                fixture.context(), fixture.paymentIntentId(), DatabaseInstant.now().minusSeconds(1),
                 "rollback-retry-request", "CONFIRMED_FRAUD", "ACCOUNT_TAKEOVER",
                 TrafficOrigin.MERCHANT_API));
         assertThat(streamVersions(fixture.paymentIntentId())).containsExactly(1L);

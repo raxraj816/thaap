@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.thaap.payments.support.ApplicationRestartHarness;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -187,7 +188,7 @@ class DomainEventProducerRolloutPostgreSqlTests {
                 .execute(status -> writer.append(new DomainEventCommand(merchantId,
                         DomainStreamType.PAYMENT, paymentIntentId,
                         DomainEventType.PAYMENT_INTENT_CREATED, version,
-                        Instant.now().minusSeconds(1), "rollout-correlation", null,
+                        DatabaseInstant.now().minusSeconds(1), "rollout-correlation", null,
                         "rollout-request", null,
                         new DomainEventActor(DomainEventActorType.SYSTEM, "rollout-producer"),
                         TrafficOrigin.MERCHANT_API, payload)));

@@ -1,6 +1,7 @@
 package com.thaap.payments.fraud;
 
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -83,7 +84,7 @@ public class RuleExecutionResult {
         this.evaluationOutcome = evaluation.outcome();
         this.latencyUs = evaluation.latencyUs();
         this.trafficOrigin = trafficOrigin;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() { return id; }

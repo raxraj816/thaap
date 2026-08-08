@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -87,7 +88,7 @@ class MerchantRiskPolicyPostgreSqlTests {
         UUID selfPolicy = createPolicy(fixture.creator(), "PG_SELF_POLICY", "pg-self-policy");
         createThreshold(fixture.creator(), selfPolicy, "SELF_AMOUNT", "pg-self-threshold");
         transitionPolicy(fixture.creator(), selfPolicy, "submit", "pg-self-submit", 200);
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO merchant_risk_policy_events
                     (id, merchant_id, policy_version_id, event_type, actor_operator_id, occurred_at, created_at)
@@ -117,7 +118,7 @@ class MerchantRiskPolicyPostgreSqlTests {
         transitionPolicy(first.creator(), secondPolicy, "submit", "pg-race-two-submit", 200);
         transitionPolicy(first.approver(), secondPolicy, "approve", "pg-race-two-approve", 200);
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         try (Connection winner = dataSource.getConnection()) {
             winner.setAutoCommit(false);
             insertPolicyEvent(winner, first.merchant().id(), first.policyId(), first.approver().id(),
@@ -178,7 +179,7 @@ class MerchantRiskPolicyPostgreSqlTests {
             merchantLock.setObject(1, fixture.merchant().id());
             merchantLock.executeQuery();
             insertPolicyEvent(activation, fixture.merchant().id(), fixture.policyId(), fixture.approver().id(),
-                    "ACTIVATED", Instant.now());
+                    "ACTIVATED", DatabaseInstant.now());
             Future<JsonNode> confirm = executor.submit(() -> confirm(fixture.merchant(), payment,
                     "activation-first-confirm"));
             awaitPostgreSqlLockWaiters(1);

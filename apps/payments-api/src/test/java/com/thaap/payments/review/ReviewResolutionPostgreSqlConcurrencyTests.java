@@ -16,6 +16,7 @@ import com.thaap.payments.risk.RiskOperatorService;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.workspace.ReviewNote;
 import com.thaap.payments.workspace.ReviewNoteCipher;
 import com.thaap.payments.workspace.ReviewNoteRepository;
@@ -127,7 +128,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                             ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
                             ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
                             ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
-                            Instant.now().minusSeconds(5), "analyst-first-resolution");
+                            DatabaseInstant.now().minusSeconds(5), "analyst-first-resolution");
                     resolutionOwnsPaymentLock.countDown();
                     await(releaseResolutionCommit);
                 });
@@ -183,7 +184,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                             ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
                             ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
                             ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
-                            Instant.now().minusSeconds(5), "merchant-first-resolution")));
+                            DatabaseInstant.now().minusSeconds(5), "merchant-first-resolution")));
             awaitDatabaseLockWait("payment_intents");
 
             releaseCancellationCommit.countDown();
@@ -207,7 +208,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                     reviewOperationsService.resolve(fixture.analyst().context(), fixture.review().reviewCaseId(),
                             ReviewResolutionOutcome.APPROVE, ReviewClassification.INCONCLUSIVE, null,
                             ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED,
-                            Instant.now().minusSeconds(5), "review_approval-approval-first");
+                            DatabaseInstant.now().minusSeconds(5), "review_approval-approval-first");
                     approvalOwnsPaymentLock.countDown();
                     await(releaseApprovalCommit);
                 });
@@ -274,7 +275,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                             fixture.analyst().context(), fixture.review().reviewCaseId(),
                             ReviewResolutionOutcome.APPROVE, ReviewClassification.INCONCLUSIVE, null,
                             ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED,
-                            Instant.now().minusSeconds(5), "review_approval-cancel-first-approval")));
+                            DatabaseInstant.now().minusSeconds(5), "review_approval-cancel-first-approval")));
             awaitDatabaseLockWait("payment_intents");
 
             releaseCancellationCommit.countDown();
@@ -649,7 +650,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                 ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
                                 ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
                                 ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
-                                Instant.now().minusSeconds(5), "first-competing-resolution");
+                                DatabaseInstant.now().minusSeconds(5), "first-competing-resolution");
                         firstResolutionOwnsPaymentLock.countDown();
                         await(releaseFirstResolution);
                         return result;
@@ -662,7 +663,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                     ReviewResolutionOutcome.CANCEL,
                                     ReviewClassification.INCONCLUSIVE, null,
                                     ReviewResolutionReasonCode.RISK_TOO_HIGH,
-                                    Instant.now().minusSeconds(5), "second-competing-resolution")));
+                                    DatabaseInstant.now().minusSeconds(5), "second-competing-resolution")));
             awaitDatabaseLockWait("payment_intents");
 
             releaseFirstResolution.countDown();
@@ -695,7 +696,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                 fixture.analyst().context(), fixture.review().reviewCaseId(),
                                 ReviewResolutionOutcome.APPROVE, ReviewClassification.INCONCLUSIVE, null,
                                 ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED,
-                                Instant.now().minusSeconds(5), "review_approval-first-approval");
+                                DatabaseInstant.now().minusSeconds(5), "review_approval-first-approval");
                         firstApprovalOwnsPaymentLock.countDown();
                         await(releaseFirstApproval);
                         return result;
@@ -709,7 +710,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                     ReviewResolutionOutcome.APPROVE,
                                     ReviewClassification.CONFIRMED_LEGITIMATE, null,
                                     ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED,
-                                    Instant.now().minusSeconds(4), "review_approval-second-approval")));
+                                    DatabaseInstant.now().minusSeconds(4), "review_approval-second-approval")));
             awaitDatabaseLockWait("payment_intents");
 
             releaseFirstApproval.countDown();
@@ -790,7 +791,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                             fixture.analyst().context(), fixture.review().reviewCaseId(),
                             ReviewResolutionOutcome.APPROVE, ReviewClassification.INCONCLUSIVE, null,
                             ReviewResolutionReasonCode.MANUAL_REVIEW_APPROVED,
-                            Instant.now().minusSeconds(5), "review_approval-disabled-approval")));
+                            DatabaseInstant.now().minusSeconds(5), "review_approval-disabled-approval")));
             awaitDatabaseLockWait("risk_operators");
 
             releaseDisable.countDown();
@@ -1036,8 +1037,8 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
     }
 
     private UUID createDueReviewNote(Fixture fixture) {
-        Instant createdAt = Instant.now().minus(java.time.Duration.ofDays(91));
-        Instant retentionExpiresAt = Instant.now().minus(java.time.Duration.ofDays(1));
+        Instant createdAt = DatabaseInstant.now().minus(java.time.Duration.ofDays(91));
+        Instant retentionExpiresAt = DatabaseInstant.now().minus(java.time.Duration.ofDays(1));
         UUID noteId = UUID.randomUUID();
         ReviewNoteCipher.EncryptedNote encrypted = reviewNoteCipher.encrypt(
                 "Historical delivery verification context", fixture.merchant().id(),
@@ -1240,7 +1241,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                   "reasonCode":"CARD_TESTING_CONFIRMED",
                   "evidenceOccurredAt":"%s"
                 }
-                """.formatted(Instant.now().minusSeconds(5));
+                """.formatted(DatabaseInstant.now().minusSeconds(5));
     }
 
     private String approvalBody() {
@@ -1251,7 +1252,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                   "reasonCode":"MANUAL_REVIEW_APPROVED",
                   "evidenceOccurredAt":"%s"
                 }
-                """.formatted(Instant.now().minusSeconds(5));
+                """.formatted(DatabaseInstant.now().minusSeconds(5));
     }
 
     /**
@@ -1278,7 +1279,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                         ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
                                         ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
                                         ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
-                                        Instant.now().minusSeconds(5), "competing-events-first");
+                                        DatabaseInstant.now().minusSeconds(5), "competing-events-first");
                         firstResolutionOwnsPaymentLock.countDown();
                         await(releaseFirstResolution);
                         return result;
@@ -1292,7 +1293,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                                     ReviewResolutionOutcome.CANCEL,
                                     ReviewClassification.INCONCLUSIVE, null,
                                     ReviewResolutionReasonCode.RISK_TOO_HIGH,
-                                    Instant.now().minusSeconds(5), "competing-events-second")));
+                                    DatabaseInstant.now().minusSeconds(5), "competing-events-second")));
             awaitDatabaseLockWait("payment_intents");
 
             releaseFirstResolution.countDown();
@@ -1337,7 +1338,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                         fixture.review().reviewCaseId(), ReviewResolutionOutcome.CANCEL,
                         ReviewClassification.INCONCLUSIVE, null,
                         ReviewResolutionReasonCode.RISK_TOO_HIGH,
-                        Instant.now().minusSeconds(5), "viewer-resolve-request")))
+                        DatabaseInstant.now().minusSeconds(5), "viewer-resolve-request")))
                 .isInstanceOf(PublicApiException.class);
 
         assertThat(count("domain_events")).isEqualTo(eventsBefore);
@@ -1372,7 +1373,7 @@ class ReviewResolutionPostgreSqlConcurrencyTests {
                         ReviewResolutionOutcome.CANCEL_AND_REPORT_FRAUD,
                         ReviewClassification.CONFIRMED_FRAUD, FraudType.CARD_TESTING,
                         ReviewResolutionReasonCode.CARD_TESTING_CONFIRMED,
-                        Instant.now().minusSeconds(5), "disabled-resolve-request")))
+                        DatabaseInstant.now().minusSeconds(5), "disabled-resolve-request")))
                 .isInstanceOf(PublicApiException.class);
 
         assertThat(count("domain_events")).isEqualTo(eventsAfterAssign);

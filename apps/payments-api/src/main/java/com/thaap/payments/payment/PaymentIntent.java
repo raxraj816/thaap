@@ -2,6 +2,7 @@ package com.thaap.payments.payment;
 
 import com.thaap.payments.api.PublicApiErrorDescriptor;
 import com.thaap.payments.api.PublicApiException;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -93,7 +94,7 @@ public class PaymentIntent {
         this.description = description;
         this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
         this.trafficOrigin = trafficOrigin;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
         this.updatedAt = this.createdAt;
     }
 
@@ -151,25 +152,25 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_PROCESSABLE, "PaymentIntent cannot be processed from status " + status);
         }
         this.status = PaymentIntentStatus.PROCESSING;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markBlockedAfterFraudDecision() {
         requireConfirmable("blocked by fraud");
         this.status = PaymentIntentStatus.BLOCKED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresActionAfterFraudDecision() {
         requireConfirmable("require fraud step-up");
         this.status = PaymentIntentStatus.REQUIRES_ACTION;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresReviewAfterFraudDecision() {
         requireConfirmable("require review");
         this.status = PaymentIntentStatus.REQUIRES_REVIEW;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresCaptureAfterAuthorization() {
@@ -177,7 +178,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_AUTHORIZABLE, "PaymentIntent cannot be authorization-approved from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_CAPTURE;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markProcessingAfterReviewApproval() {
@@ -185,7 +186,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_RESUMABLE_AFTER_REVIEW, "PaymentIntent cannot continue after review from status " + status);
         }
         this.status = PaymentIntentStatus.PROCESSING;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresPaymentMethodAfterProcessorDecline() {
@@ -193,7 +194,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_DECLINABLE, "PaymentIntent cannot be processor-declined from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresActionAfterProcessorStepUp() {
@@ -201,7 +202,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_ACTION_NOT_REQUIRABLE, "PaymentIntent cannot require action from status " + status);
         }
         this.status = PaymentIntentStatus.REQUIRES_ACTION;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markProcessingAfterAuthentication() {
@@ -209,7 +210,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_AUTHENTICATION_NOT_CONTINUABLE, "PaymentIntent cannot continue authentication from status " + status);
         }
         status = PaymentIntentStatus.PROCESSING;
-        updatedAt = Instant.now();
+        updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresPaymentMethodAfterAuthenticationFailure() {
@@ -217,7 +218,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_AUTHENTICATION_NOT_FAILABLE, "PaymentIntent cannot fail authentication from status " + status);
         }
         status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD;
-        updatedAt = Instant.now();
+        updatedAt = DatabaseInstant.now();
     }
 
     public void capture() {
@@ -225,7 +226,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CAPTURABLE, "PaymentIntent cannot be captured from status " + status);
         }
         this.status = PaymentIntentStatus.CAPTURED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void cancel() {
@@ -239,7 +240,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_CANCELABLE, "PaymentIntent cannot be canceled from status " + status);
         }
         this.status = PaymentIntentStatus.CANCELED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void refund() {
@@ -254,7 +255,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.REFUND_AMOUNT_INVALID, "Refund amount must equal captured PaymentIntent amount until partial refunds are supported");
         }
         this.status = PaymentIntentStatus.REFUNDED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void dispute() {
@@ -262,7 +263,7 @@ public class PaymentIntent {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_INTENT_NOT_DISPUTABLE, "PaymentIntent cannot be disputed from status " + status);
         }
         this.status = PaymentIntentStatus.DISPUTED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     private void requireConfirmable(String transition) {

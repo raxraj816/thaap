@@ -66,6 +66,7 @@ import com.thaap.payments.ratelimit.RateLimitOperation;
 import com.thaap.payments.ratelimit.RequestRateLimitService;
 import com.thaap.payments.riskpolicy.MerchantRiskPolicyEvaluator;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.velocity.VelocityAssessment;
 import com.thaap.payments.velocity.VelocityDecisionAggregator;
 import com.thaap.payments.velocity.VelocityRiskCoordinator;
@@ -272,7 +273,7 @@ public class PaymentIntentController {
                 paymentIntent, paymentAttempt, paymentMethod, riskContext);
         FraudListAssessment fraudListAssessment = fraudListEvaluator.evaluate(
                 paymentIntent, paymentMethod, riskContext);
-        Instant decisionStartedAt = Instant.now();
+        Instant decisionStartedAt = DatabaseInstant.now();
         MerchantRiskConfiguration merchantRiskConfiguration = merchantRiskPolicyEvaluator.loadConfiguration(
                 merchantContext.merchantId(), decisionStartedAt);
         MaterializedFeatureSet materializedFeatures = featureMaterializer.materialize(
@@ -298,7 +299,7 @@ public class PaymentIntentController {
         long engineElapsedNanos = Math.max(0L, System.nanoTime() - engineStartedNanos);
         fraudDecisionMetrics.observeDecisionTransaction(
                 decision, paymentAttempt.getTrafficOrigin(), engineElapsedNanos);
-        Instant decisionCompletedAt = Instant.now();
+        Instant decisionCompletedAt = DatabaseInstant.now();
         long latencyMs = Math.max(0L, Duration.between(decisionStartedAt, decisionCompletedAt).toMillis());
         PersistedFraudLineage persistedFraudLineage = persistFraudLineage(
                 merchantContext, paymentAttempt, materializedFeatures,

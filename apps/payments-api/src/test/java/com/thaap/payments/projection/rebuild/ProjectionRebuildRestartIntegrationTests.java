@@ -26,6 +26,7 @@ import com.thaap.payments.platform.PlatformOperatorService;
 import com.thaap.payments.projection.ProjectionNames;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -375,7 +376,7 @@ class ProjectionRebuildRestartIntegrationTests {
         payload.put("captureMethod", intent.getCaptureMethod().name());
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, intent.getId(),
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 "restart-correlation", null, "restart-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "restart-producer"),
                 TrafficOrigin.MERCHANT_API, payload);

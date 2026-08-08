@@ -6,6 +6,7 @@ import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.riskcontext.RiskContext;
 import com.thaap.payments.riskpolicy.MerchantRiskTier;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.velocity.VelocityAssessment;
 import com.thaap.payments.velocity.VelocityAvailability;
 import com.thaap.payments.velocity.VelocitySignal;
@@ -68,7 +69,7 @@ public class FeatureMaterializer {
                     featureDefinitionRepository.findAllByOrderByFeatureCodeAscFeatureVersionAsc();
             catalogueValidator.validate(definitions);
             Map<String, FeatureDefinition> byCode = definitionsByCode(definitions);
-            Instant computedAt = Instant.now();
+            Instant computedAt = DatabaseInstant.now();
             Map<String, SourceValue> sources = sourceValues(paymentIntent, paymentAttempt, paymentMethod, riskContext,
                     velocityAssessment, merchantRiskTier);
             List<FeatureValue> values = new ArrayList<>();

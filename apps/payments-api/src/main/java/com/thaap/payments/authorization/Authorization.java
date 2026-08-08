@@ -1,5 +1,6 @@
 package com.thaap.payments.authorization;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -110,7 +111,7 @@ public class Authorization {
         this.avsPostalCodeCheck = avsPostalCodeCheck;
         this.threeDsResult = threeDsResult;
         this.simulatorOutcomeCode = simulatorOutcomeCode;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

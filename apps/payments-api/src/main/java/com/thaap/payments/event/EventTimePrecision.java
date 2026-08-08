@@ -1,17 +1,19 @@
 package com.thaap.payments.event;
 
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 
+/**
+ * The event-stream spelling of {@link DatabaseInstant}. It delegates rather than repeating the
+ * rule, so the precision the canonical codec enforces and the precision the rest of the
+ * application mints cannot drift apart.
+ */
 public final class EventTimePrecision {
 
     private EventTimePrecision() {
     }
 
     public static Instant toPostgreSqlMicroseconds(Instant value) {
-        if (value == null) {
-            throw new IllegalArgumentException("Event time is required");
-        }
-        return value.truncatedTo(ChronoUnit.MICROS);
+        return DatabaseInstant.of(value);
     }
 }

@@ -1,5 +1,6 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.annotation.PostConstruct;
 import java.time.Clock;
 import java.time.Duration;
@@ -45,7 +46,7 @@ public class WebhookExecutionConfiguration {
         this.secretCipher = secretCipher;
         this.targetPolicy = targetPolicy;
         this.endpointRepository = null;
-        this.clock = Clock.systemUTC();
+        this.clock = DatabaseInstant.tick(Clock.systemUTC());
         this.leaseDuration = Duration.ofSeconds(30);
         this.connectTimeout = Duration.ofSeconds(2);
         this.requestTimeout = Duration.ofSeconds(5);

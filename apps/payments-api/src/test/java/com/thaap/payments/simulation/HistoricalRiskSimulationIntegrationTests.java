@@ -16,6 +16,7 @@ import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -403,7 +404,7 @@ class HistoricalRiskSimulationIntegrationTests {
         UUID decisionId = UUID.fromString(confirmation.get("fraudDecisionId").asText());
         Instant decisionAt = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM fraud_decisions WHERE id = ?", Instant.class, decisionId);
-        Instant asOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant asOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         RiskOperatorContext operator = new RiskOperatorContext(merchant.id(), manager.id(),
                 "simulation-manager", RiskOperatorRole.RISK_MANAGER, "risk_test");
 
@@ -550,7 +551,7 @@ class HistoricalRiskSimulationIntegrationTests {
             RiskSimulationCandidateType candidateType, UUID candidateId) {
         RiskSimulationCandidateSnapshotService.FrozenCandidate candidate = snapshotService.freeze(
                 merchantId, candidateType, candidateId);
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant now = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         UUID runId = UUID.randomUUID();
         jdbcTemplate.update("""
                 INSERT INTO risk_simulation_runs
@@ -583,7 +584,7 @@ class HistoricalRiskSimulationIntegrationTests {
 
     private FraudDecisionAction simulatedAction(RiskOperatorContext operator,
             RiskSimulationCandidateType candidateType, UUID candidateId, Instant decisionAt) {
-        Instant asOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant asOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         RiskSimulationService.SimulationView queued = service.create(operator, candidateType,
                 candidateId, decisionAt, decisionAt.plus(1, ChronoUnit.MICROS),
                 asOf, asOf, RiskSimulationTrafficOriginPolicy.LIVE_ONLY,

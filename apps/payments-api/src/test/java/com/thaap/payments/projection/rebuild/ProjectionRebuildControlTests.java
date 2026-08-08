@@ -45,6 +45,7 @@ import com.thaap.payments.projection.ProjectionProcessingOutcome;
 import com.thaap.payments.projection.TransportedDomainEvent;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -270,7 +271,7 @@ class ProjectionRebuildControlTests {
         PaymentAttempt attempt = paymentAttemptRepository.saveAndFlush(new PaymentAttempt(
                 merchant.getId(), intent.getId(), paymentMethod.getId(),
                 "rebuild-risk-score-attempt", 1));
-        Instant decisionCompletedAt = Instant.now();
+        Instant decisionCompletedAt = DatabaseInstant.now();
         ConfirmDecision sourceDecision = new ConfirmDecision(FraudDecisionAction.ALLOW,
                 new BigDecimal("0.0500"), FraudRiskLevel.LOW, "rules_v1", null,
                 List.of(FraudDecisionReasonCode.NO_RULE_MATCH));
@@ -482,7 +483,7 @@ class ProjectionRebuildControlTests {
         payload.put("captureMethod", intent.getCaptureMethod().name());
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, intent.getId(),
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 "rebuild-chunk-contract", null, "rebuild-chunk-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "rebuild-test-producer"),
                 TrafficOrigin.MERCHANT_API, payload);

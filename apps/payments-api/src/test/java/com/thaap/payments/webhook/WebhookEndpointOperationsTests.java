@@ -11,6 +11,7 @@ import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.time.Clock;
@@ -227,7 +228,7 @@ class WebhookEndpointOperationsTests {
                 new WebhookEndpointCreationKeyConfiguration(
                         creationRecordRepository,
                         new SensitiveValueHasher(newPepper, "webhook-v2", ""),
-                        Clock.systemUTC());
+                        DatabaseInstant.tick(Clock.systemUTC()));
         assertThatThrownBy(missingOldKey::afterPropertiesSet)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("webhook-v1");
@@ -251,15 +252,15 @@ class WebhookEndpointOperationsTests {
                 SET created_at = ?,
                     expires_at = ?
                 WHERE webhook_endpoint_id = ?
-                """, java.sql.Timestamp.from(Instant.now().minusSeconds(120)),
-                java.sql.Timestamp.from(Instant.now().minusSeconds(1)),
+                """, java.sql.Timestamp.from(DatabaseInstant.now().minusSeconds(120)),
+                java.sql.Timestamp.from(DatabaseInstant.now().minusSeconds(1)),
                 original.endpoint().getId());
 
         SensitiveValueHasher newHasher = new SensitiveValueHasher(
                 "expired-webhook-new-pepper", "expired-webhook-v2", "");
         WebhookEndpointCreationKeyConfiguration retiredOldKey =
                 new WebhookEndpointCreationKeyConfiguration(
-                        creationRecordRepository, newHasher, Clock.systemUTC());
+                        creationRecordRepository, newHasher, DatabaseInstant.tick(Clock.systemUTC()));
         retiredOldKey.afterPropertiesSet();
         WebhookEndpointService.EndpointSecretResult replacement =
                 endpointService(newHasher).create(
@@ -289,8 +290,8 @@ class WebhookEndpointOperationsTests {
                 SET created_at = ?,
                     expires_at = ?
                 WHERE webhook_endpoint_id = ?
-                """, java.sql.Timestamp.from(Instant.now().minusSeconds(120)),
-                java.sql.Timestamp.from(Instant.now().minusSeconds(1)),
+                """, java.sql.Timestamp.from(DatabaseInstant.now().minusSeconds(120)),
+                java.sql.Timestamp.from(DatabaseInstant.now().minusSeconds(1)),
                 original.endpoint().getId());
 
         WebhookEndpointService.EndpointSecretResult replacement = endpointService.create(
@@ -380,7 +381,7 @@ class WebhookEndpointOperationsTests {
         MerchantContext merchantContext = context(merchant, "reclaim-webhook");
         String staleKey = "stale-create-key";
         String staleUrl = "https://merchant.example/reclaimed";
-        Instant staleStartedAt = Instant.now().minusSeconds(120);
+        Instant staleStartedAt = DatabaseInstant.now().minusSeconds(120);
         WebhookEndpointCreationRecord staleRecord = new WebhookEndpointCreationRecord(
                 merchant.getId(),
                 sensitiveValueHasher.hmacSha256("webhook.endpoint.idempotency", staleKey),
@@ -405,7 +406,7 @@ class WebhookEndpointOperationsTests {
 
         String activeKey = "active-create-key";
         String activeUrl = "https://merchant.example/active-reservation";
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         WebhookEndpointCreationRecord activeRecord = new WebhookEndpointCreationRecord(
                 merchant.getId(),
                 sensitiveValueHasher.hmacSha256("webhook.endpoint.idempotency", activeKey),
@@ -456,7 +457,7 @@ class WebhookEndpointOperationsTests {
                 WHERE webhook_endpoint_id = ?
                 """, replayEndpoint.endpoint().getId());
 
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         assertThat(endpointRepository.findRequiredSecretKeyVersions(now))
                 .containsExactlyInAnyOrder(
                         "current-v2", "previous-v1", "test-v1", "replay-v0");
@@ -553,7 +554,7 @@ class WebhookEndpointOperationsTests {
                 secretCipher,
                 auditLogService,
                 webhookMetrics,
-                Clock.systemUTC(),
+                DatabaseInstant.tick(Clock.systemUTC()),
                 hasher,
                 transactionManager,
                 Duration.ofMinutes(15),

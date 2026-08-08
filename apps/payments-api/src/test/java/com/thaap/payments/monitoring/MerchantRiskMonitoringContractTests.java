@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -67,7 +68,7 @@ class MerchantRiskMonitoringContractTests {
         confirm(merchant, customerId, approvedMethod, "synthetic-approved", true);
         Map<String, Long> domainTruthBeforeMonitoring = domainTruthCounts();
 
-        Instant asOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant asOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         Instant start = asOf.minus(1, ChronoUnit.HOURS);
         JsonNode live = summary(viewer, start, asOf, asOf, null);
         JsonNode liveApproval = metric(live, "AUTHORIZATION_APPROVAL_RATE");
@@ -120,7 +121,7 @@ class MerchantRiskMonitoringContractTests {
         OperatorAccess manager = createOperator(merchant, "monitoring-manager", "RISK_MANAGER");
         OperatorAccess analyst = createOperator(merchant, "monitoring-analyst", "ANALYST");
         OperatorAccess otherManager = createOperator(other, "monitoring-other-manager", "RISK_MANAGER");
-        Instant asOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant asOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         String body = snapshotBody(asOf.minus(1, ChronoUnit.HOURS), asOf, asOf, "MERCHANT_API_ONLY");
 
         mockMvc.perform(post("/risk/monitoring/snapshots")
@@ -169,7 +170,7 @@ class MerchantRiskMonitoringContractTests {
         for (int index = 0; index < 20; index++) {
             confirm(merchant, customerId, cvcFailureMethod, "enumeration-" + index, false);
         }
-        Instant asOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant asOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         String body = snapshotBody(asOf.minus(1, ChronoUnit.HOURS), asOf, asOf,
                 "MERCHANT_API_ONLY");
 
@@ -198,8 +199,8 @@ class MerchantRiskMonitoringContractTests {
                 "4242424242424242", "point-in-time-method");
         UUID paymentIntentId = createAndConfirmCapturedPayment(
                 merchant, customerId, paymentMethodId, "point-in-time-capture");
-        Instant beforeEvidence = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant beforeEvidence = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant receivedAt = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         if (!receivedAt.isAfter(beforeEvidence)) {
             receivedAt = beforeEvidence.plus(1, ChronoUnit.MICROS);
         }
@@ -219,7 +220,7 @@ class MerchantRiskMonitoringContractTests {
                 Timestamp.class, paymentIntentId);
         assertThat(availableTimestamp).isNotNull();
         Instant availableAt = availableTimestamp.toInstant();
-        Instant afterEvidence = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant afterEvidence = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         Instant windowStart = beforeEvidence.minus(1, ChronoUnit.HOURS);
 
         JsonNode before = summary(viewer, windowStart, beforeEvidence, beforeEvidence, null);
@@ -270,7 +271,7 @@ class MerchantRiskMonitoringContractTests {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM incident_evidence_links", Integer.class)).isZero();
 
-        Instant frozenAsOf = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant frozenAsOf = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         Instant windowStart = frozenAsOf.minus(1, ChronoUnit.HOURS);
         JsonNode summaryBeforeLink = summary(
                 viewer, windowStart, frozenAsOf, frozenAsOf, null);
@@ -295,7 +296,7 @@ class MerchantRiskMonitoringContractTests {
                 "SELECT COUNT(DISTINCT linked_at) FROM incident_evidence_links", Integer.class))
                 .isOne();
         Instant afterLinkedAt = linkedAt.plus(1, ChronoUnit.MICROS);
-        while (Instant.now().isBefore(afterLinkedAt)) {
+        while (DatabaseInstant.now().isBefore(afterLinkedAt)) {
             Thread.onSpinWait();
         }
 
@@ -349,7 +350,7 @@ class MerchantRiskMonitoringContractTests {
         assertThat(reportingBuckets).hasSize(1);
         assertThat(reportingBuckets.get(0).get("sourceCode").asText()).isEqualTo("UNCLASSIFIED");
 
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant now = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         mockMvc.perform(get("/risk/monitoring/summary").header(RISK_KEY, viewer.secret())
                         .param("windowStart", now.toString())
                         .param("windowEnd", now.minusSeconds(1).toString())
@@ -453,7 +454,7 @@ class MerchantRiskMonitoringContractTests {
                         resultSet.getObject("fraud_decision_id", UUID.class),
                         resultSet.getTimestamp("observed_at").toInstant()), merchantId);
         assertThat(evidence).hasSize(3);
-        Instant linkedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant linkedAt = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         Instant firstEvidenceAt = evidence.getFirst().observedAt();
         Instant lastEvidenceAt = evidence.getLast().observedAt();
         UUID incidentId = UUID.randomUUID();

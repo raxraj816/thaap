@@ -1,6 +1,7 @@
 package com.thaap.payments.webhook;
 
 import com.thaap.payments.security.SecretHasher;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -103,7 +104,7 @@ public class WebhookEndpoint {
         this.signingSecretHash = SecretHasher.sha256(rawSigningSecret);
         this.signingSecretGeneration = UUID.randomUUID();
         this.verificationStatus = WebhookEndpointVerificationStatus.NOT_REQUESTED;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public WebhookEndpoint(UUID id, UUID merchantId, String url, String rawSigningSecret,

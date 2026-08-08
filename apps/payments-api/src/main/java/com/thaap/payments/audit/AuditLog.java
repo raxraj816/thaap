@@ -1,5 +1,6 @@
 package com.thaap.payments.audit;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -90,7 +91,7 @@ public class AuditLog {
     @PrePersist
     void onCreate() {
         if (createdAt == null) {
-            createdAt = Instant.now();
+            createdAt = DatabaseInstant.now();
         }
     }
 

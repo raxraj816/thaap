@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.event.DomainEventRepository;
 import com.thaap.payments.projection.PaymentRiskProjectionConsumerService;
 import com.thaap.payments.support.RiskWorkspaceScenario;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -179,7 +180,7 @@ class RelatedPaymentContractTests {
     @Test
     void aWindowWiderThanTheProductPromiseOrPointingAtTheFutureIsRefused() throws Exception {
         RiskWorkspaceScenario.Payment seed = scenario.allowedPayment(merchant, "range-seed");
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
 
         expectRefusal(seed.paymentIntentId(),
                 "?from=" + now.minus(Duration.ofDays(120)) + "&to=" + now);

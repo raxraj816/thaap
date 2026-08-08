@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Duration;
@@ -232,9 +233,9 @@ class RiskContextPostgreSqlTests {
     }
 
     private List<String> awaitBlockedQueries(int expectedCount) throws InterruptedException {
-        Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
+        Instant deadline = DatabaseInstant.now().plus(Duration.ofSeconds(10));
         List<String> queries = List.of();
-        while (Instant.now().isBefore(deadline)) {
+        while (DatabaseInstant.now().isBefore(deadline)) {
             queries = jdbcTemplate.queryForList("""
                     SELECT query FROM pg_stat_activity
                     WHERE datname = current_database() AND pid <> pg_backend_pid()
@@ -249,8 +250,8 @@ class RiskContextPostgreSqlTests {
     }
 
     private void awaitBlockedQuery(String fragment, int expectedCount) throws InterruptedException {
-        Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plus(Duration.ofSeconds(10));
+        while (DatabaseInstant.now().isBefore(deadline)) {
             Integer count = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*) FROM pg_stat_activity
                     WHERE datname = current_database() AND pid <> pg_backend_pid()

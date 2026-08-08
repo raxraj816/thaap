@@ -18,6 +18,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -116,12 +117,12 @@ class InvestigationWorkflowLineageTests {
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("lineage-idem"),
-                sixtyFourChars("lineage-digest"), 2, java.time.Instant.now());
+                sixtyFourChars("lineage-digest"), 2, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId,
-                succeeding.reviewCaseId(), 0, 1, java.time.Instant.now());
+                succeeding.reviewCaseId(), 0, 1, DatabaseInstant.now());
         // Requesting version 5 against a case still at 0 is the stale partition.
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId,
-                stale.reviewCaseId(), 5, 2, java.time.Instant.now());
+                stale.reviewCaseId(), 5, 2, DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "lineage-worker");
         ReviewBulkActionStore.ClaimedItem item;
@@ -165,9 +166,9 @@ class InvestigationWorkflowLineageTests {
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("no-analytics-idem"),
-                sixtyFourChars("no-analytics-digest"), 1, java.time.Instant.now());
+                sixtyFourChars("no-analytics-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId,
-                payment.reviewCaseId(), 0, 1, java.time.Instant.now());
+                payment.reviewCaseId(), 0, 1, DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "no-analytics-worker");
         itemExecutor.execute(store.claimNext(lease));
         store.finalizeRequest(lease);

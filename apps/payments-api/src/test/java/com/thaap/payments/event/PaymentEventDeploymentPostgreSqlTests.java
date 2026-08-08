@@ -14,6 +14,7 @@ import com.thaap.payments.eventpublication.EventPublicationPublisher;
 import com.thaap.payments.eventpublication.KafkaDomainEventSender;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
@@ -259,7 +260,7 @@ class PaymentEventDeploymentPostgreSqlTests {
         payload.put("captureMethod", "AUTOMATIC");
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, paymentIntentId,
                 DomainEventType.PAYMENT_INTENT_CREATED, version,
-                Instant.now().minusSeconds(1), "deployment-correlation", null,
+                DatabaseInstant.now().minusSeconds(1), "deployment-correlation", null,
                 "deployment-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "deployment-producer"),
                 TrafficOrigin.MERCHANT_API, payload);

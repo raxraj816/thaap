@@ -11,6 +11,7 @@ import com.thaap.payments.eventpublication.EventPublicationPublisher;
 import com.thaap.payments.eventpublication.KafkaDomainEventSender;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.lang.reflect.Constructor;
 import java.time.Instant;
 import java.util.Arrays;
@@ -146,8 +147,8 @@ class RiskOperationsEventDeploymentPostgreSqlTests {
 
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 producer.fraudLabelRecorded(fixture.context(), fixture.paymentIntentId(),
-                        Instant.now().minusSeconds(1), "risk-deployment-request", "FRAUD",
-                        "MANUAL_REVIEW", Instant.now().minusSeconds(1),
+                        DatabaseInstant.now().minusSeconds(1), "risk-deployment-request", "FRAUD",
+                        "MANUAL_REVIEW", DatabaseInstant.now().minusSeconds(1),
                         "STOLEN_PAYMENT_CREDENTIAL", TrafficOrigin.MERCHANT_API));
 
         assertThat(count("domain_events")).isEqualTo(1);
@@ -170,7 +171,7 @@ class RiskOperationsEventDeploymentPostgreSqlTests {
         Fixture fixture = seedPaymentStream("broker-absent");
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 producer.manualReviewResolved(fixture.context(), fixture.paymentIntentId(),
-                        Instant.now().minusSeconds(1), "risk-broker-absent-request",
+                        DatabaseInstant.now().minusSeconds(1), "risk-broker-absent-request",
                         "CONFIRMED_FRAUD", "STOLEN_PAYMENT_CREDENTIAL",
                         TrafficOrigin.MERCHANT_API));
 

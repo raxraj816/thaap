@@ -14,6 +14,7 @@ import com.thaap.payments.replay.OfflineReplayDatasetWorker.WorkOutcome;
 import com.thaap.payments.replay.OfflineReplayDatasetWorker.WorkerClaim;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
@@ -427,7 +428,7 @@ class OfflineReplayDatasetRestartIntegrationTests {
                 """, UUID.class, merchant.id(), paymentAttemptId);
         Instant decisionAt = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM fraud_decisions WHERE id = ?", Instant.class, decisionId);
-        Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant receivedAt = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         mockMvc.perform(post("/chargebacks").header(API_KEY, merchant.apiKey())
                         .header(IDEMPOTENCY_KEY, key + "-chargeback")
                         .contentType(APPLICATION_JSON)
@@ -444,7 +445,7 @@ class OfflineReplayDatasetRestartIntegrationTests {
                 SELECT available_at FROM fraud_labels
                  WHERE merchant_id = ? AND payment_attempt_id = ?
                 """, Instant.class, merchant.id(), paymentAttemptId);
-        Instant cutoffAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant cutoffAt = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         if (cutoffAt.isBefore(labelAvailableAt)) {
             cutoffAt = labelAvailableAt;
         }

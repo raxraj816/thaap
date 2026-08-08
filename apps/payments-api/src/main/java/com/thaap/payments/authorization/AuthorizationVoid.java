@@ -1,5 +1,6 @@
 package com.thaap.payments.authorization;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -66,7 +67,7 @@ public class AuthorizationVoid {
         this.paymentIntentId = paymentIntentId;
         this.status = AuthorizationVoidStatus.RECORDED;
         this.reason = AuthorizationVoidReason.MERCHANT_CANCELED;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

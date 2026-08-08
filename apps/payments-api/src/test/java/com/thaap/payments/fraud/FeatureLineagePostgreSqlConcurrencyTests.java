@@ -24,6 +24,7 @@ import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.riskcontext.RiskContext;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.velocity.VelocityAssessment;
 import java.sql.Connection;
 import java.sql.Statement;
@@ -439,9 +440,9 @@ class FeatureLineagePostgreSqlConcurrencyTests {
     }
 
     private List<String> awaitBlockedQueries(int expectedCount) throws InterruptedException {
-        Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
+        Instant deadline = DatabaseInstant.now().plus(Duration.ofSeconds(10));
         List<String> queries = List.of();
-        while (Instant.now().isBefore(deadline)) {
+        while (DatabaseInstant.now().isBefore(deadline)) {
             queries = jdbcTemplate.queryForList("""
                     SELECT query
                     FROM pg_stat_activity
@@ -458,8 +459,8 @@ class FeatureLineagePostgreSqlConcurrencyTests {
     }
 
     private void awaitBlockedQuery(String fragment, int expectedCount) throws InterruptedException {
-        Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plus(Duration.ofSeconds(10));
+        while (DatabaseInstant.now().isBefore(deadline)) {
             Integer count = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*)
                     FROM pg_stat_activity

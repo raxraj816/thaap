@@ -21,6 +21,7 @@ import com.thaap.payments.projection.rebuild.ProjectionRebuildDispatcher;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
@@ -220,7 +221,7 @@ abstract class PhaseFiveClosureFixture {
                         .content("{\"paymentMethodId\":\"" + paymentMethodId + "\"}"))
                 .andExpect(status().isCreated());
 
-        Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant receivedAt = DatabaseInstant.now().truncatedTo(ChronoUnit.MICROS);
         mockMvc.perform(post("/chargebacks").header(API_KEY, apiKey)
                         .header(IDEMPOTENCY_KEY, key + "-chargeback")
                         .contentType(APPLICATION_JSON)

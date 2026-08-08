@@ -33,6 +33,7 @@ import com.thaap.payments.projection.ProjectionProcessingOutcome;
 import com.thaap.payments.projection.TransportedDomainEvent;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -567,7 +568,7 @@ class ProjectionGenerationActivationPostgreSqlConcurrencyTests {
         payload.put("captureMethod", intent.getCaptureMethod().name());
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, intent.getId(),
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 "activation-race-correlation", null, "activation-race-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "activation-race-producer"),
                 TrafficOrigin.MERCHANT_API, payload);

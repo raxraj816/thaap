@@ -2,6 +2,7 @@ package com.thaap.payments.paymentattempt;
 
 import com.thaap.payments.api.PublicApiErrorDescriptor;
 import com.thaap.payments.api.PublicApiException;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -95,7 +96,7 @@ public class PaymentAttempt {
         this.status = PaymentAttemptStatus.CREATED;
         this.attemptNumber = attemptNumber;
         this.trafficOrigin = trafficOrigin;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
         this.updatedAt = this.createdAt;
     }
 
@@ -159,7 +160,7 @@ public class PaymentAttempt {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_FRAUD_DECISION_EXISTS, "PaymentAttempt already has a fraud decision");
         }
         this.fraudDecisionId = fraudDecisionId;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markReadyForProcessor() {
@@ -167,26 +168,26 @@ public class PaymentAttempt {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_PROCESSOR_READY, "PaymentAttempt cannot be made processor-ready from status " + status);
         }
         this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markBlockedByFraud() {
         requireCreatedWithFraudDecision("blocked");
         this.status = PaymentAttemptStatus.BLOCKED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresActionByFraud() {
         requireCreatedWithFraudDecision("action-required");
         this.status = PaymentAttemptStatus.REQUIRES_ACTION;
         this.threeDsStatus = ThreeDsStatus.REQUESTED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markInReview() {
         requireCreatedWithFraudDecision("in-review");
         this.status = PaymentAttemptStatus.IN_REVIEW;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void cancelFromReview() {
@@ -194,7 +195,7 @@ public class PaymentAttempt {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_CANCELABLE, "PaymentAttempt cannot be canceled from status " + status);
         }
         this.status = PaymentAttemptStatus.CANCELED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markReadyForProcessorAfterReview() {
@@ -202,21 +203,21 @@ public class PaymentAttempt {
             throw new PublicApiException(PublicApiErrorDescriptor.PAYMENT_ATTEMPT_NOT_RESUMABLE_AFTER_REVIEW, "PaymentAttempt cannot continue after review from status " + status);
         }
         this.status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markAuthorized(String processorAuthorizationId) {
         requireProcessorReady("authorized");
         this.status = PaymentAttemptStatus.AUTHORIZED;
         this.processorAuthorizationId = processorAuthorizationId;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markDeclined(String processorAuthorizationId) {
         requireProcessorReady("declined");
         this.status = PaymentAttemptStatus.DECLINED;
         this.processorAuthorizationId = processorAuthorizationId;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markRequiresAction(String processorAuthorizationId) {
@@ -224,7 +225,7 @@ public class PaymentAttempt {
         this.status = PaymentAttemptStatus.REQUIRES_ACTION;
         this.processorAuthorizationId = processorAuthorizationId;
         this.threeDsStatus = ThreeDsStatus.REQUESTED;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void markReadyForProcessorAfterAuthentication() {
@@ -233,7 +234,7 @@ public class PaymentAttempt {
         }
         status = PaymentAttemptStatus.READY_FOR_PROCESSOR;
         threeDsStatus = ThreeDsStatus.COMPLETED;
-        updatedAt = Instant.now();
+        updatedAt = DatabaseInstant.now();
     }
 
     public void markAuthenticationFailed(boolean expired) {
@@ -243,7 +244,7 @@ public class PaymentAttempt {
         status = expired ? PaymentAttemptStatus.AUTHENTICATION_EXPIRED
                 : PaymentAttemptStatus.AUTHENTICATION_FAILED;
         threeDsStatus = ThreeDsStatus.FAILED;
-        updatedAt = Instant.now();
+        updatedAt = DatabaseInstant.now();
     }
 
     public void cancelFromAuthentication() {
@@ -252,7 +253,7 @@ public class PaymentAttempt {
         }
         status = PaymentAttemptStatus.CANCELED;
         threeDsStatus = ThreeDsStatus.FAILED;
-        updatedAt = Instant.now();
+        updatedAt = DatabaseInstant.now();
     }
 
     private void requireProcessorReady(String targetStatus) {

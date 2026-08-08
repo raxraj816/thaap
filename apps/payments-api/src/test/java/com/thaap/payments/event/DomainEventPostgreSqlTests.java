@@ -9,6 +9,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -291,7 +292,7 @@ class DomainEventPostgreSqlTests {
         payload.put("captureMethod", "AUTOMATIC");
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, streamId,
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 correlationId, null, correlationId + "-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM,
                         "postgres-event-proof"), TrafficOrigin.MERCHANT_API, payload);

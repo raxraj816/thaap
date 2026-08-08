@@ -11,6 +11,7 @@ import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.authentication.AuthenticationReplayCipher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.time.Clock;
 import java.time.Duration;
@@ -133,7 +134,7 @@ class IdempotencyServiceTests {
                 new IdempotencyKeyConfiguration(
                         idempotencyRepository,
                         new SensitiveValueHasher(newPepper, "general-v2", ""),
-                        Clock.systemUTC());
+                        DatabaseInstant.tick(Clock.systemUTC()));
         assertThatThrownBy(missingOldKey::afterPropertiesSet)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("general-v1");
@@ -149,7 +150,7 @@ class IdempotencyServiceTests {
         MerchantContext context = context(merchant);
         TestRequest oldRequest = new TestRequest("old-request");
         String serializedOldRequest = objectMapper.writeValueAsString(oldRequest);
-        Instant oldStartedAt = Instant.now().minus(2, ChronoUnit.DAYS);
+        Instant oldStartedAt = DatabaseInstant.now().minus(2, ChronoUnit.DAYS);
         UUID oldLeaseToken = UUID.randomUUID();
         IdempotencyRecord expired = new IdempotencyRecord(
                 IdempotencyPrincipal.merchant(context), "reusable-expired-key", "test.old",
@@ -161,14 +162,14 @@ class IdempotencyServiceTests {
                 oldLeaseToken, HttpStatus.CREATED.value(),
                 objectMapper.writeValueAsString(new TestResponse("old")),
                 oldStartedAt.plusSeconds(1),
-                Instant.now().minusSeconds(1));
+                DatabaseInstant.now().minusSeconds(1));
         idempotencyRepository.saveAndFlush(expired);
 
         SensitiveValueHasher newHasher = new SensitiveValueHasher(
                 "expired-idempotency-new-pepper", "expired-v2", "");
         IdempotencyKeyConfiguration retiredOldKey =
                 new IdempotencyKeyConfiguration(
-                        idempotencyRepository, newHasher, Clock.systemUTC());
+                        idempotencyRepository, newHasher, DatabaseInstant.tick(Clock.systemUTC()));
         retiredOldKey.afterPropertiesSet();
 
         AtomicInteger supplierCalls = new AtomicInteger();
@@ -188,7 +189,7 @@ class IdempotencyServiceTests {
                     assertThat(record.getOperation()).isEqualTo("test.new");
                     assertThat(record.getRequestHashKeyVersion())
                             .isEqualTo("expired-v2");
-                    assertThat(record.getExpiresAt()).isAfter(Instant.now());
+                    assertThat(record.getExpiresAt()).isAfter(DatabaseInstant.now());
                 });
     }
 
@@ -295,7 +296,7 @@ class IdempotencyServiceTests {
         var request = new TestRequest("manual-in-progress");
         var requestHash = requestHash(request);
 
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         idempotencyRepository.saveAndFlush(new IdempotencyRecord(
                 merchant.getId(), "manual-key", "test.create", requestHash,
                 sensitiveValueHasher.currentKeyVersion(), UUID.randomUUID(),
@@ -307,9 +308,9 @@ class IdempotencyServiceTests {
         assertThat(record.getStatus()).isEqualTo(IdempotencyStatus.IN_PROGRESS);
         assertThat(record.getHttpStatus()).isNull();
         assertThat(record.getResponseBody()).isNull();
-        assertThat(record.getExpiresAt()).isAfter(Instant.now());
+        assertThat(record.getExpiresAt()).isAfter(DatabaseInstant.now());
         assertThat(record.getLeaseToken()).isNotNull();
-        assertThat(record.getLeaseExpiresAt()).isAfter(Instant.now());
+        assertThat(record.getLeaseExpiresAt()).isAfter(DatabaseInstant.now());
     }
 
     @Test
@@ -317,7 +318,7 @@ class IdempotencyServiceTests {
         Merchant merchant = createMerchant("merchant-expired-reservation");
         MerchantContext merchantContext = context(merchant);
         TestRequest request = new TestRequest("expired-request");
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         IdempotencyRecord expired = new IdempotencyRecord(
                 IdempotencyPrincipal.merchant(merchantContext), "expired-key", "test.create", requestHash(request),
                 sensitiveValueHasher.currentKeyVersion(),
@@ -347,7 +348,7 @@ class IdempotencyServiceTests {
                 new AuthenticationReplayCipher(
                         "dGVzdC1hdXRoLXJlcGxheS1rZXktMzItYnl0ZXMtMTI=", "test-v1", ""),
                 transactionManager,
-                Clock.systemUTC(), Duration.ofSeconds(30));
+                DatabaseInstant.tick(Clock.systemUTC()), Duration.ofSeconds(30));
     }
 
     private Merchant createMerchant(String name) {

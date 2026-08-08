@@ -22,6 +22,7 @@ import com.thaap.payments.platform.PlatformOperatorRole;
 import com.thaap.payments.platform.PlatformOperatorService;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -132,7 +133,7 @@ class PublicationRecoveryContractTests {
         DomainEventWriteResult result = transaction.execute(status ->
                 eventWriter.append(command(merchant.getId(), UUID.randomUUID())));
         assertThat(result).isNotNull();
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         jdbcTemplate.update("""
                 UPDATE event_publications
                    SET lifecycle_status = 'BLOCKED', blocked_at = ?, updated_at = ?,
@@ -151,7 +152,7 @@ class PublicationRecoveryContractTests {
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, streamId,
                 DomainEventType.PAYMENT_INTENT_CREATED,
                 DomainEventCatalogue.INITIAL_EVENT_VERSION,
-                Instant.now().minusSeconds(1), "recovery-correlation", null,
+                DatabaseInstant.now().minusSeconds(1), "recovery-correlation", null,
                 "recovery-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM,
                         "recovery-contract"), TrafficOrigin.MERCHANT_API, payload);

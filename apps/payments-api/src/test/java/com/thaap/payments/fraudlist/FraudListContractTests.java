@@ -12,6 +12,7 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.processor.ProcessorAdapter;
 import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -144,7 +145,7 @@ class FraudListContractTests {
 
         UUID timeListId = createList(manager,
                 new ListSpec("INVALID_TIMES", "EMAIL", null, "unused@example.com", "BLOCK"));
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         assertTimedEntryRejected(manager, timeListId, "backdated", now.minus(1, ChronoUnit.MINUTES), null);
         assertTimedEntryRejected(manager, timeListId, "too-far-future", now.plus(31, ChronoUnit.DAYS), null);
         assertTimedEntryRejected(manager, timeListId, "expiry-before-start", now.plus(1, ChronoUnit.MINUTES),

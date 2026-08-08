@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Clock;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -29,8 +30,14 @@ public class JacksonConfiguration {
                 .disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT);
     }
 
+    /**
+     * The application clock ticks at the precision the database stores, not the precision the
+     * host kernel happens to offer. On Linux {@code Clock.systemUTC()} resolves to nanoseconds,
+     * which PostgreSQL rounds away on write, so an untruncated clock hands every caller a value
+     * that stops matching its own row as soon as it is read back.
+     */
     @Bean
     public Clock clock() {
-        return Clock.systemUTC();
+        return DatabaseInstant.tick(Clock.systemUTC());
     }
 }

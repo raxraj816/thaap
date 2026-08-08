@@ -7,6 +7,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.tenant.MerchantContext;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -154,8 +155,8 @@ class DeveloperScenarioPostgreSqlConcurrencyTests {
     }
 
     private void awaitDatabaseLockWait(String relation) throws InterruptedException {
-        Instant deadline = Instant.now().plusSeconds(5);
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plusSeconds(5);
+        while (DatabaseInstant.now().isBefore(deadline)) {
             Integer waiting = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*) FROM pg_stat_activity
                      WHERE datname = current_database() AND wait_event_type = 'Lock'

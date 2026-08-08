@@ -1,5 +1,6 @@
 package com.thaap.payments.review;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -31,7 +32,7 @@ public class ReviewCase {
         this.id = UUID.randomUUID();
         this.merchantId = merchantId;
         this.status = status;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

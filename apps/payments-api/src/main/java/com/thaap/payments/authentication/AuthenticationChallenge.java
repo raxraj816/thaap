@@ -3,6 +3,7 @@ package com.thaap.payments.authentication;
 import com.thaap.payments.api.PublicApiErrorDescriptor;
 import com.thaap.payments.api.PublicApiException;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -110,7 +111,7 @@ public class AuthenticationChallenge {
             throw conflict("cannot attach authorization");
         }
         this.authorizationId = authorizationId;
-        this.updatedAt = Instant.now();
+        this.updatedAt = DatabaseInstant.now();
     }
 
     public void succeed(Instant now) {

@@ -1,5 +1,6 @@
 package com.thaap.payments.ledger;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -95,7 +96,7 @@ public class LedgerEntry {
         this.direction = direction;
         this.amount = amount;
         this.currency = currency;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {
