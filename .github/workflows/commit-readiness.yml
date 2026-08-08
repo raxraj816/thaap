@@ -79,3 +79,68 @@ jobs:
           path: apps/payments-api/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
+
+  randomized-order:
+    # The suite now runs in a pinned alphabetical order everywhere, which is what makes a local
+    # run and a CI run comparable. It also freezes one ordering forever, and a suite only ever
+    # exercised in one order stops being able to find the bug that ordering hides -- which is
+    # precisely the bug it just found: a test that deleted meters from a MeterRegistry shared with
+    # thirty other classes, invisible unless it ran first.
+    #
+    # So the shuffle is kept, deliberately and in one place. Surefire prints the seed it chose, and
+    # this job republishes it to the run summary, so a failure here is reproducible with one flag
+    # instead of being written off as flake. A failure means a real order dependency exists.
+    name: Randomized test order
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Confirm Docker is available for Testcontainers
+        run: |
+          docker version
+          docker info >/dev/null
+
+      - name: Run the backend suite in a random order
+        run: |
+          set -o pipefail
+          mvn -B -f apps/payments-api/pom.xml -Dsurefire.runOrder=random test \
+            | tee randomized-order.log
+
+      - name: Publish the seed that replays this ordering
+        if: always()
+        run: |
+          seed="$(grep -oE 'surefire\.runOrder\.random\.seed=[0-9]+' randomized-order.log \
+            | tail -1 | cut -d= -f2 || true)"
+          if [[ -z "$seed" ]]; then
+            echo "No surefire random seed found in the build log." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Randomized test order"
+            echo
+            echo "Replay this exact ordering with:"
+            echo
+            echo '```bash'
+            echo "mvn -f apps/payments-api/pom.xml test -Dsurefire.runOrder=random \\"
+            echo "  -Dsurefire.runOrder.random.seed=$seed"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-randomized
+          path: apps/payments-api/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 14
