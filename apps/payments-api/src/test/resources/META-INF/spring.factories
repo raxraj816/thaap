@@ -1,0 +1,6 @@
+# Gives every @ExclusiveMeterRegistry test class an application context of its own, so a class that
+# prunes the MeterRegistry in setup cannot reach the dozens of classes Spring would otherwise hand
+# the same registry bean. This is the extension point Spring itself uses to isolate classes that
+# declare bean overrides; see ExclusiveMeterRegistry and ER-0101.
+org.springframework.test.context.ContextCustomizerFactory=\
+com.thaap.payments.support.ExclusiveMeterRegistryContextCustomizerFactory
