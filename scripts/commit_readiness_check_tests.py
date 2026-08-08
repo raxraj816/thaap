@@ -38,6 +38,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
                 f"#!/usr/bin/env bash\ntouch '{vision_marker}'\n")
             for checker in (
                     "technical-debt-check.py",
+                    "runtime-configuration-reference-check.py",
                     "escaped-review-check.py",
                     "executable-artifact-naming-check.py",
                     "public-api-error-contract-check.py",
@@ -81,6 +82,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
         # from commit-readiness-check.sh fails this test.
         required_gates = (
             "technical-debt-check.py",
+            "runtime-configuration-reference-check.py",
             "vision-coverage-check.py",
             "escaped-review-check.py",
             "executable-artifact-naming-check.py",
@@ -134,6 +136,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.write_executable(fake_bin / "rg", "#!/usr/bin/env bash\nexit 1\n")
             for checker in (
                     "technical-debt-check.py",
+                    "runtime-configuration-reference-check.py",
                     "vision-coverage-check.py",
                     "escaped-review-check.py",
                     "executable-artifact-naming-check.py",

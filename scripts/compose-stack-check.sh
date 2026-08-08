@@ -21,7 +21,16 @@ KEEP="${THAAP_STACK_CHECK_KEEP:-false}"
 # vite.config.ts and nginx.conf by src/routingContract.test.ts.
 PREFIXES=(/risk /developer /customers /payment_methods /payment_intents /webhook_endpoints /webhook_deliveries)
 
+# The identity this stack is built with. `release-identity-check.sh` proves the image *contains*
+# the right version and commit; this proves a running instance *serves* them over HTTP, which is
+# the form of the promise an operator actually uses. Building with the real values here rather
+# than the compose defaults is what makes that assertion mean something.
+BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+BUILD_VERSION="$(bash "$ROOT_DIR/scripts/project-version.sh" 2>/dev/null || echo unknown)"
+
 compose() {
+    THAAP_BUILD_COMMIT="$BUILD_COMMIT" \
+    THAAP_BUILD_VERSION="$BUILD_VERSION" \
     THAAP_POSTGRES_PORT="${THAAP_STACK_CHECK_PG_PORT:-55432}" \
     THAAP_REDIS_PORT="${THAAP_STACK_CHECK_REDIS_PORT:-56379}" \
     THAAP_KAFKA_PORT="${THAAP_STACK_CHECK_KAFKA_PORT:-59092}" \
@@ -67,6 +76,22 @@ curl --fail --silent "http://127.0.0.1:${API_PORT}/actuator/health/liveness" >/d
 echo "ok: liveness reports UP"
 
 failures=0
+
+# Release identity, over HTTP, from a running instance. This is the exact question asked during an
+# incident by someone who has a URL and no shell, and the only honest answer comes from the process
+# itself rather than from what a deployment pipeline believes it shipped.
+info="$(curl --fail --silent "http://127.0.0.1:${API_PORT}/actuator/info" || true)"
+if ! grep -q "\"version\":\"${BUILD_VERSION}\"" <<<"$info"; then
+    echo "FAIL: /actuator/info did not report version $BUILD_VERSION" >&2
+    echo "$info" >&2
+    failures=$((failures + 1))
+elif ! grep -q "\"commit\":\"${BUILD_COMMIT}\"" <<<"$info"; then
+    echo "FAIL: /actuator/info did not report commit $BUILD_COMMIT" >&2
+    echo "$info" >&2
+    failures=$((failures + 1))
+else
+    echo "ok: the running instance reports $BUILD_VERSION at $BUILD_COMMIT"
+fi
 
 # The workspace shell and its deep links. A routed SPA that 404s on reload is broken for every
 # link an analyst shares.

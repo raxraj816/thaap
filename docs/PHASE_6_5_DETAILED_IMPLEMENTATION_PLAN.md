@@ -19,7 +19,17 @@
   `docs/reviews/`
 - Deployment region: `ap-south-1` (Mumbai) first, region-parameterised
 
-Phase 6.5 implementation status: CHAPTER 60 COMPLETE
+Phase 6.5 implementation status: CHAPTERS 60–62 COMPLETE
+
+Section 17 gates Chapter 61 on the nine decisions being confirmed as one set.
+Chapters 61 and 62 were authorised by direct founder instruction on 2026-08-08,
+which confirms the decisions those two chapters actually depend on — **4** (release
+as `1.0.0` with the Section 13 boundary stated wherever the version is published)
+and the deployment-target half of **1** (an `aws` profile, since the runtime
+contract has to name the target it enforces for). Decisions **2**, **3**, **5**,
+**6**, **7**, **8** and **9** are not consumed by these two chapters and remain
+open; **1**'s infrastructure half, **2**, **3** and **5** are consumed by
+Chapter 63 and must be confirmed before it starts.
 
 THAAP is a global, multi-rail product. India and its UPI rail are a first-class
 market within it rather than the whole of it, and that distinction has two
@@ -401,18 +411,57 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 - **Matrix:** `docs/reviews/CHAPTER_60_INVARIANT_PROOF_MATRIX.md` — frozen
   2026-08-08, all rows `PENDING`.
 
-### Chapter 61 — Release Identity
+### Chapter 61 — Release Identity — COMPLETE 2026-08-08
 
 - **Delivers:** `1.0.0` in `pom.xml`, the `build-info` goal, `CHANGELOG.md`,
   tag `v1.0.0`, and CI push to ECR under version and SHA.
 - **Proves:** a running instance reports the commit it was built from.
+- **Delivered as:** `pom.xml` at `1.0.0` with a `build-info` execution;
+  `THAAP_BUILD_COMMIT` and `THAAP_BUILD_VERSION` Docker arguments carrying the
+  identity into both images as OCI labels; the hardcoded `info.app.version` in
+  `application.yml` removed so the version has one source;
+  `scripts/release-identity-check.sh`; `.github/workflows/release-image.yml`;
+  `ReleaseIdentityContractTests`; an identity assertion added to
+  `scripts/compose-stack-check.sh`.
+- **Two decisions worth review.** `build.time` is excluded from build-info:
+  it is the only recorded property that is not a function of the source, and
+  keeping it would have meant one commit producing a different artifact on every
+  rebuild, retiring the reproducibility Chapter 60 had just established. And the
+  commit is *passed in* rather than read, because `.dockerignore` excludes
+  `.git/` on purpose — a git-reading plugin would report nothing in exactly the
+  build that matters.
+- **Honestly unproven:** the ECR push itself. The registry is created by
+  Terraform in Chapter 63 and the AWS account is an external prerequisite, so the
+  workflow's publish steps are conditional on the account being configured and
+  say so in the run summary. Everything before the push — build, identity proof,
+  image content proof, tag-versus-pom agreement — runs unconditionally and gates.
 
-### Chapter 62 — Production Runtime Configuration Contract
+### Chapter 62 — Production Runtime Configuration Contract — COMPLETE 2026-08-08
 
 - **Delivers:** `application-aws.yml`, a fail-fast secret validator for the
   eight variables in Section 8, and the complete environment-variable reference.
 - **Proves:** the application refuses to start on a missing or empty secret,
   proven per variable rather than for one representative case.
+- **Delivered as:** `RequiredRuntimeSecret` and `RuntimeSecretContractGate` in
+  `com.thaap.payments.config`; `application-aws.yml`;
+  `docs/references/RUNTIME_CONFIGURATION_REFERENCE.md` covering all 87 variables;
+  `scripts/runtime-configuration-reference-check.py` wired into
+  `scripts/commit-readiness-check.sh`.
+- **Enforced earlier than the plan required.** The gate is an
+  `EnvironmentPostProcessor` rather than a bean, so the refusal lands before the
+  first bean is created, before Hikari opens a connection, and before Flyway
+  takes the migration lock. When the answer is "this instance must not run", the
+  cheapest moment to say so is before it has touched the production database.
+  `RuntimeSecretContractStartupTests.refusesBeforeItOpensADatabaseConnection`
+  proves it by pointing the datasource at an unreachable address and still
+  requiring the failure to be the secret contract.
+- **Three rules beyond the plan's letter,** each of which refused a plausible
+  deployment during the proof: no value may be reused across two secrets; no
+  value published anywhere in this repository is accepted; and no value carrying
+  a placeholder marker is accepted. The second is the one that matters most —
+  this repository publishes working secrets deliberately so a stranger can start
+  the stack, which makes "somebody copied the quickstart" the single most likely
+  route to a deployed system holding a known key.
 
 ### Chapter 63 — AWS Infrastructure As Code
 
@@ -449,6 +498,12 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 
 ### Chapter 66 — Phase 6.5 Closure
 
+- **Folds in, per Section 13.1:** `CHAPTER_60_INVARIANT_PROOF_MATRIX.md`, and the
+  Chapter 61–62 evidence recorded in this section and in
+  `docs/learning/daily/2026-08-08.md` §12–§20 and its deep dive §15. Chapters 61
+  and 62 deliberately produced no matrix of their own — this phase uses one
+  integrated matrix, and a per-chapter matrix written after the fact could not
+  honestly carry `Matrix provenance: PRE_IMPLEMENTATION`.
 - **Delivers:** the integrated matrix and dossier, infra gates added to
   `scripts/commit-readiness-check.sh`, and updates to
   `docs/THAAP_VISION_COVERAGE_MATRIX.md` and

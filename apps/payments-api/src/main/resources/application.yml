@@ -97,12 +97,21 @@ management:
   info:
     env:
       enabled: true
+    # Serves META-INF/build-info.properties — the artifact version and the commit it was built
+    # from — at /actuator/info. Enabled explicitly rather than left to the default, because the
+    # release-identity promise is that a deployed instance states its commit, and a promise that
+    # depends on a framework default staying what it is today is not one worth making.
+    build:
+      enabled: true
 
 info:
   app:
     name: payments-api
     description: THAAP primary payment and fraud simulation API
-    version: 0.0.1-SNAPSHOT
+    # The version is deliberately absent here. It lives in pom.xml, reaches /actuator/info
+    # through build-info.properties as `build.version`, and stating it a second time in this file
+    # would create two sources for one truth — which is how this line came to say
+    # 0.0.1-SNAPSHOT while the artifact it described was something else.
 
 thaap:
   admin:

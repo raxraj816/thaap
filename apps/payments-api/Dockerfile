@@ -28,11 +28,21 @@ RUN mvn -B -Dmaven.repo.local=/build/.m2 dependency:go-offline
 # ---------------------------------------------------------------------------------------------
 FROM maven:3.9-eclipse-temurin-25@sha256:1b1fc6d0168ea616afd1c861d6f32ec37c9ec2ffe88a0351b3771dd4ad86b0d8 AS build
 
+# The commit being built. It has to be passed in rather than read, because `.dockerignore`
+# excludes `.git/` from the build context as a deliberate control — so the one build that most
+# needs to record its provenance is the one that cannot look it up.
+#
+# `unknown` is the honest default for a developer build that was handed nothing. Releases are not
+# permitted to carry it: scripts/release-identity-check.sh passes the real SHA and fails if the
+# running instance reports anything else.
+ARG THAAP_BUILD_COMMIT=unknown
+
 WORKDIR /build
 COPY --from=deps /build/.m2 /build/.m2
 COPY pom.xml ./
 COPY src ./src
-RUN mvn -B -Dmaven.repo.local=/build/.m2 -DskipTests package
+RUN mvn -B -Dmaven.repo.local=/build/.m2 -Dthaap.build.commit="${THAAP_BUILD_COMMIT}" \
+    -DskipTests package
 
 # Spring Boot's tools jarmode splits the archive so that dependencies, which change rarely, land
 # in an earlier layer than application classes, which change every commit. Without this the whole
@@ -46,6 +56,22 @@ RUN cp target/*.jar /build/application.jar \
 # Stage 3 — runtime
 # ---------------------------------------------------------------------------------------------
 FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e AS runtime
+
+# Re-declared: an ARG is scoped to the stage that declares it.
+ARG THAAP_BUILD_COMMIT=unknown
+ARG THAAP_BUILD_VERSION=unknown
+
+# Standard OCI labels, so a pulled image can be identified without starting it. The application
+# answers the same question at /actuator/info; these answer it for an image sitting in a registry,
+# which is where the question "what is this thing" usually gets asked.
+#
+# The two answers cannot drift apart silently: release-identity-check.sh starts the image it just
+# built and fails unless the labels and the running instance report the same version and commit.
+LABEL org.opencontainers.image.title="thaap-payments-api" \
+      org.opencontainers.image.description="THAAP primary payment and fraud simulation API" \
+      org.opencontainers.image.version="${THAAP_BUILD_VERSION}" \
+      org.opencontainers.image.revision="${THAAP_BUILD_COMMIT}" \
+      org.opencontainers.image.licenses="UNLICENSED"
 
 # curl is required by the container healthcheck below. It is the only addition to the base image.
 RUN apt-get update \

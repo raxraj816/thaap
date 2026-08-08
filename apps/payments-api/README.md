@@ -42,6 +42,71 @@ Responsibilities:
 - audit logs
 - outbox events
 
+## Release Identity
+
+The artifact version lives in `pom.xml` and reaches a running instance through
+`META-INF/build-info.properties`, which the `build-info` goal writes at package
+time. A deployed instance therefore answers "what are you?" over HTTP, without
+shell access:
+
+```bash
+curl http://localhost:8080/actuator/info
+```
+
+`build.version` is the released version. `build.commit` is the commit the
+artifact was built from, and it is passed in rather than discovered: the image's
+`.dockerignore` excludes `.git/` deliberately, so the build that most needs its
+provenance is the one that cannot look it up. It arrives as the
+`THAAP_BUILD_COMMIT` Docker argument, defaults to `unknown` for a developer build
+that was handed nothing, and `scripts/release-identity-check.sh` refuses to let a
+release carry that default. `build.time` is deliberately excluded — it is the
+only recorded property that is not a function of the source, and including it
+would mean one commit produced a different artifact on every rebuild.
+
+Container images carry the same pair as `org.opencontainers.image.version` and
+`org.opencontainers.image.revision`, and are pushed under both the semantic
+version and the commit SHA. Deployments reference the SHA; humans reference the
+version.
+
+Every released version has an entry in [`../../CHANGELOG.md`](../../CHANGELOG.md).
+
+## Deployed Runtime Configuration
+
+Every environment variable this service reads is documented in
+[`../../docs/references/RUNTIME_CONFIGURATION_REFERENCE.md`](../../docs/references/RUNTIME_CONFIGURATION_REFERENCE.md),
+and `scripts/runtime-configuration-reference-check.py` fails the readiness gate
+when that document and `application.yml` disagree.
+
+Deployments activate the `aws` profile:
+
+```bash
+SPRING_PROFILES_ACTIVE=aws
+```
+
+The profile's purpose is `RuntimeSecretContractGate`, which **refuses to start**
+when any of eight security-relevant secrets is absent, empty, below its minimum
+shape, reused for another purpose, or set to a value this repository publishes
+for local development. The refusal happens while the environment is being
+prepared — before the first bean, before a database connection, before the
+Flyway lock — and reports every failing variable at once rather than one per
+failed deployment.
+
+The eight are `THAAP_ADMIN_BOOTSTRAP_TOKEN`, `THAAP_PLATFORM_BOOTSTRAP_TOKEN`,
+`THAAP_SCENARIO_RUNNER_TOKEN`, `THAAP_HASH_PEPPER`, `THAAP_CORRELATION_PEPPER`,
+`THAAP_AUTHENTICATION_REPLAY_ENCRYPTION_KEY`,
+`THAAP_WEBHOOK_SECRET_ENCRYPTION_KEY` and `THAAP_REVIEW_NOTE_ENCRYPTION_KEY`.
+
+All eight default to the empty string so a laptop starts without a secrets
+ceremony, and every one of them lets the application start, report healthy and
+serve traffic while protecting nothing. That combination — a system that appears
+correct while encrypting nothing or authenticating nobody — is the failure the
+gate exists for, and it is the same position `DomainEventProducerGate` already
+takes for event emission: a component that cannot do its job fails loudly rather
+than serving a weaker promise than it advertises.
+
+Rotation key sets stay optional. An empty previous-key set is what every
+deployment that has never rotated looks like.
+
 ## Merchant Tenant Boundary
 
 `Merchant` is the tenant root. Admin setup creates merchants and reveals an

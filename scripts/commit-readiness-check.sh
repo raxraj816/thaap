@@ -112,6 +112,10 @@ echo "Checking durable executable artifact naming..."
 scripts/executable-artifact-naming-check.py
 
 echo
+echo "Checking the runtime configuration reference against what the application reads..."
+scripts/runtime-configuration-reference-check.py
+
+echo
 echo "Checking typed public API error boundaries..."
 scripts/public-api-error-contract-check.py
 

@@ -1,0 +1,11 @@
+# Registers RuntimeSecretContractGate as an environment post-processor, which is what makes a
+# deployed instance refuse to start on an incomplete secret contract.
+#
+# spring.factories rather than a META-INF/spring/*.imports file: Spring Boot 4 loads environment
+# post-processors through SpringFactoriesEnvironmentPostProcessorsFactory and has no imports-file
+# path for this extension point, so an .imports file here would be a registration that silently
+# registers nothing — a gate with full test coverage and no effect on any deployment.
+# RuntimeSecretContractStartupTests exists because that is exactly what happened on the first
+# attempt, and it caught it.
+org.springframework.boot.EnvironmentPostProcessor=\
+com.thaap.payments.config.RuntimeSecretContractGate

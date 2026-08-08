@@ -33,6 +33,18 @@ RUN npm run build
 # ---------------------------------------------------------------------------------------------
 FROM nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8 AS runtime
 
+# The workspace ships in the same release as the API and is deployed from the same commit, so it
+# carries the same identity labels. A SPA has no /actuator/info to ask, which makes the label the
+# only way to tell which bundle a CloudFront origin is serving.
+ARG THAAP_BUILD_COMMIT=unknown
+ARG THAAP_BUILD_VERSION=unknown
+
+LABEL org.opencontainers.image.title="thaap-analyst-dashboard-ui" \
+      org.opencontainers.image.description="THAAP analyst workspace single-page application" \
+      org.opencontainers.image.version="${THAAP_BUILD_VERSION}" \
+      org.opencontainers.image.revision="${THAAP_BUILD_COMMIT}" \
+      org.opencontainers.image.licenses="UNLICENSED"
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /build/dist /usr/share/nginx/html
 

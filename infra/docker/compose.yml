@@ -86,6 +86,13 @@ services:
     build:
       context: ../../apps/payments-api
       dockerfile: Dockerfile
+      # Compose cannot run `git rev-parse`, and a stranger following the quickstart may not have
+      # git at all, so these default to `unknown` — which is what a locally built image honestly
+      # is. scripts/release-identity-check.sh supplies the real values and proves the instance
+      # reports them; nothing that reaches a registry is built this way.
+      args:
+        THAAP_BUILD_COMMIT: ${THAAP_BUILD_COMMIT:-unknown}
+        THAAP_BUILD_VERSION: ${THAAP_BUILD_VERSION:-unknown}
     image: thaap/payments-api:local
     container_name: thaap-payments-api
     restart: unless-stopped
@@ -132,6 +139,9 @@ services:
     build:
       context: ../../apps/analyst-dashboard-ui
       dockerfile: Dockerfile
+      args:
+        THAAP_BUILD_COMMIT: ${THAAP_BUILD_COMMIT:-unknown}
+        THAAP_BUILD_VERSION: ${THAAP_BUILD_VERSION:-unknown}
     image: thaap/analyst-dashboard-ui:local
     container_name: thaap-analyst-dashboard-ui
     restart: unless-stopped

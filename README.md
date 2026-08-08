@@ -149,6 +149,15 @@ phase-wide contract inventory, fresh `V1→V91` and retained `V85→V91` migrati
 accessibility, observability, and recovery are reconciled, and its dossier is
 `READY_TO_MERGE`/`MERGE`.
 Phase 6 implementation status: COMPLETE
+Phase 6.5 implementation status: CHAPTERS 60–62 COMPLETE. THAAP now builds as
+digest-pinned container images, starts end to end under `docker compose up`,
+states which commit it is running at `/actuator/info`, and refuses to start a
+deployed instance whose secret contract is incomplete. `1.0.0` is the first
+released version and `CHANGELOG.md` describes it; `1.0.0` denotes a complete,
+proven, deployable simulator and not a system licensed to process real payments.
+Chapters 63–66 — Terraform topology, first deploy, seeded demo tenant and phase
+closure — are the remaining work, and the AWS account, domain and hosted zone
+they depend on are external prerequisites.
 Chapter 56 is complete: queue-productivity and decision/business insights are
 proven across all twelve invariants, with the published distribution and money
 reconciled directly against the projection, review activity reconciled against
@@ -452,6 +461,9 @@ See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the full glossary.
 ## Documentation Map
 
 - [Master plan](docs/IMPLEMENTATION_MASTER_PLAN.md)
+- [Changelog](CHANGELOG.md)
+- [Runtime configuration reference](docs/references/RUNTIME_CONFIGURATION_REFERENCE.md)
+- [Phase 6.5 plan — release and AWS deployment](docs/PHASE_6_5_DETAILED_IMPLEMENTATION_PLAN.md)
 - [Technical and implementation debt register](docs/TECHNICAL_DEBT_REGISTER.md)
 - [Product vision](docs/VISION.md)
 - [Architecture overview](docs/ARCHITECTURE.md)
