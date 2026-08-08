@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.event.DomainEventRepository;
 import com.thaap.payments.projection.PaymentRiskProjectionConsumerService;
+import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.support.RiskWorkspaceScenario;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -69,6 +70,9 @@ class PaymentInvestigationNavigationScopeBoundaryTests {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private DatabaseCleaner databaseCleaner;
+
+    @Autowired
     private DomainEventRepository domainEventRepository;
 
     @Autowired
@@ -92,6 +96,11 @@ class PaymentInvestigationNavigationScopeBoundaryTests {
     void setUp() throws Exception {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(requestIdFilter, apiVersionFilter).build();
+        // drainProjection below replays every event in the database, not only this fixture's, and
+        // this class shares its database with dozens of others. A leftover event whose subject was
+        // deleted by a later class is QUARANTINED rather than APPLIED, which failed this setUp
+        // under a random ordering. The twenty-six sibling scenario classes already clean here.
+        databaseCleaner.clean();
         scenario = new RiskWorkspaceScenario(mockMvc, objectMapper, jdbcTemplate,
                 domainEventRepository, projectionConsumer);
         merchant = scenario.merchant("navigation-scope");

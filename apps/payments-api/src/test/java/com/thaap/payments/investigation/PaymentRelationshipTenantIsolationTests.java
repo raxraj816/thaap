@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.event.DomainEventRepository;
 import com.thaap.payments.projection.PaymentRiskProjectionConsumerService;
+import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.support.RiskWorkspaceScenario;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -71,8 +72,15 @@ class PaymentRelationshipTenantIsolationTests {
     private static final RiskWorkspaceScenario.Contact SHARED_IDENTITY =
             new RiskWorkspaceScenario.Contact("shared.victim@example.com", "+14155551212");
 
+    @Autowired
+    private DatabaseCleaner databaseCleaner;
+
     @BeforeEach
     void setUp() throws Exception {
+        // A shared cached context means a shared database. Without this the fixture
+        // inherits the previous class's rows, and drainProjection replays them as if
+        // they were its own. See ER-0102.
+        databaseCleaner.clean();
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(requestIdFilter, apiVersionFilter).build();
         scenario = new RiskWorkspaceScenario(mockMvc, objectMapper, jdbcTemplate,

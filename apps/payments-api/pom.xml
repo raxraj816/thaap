@@ -23,6 +23,18 @@
         <h2.version>2.3.232</h2.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <springdoc.version>3.0.3</springdoc.version>
+        <!--
+            Surefire's default is `filesystem`, which is arbitrary on ext4 and roughly sorted on
+            APFS. That is how a green local run and a green CI run came to be testing different
+            orderings of the same suite: ReviewBulkBacklogReadinessTests landed at position 47 on a
+            Mac and 179 in CI, and only the second ordering ran the class that deleted its gauges
+            first. Pinning makes the two runs comparable and a reported position meaningful.
+
+            This is a property rather than a plugin <configuration> value on purpose, so the
+            randomized CI job can still override it with -Dsurefire.runOrder=random. Deterministic
+            by default, deliberately shuffled where a shuffle is the point.
+        -->
+        <surefire.runOrder>alphabetical</surefire.runOrder>
     </properties>
 
     <dependencies>

@@ -29,3 +29,8 @@ __pycache__/
 
 # Logs
 *.log
+
+# Claude Code
+# The project rules in .claude/settings.json and .claude/hooks/ are versioned so every clone gets
+# them. Per-developer permission grants are not.
+.claude/settings.local.json
