@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.event.DomainEventRepository;
 import com.thaap.payments.projection.PaymentRiskProjectionConsumerService;
+import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.support.RiskWorkspaceScenario;
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -18,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +69,9 @@ class PaymentInvestigationScopeBoundaryTests {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private DatabaseCleaner databaseCleaner;
+
+    @Autowired
     private DomainEventRepository domainEventRepository;
 
     @Autowired
@@ -87,6 +92,12 @@ class PaymentInvestigationScopeBoundaryTests {
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(requestIdFilter, apiVersionFilter).build();
+        // This class shares a cached Spring context, and therefore a database, with dozens of
+        // others, and RiskWorkspaceScenario.drainProjection replays every event the database holds
+        // rather than only this fixture's. Without this, the fixture inherits whatever the class
+        // before it left behind, and the class is correct only in the orderings where that is
+        // nothing. The twenty-six sibling classes using this scenario already clean here.
+        databaseCleaner.clean();
         scenario = new RiskWorkspaceScenario(mockMvc, objectMapper, jdbcTemplate,
                 domainEventRepository, projectionConsumer);
     }
@@ -168,8 +179,9 @@ class PaymentInvestigationScopeBoundaryTests {
                         operator.credential()), 200);
 
         // Both merchants transact the same card, so an unscoped anchor join would link them.
-        assertThat(distinctCardFingerprints()).as("the fixture used two different cards, so the "
-                + "cross-tenant relation proof is vacuous").isEqualTo(1);
+        assertThat(distinctCardFingerprints(first, second))
+                .as("the fixture used two different cards, so the cross-tenant relation proof is "
+                        + "vacuous").isEqualTo(1);
         assertThat(related.get("data")).isEmpty();
         assertThat(related.get("scope").asText()).isEqualTo("SAME_MERCHANT_SERVER_DERIVED");
     }
@@ -262,9 +274,23 @@ class PaymentInvestigationScopeBoundaryTests {
         return names;
     }
 
-    private int distinctCardFingerprints() {
-        List<String> fingerprints = jdbcTemplate.queryForList(
-                "SELECT DISTINCT card_fingerprint FROM payment_methods", String.class);
-        return fingerprints.size();
+    /**
+     * Distinct card fingerprints held by the named merchants, and only by them.
+     *
+     * <p>This assertion's job is to prove the fixture is not vacuous: the cross-tenant claim above
+     * means nothing unless both merchants really did transact one card. It therefore has to measure
+     * the fixture, and an unscoped count over {@code payment_methods} measures whatever the
+     * previous test class left in the table instead. This class shares a cached Spring context and
+     * a database with dozens of others and does not clean between them, so the unscoped form was
+     * correct only while the preceding class happened to leave no payment methods behind. It read
+     * {@code 2} in CI at {@code -Dsurefire.runOrder.random.seed=84512339639}.
+     */
+    private int distinctCardFingerprints(RiskWorkspaceScenario.Merchant... merchants) {
+        String placeholders = String.join(", ", Collections.nCopies(merchants.length, "?"));
+        Object[] merchantIds = Stream.of(merchants)
+                .map(RiskWorkspaceScenario.Merchant::id).toArray();
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT card_fingerprint FROM payment_methods WHERE merchant_id IN ("
+                        + placeholders + ")", String.class, merchantIds).size();
     }
 }

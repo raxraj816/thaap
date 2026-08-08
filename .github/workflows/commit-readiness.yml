@@ -13,6 +13,15 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      randomOrderSeed:
+        description: >-
+          Replay one randomized ordering in the "Randomized test order" job. Take the seed from a
+          failed run's summary. Leave blank for a fresh shuffle. Seeds replay on a runner of the
+          same platform, not on a developer machine -- see that job's comment.
+        required: false
+        type: string
 
 # A superseded run proves nothing about the tip, so let a newer push cancel it — except on the
 # default branches, where every commit's result is part of the record.
@@ -87,9 +96,16 @@ jobs:
     # precisely the bug it just found: a test that deleted meters from a MeterRegistry shared with
     # thirty other classes, invisible unless it ran first.
     #
-    # So the shuffle is kept, deliberately and in one place. Surefire prints the seed it chose, and
-    # this job republishes it to the run summary, so a failure here is reproducible with one flag
-    # instead of being written off as flake. A failure means a real order dependency exists.
+    # So the shuffle is kept, deliberately and in one place. A failure here means a real order
+    # dependency exists and is never flake.
+    #
+    # On replaying a failure, precisely, because the obvious reading is wrong: surefire shuffles the
+    # class list the directory scanner produced, and that input order is itself filesystem order. The
+    # same seed therefore yields one permutation on ext4 and a different one on APFS -- replaying
+    # this job's seed on a Mac was measured to produce a completely different ordering. A seed
+    # replays on a runner of the same platform, not on a developer machine. That is what the
+    # workflow_dispatch input above is for: re-run this workflow with the seed from a failed run's
+    # summary to get that exact ordering back.
     name: Randomized test order
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -111,9 +127,16 @@ jobs:
           docker info >/dev/null
 
       - name: Run the backend suite in a random order
+        env:
+          REPLAY_SEED: ${{ inputs.randomOrderSeed }}
         run: |
           set -o pipefail
-          mvn -B -f apps/payments-api/pom.xml -Dsurefire.runOrder=random test \
+          seed_flag=""
+          if [[ -n "$REPLAY_SEED" ]]; then
+            seed_flag="-Dsurefire.runOrder.random.seed=$REPLAY_SEED"
+            echo "Replaying the ordering from seed $REPLAY_SEED"
+          fi
+          mvn -B -f apps/payments-api/pom.xml -Dsurefire.runOrder=random $seed_flag test \
             | tee randomized-order.log
 
       - name: Publish the seed that replays this ordering
