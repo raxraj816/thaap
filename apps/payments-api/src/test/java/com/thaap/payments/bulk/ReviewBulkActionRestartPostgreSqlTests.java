@@ -15,6 +15,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -117,13 +118,13 @@ class ReviewBulkActionRestartPostgreSqlTests extends ReviewBulkPostgreSqlTestBas
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("poison-idem"),
-                sixtyFourChars("poison-digest"), 3, Instant.now());
+                sixtyFourChars("poison-digest"), 3, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseIds.get(0), 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseIds.get(1), 99, 2,
-                Instant.now());
+                DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseIds.get(2), 0, 3,
-                Instant.now());
+                DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "poison-worker");
         ReviewBulkActionStore.ClaimedItem item;
@@ -220,11 +221,11 @@ class ReviewBulkActionRestartPostgreSqlTests extends ReviewBulkPostgreSqlTestBas
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars(seed + "-idem"),
-                sixtyFourChars(seed + "-digest"), reviewCaseIds.size(), Instant.now());
+                sixtyFourChars(seed + "-digest"), reviewCaseIds.size(), DatabaseInstant.now());
         int ordinal = 1;
         for (UUID reviewCaseId : reviewCaseIds) {
             store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0,
-                    ordinal++, Instant.now());
+                    ordinal++, DatabaseInstant.now());
         }
         return requestId;
     }

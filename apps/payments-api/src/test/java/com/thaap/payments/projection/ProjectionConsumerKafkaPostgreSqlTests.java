@@ -34,6 +34,7 @@ import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -403,7 +404,7 @@ class ProjectionConsumerKafkaPostgreSqlTests {
                 CaptureMethod.AUTOMATIC, null, java.util.Map.of(),
                 TrafficOrigin.MERCHANT_API));
         return new PaymentFixture(owner, intent, amount, currency,
-                Instant.now().minusSeconds(2).truncatedTo(ChronoUnit.MICROS));
+                DatabaseInstant.now().minusSeconds(2).truncatedTo(ChronoUnit.MICROS));
     }
 
     private DomainEvent append(PaymentFixture payment, DomainEventType eventType,
@@ -487,8 +488,8 @@ class ProjectionConsumerKafkaPostgreSqlTests {
         try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(properties)) {
             consumer.assign(List.of(partition));
             consumer.seek(partition, firstOffset);
-            Instant deadline = Instant.now().plusSeconds(10);
-            while (result.size() < expectedCount && Instant.now().isBefore(deadline)) {
+            Instant deadline = DatabaseInstant.now().plusSeconds(10);
+            while (result.size() < expectedCount && DatabaseInstant.now().isBefore(deadline)) {
                 ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(250));
                 for (ConsumerRecord<byte[], byte[]> record : records.records(partition)) {
                     if (record.offset() >= firstOffset && result.size() < expectedCount) {
@@ -507,8 +508,8 @@ class ProjectionConsumerKafkaPostgreSqlTests {
 
     private void awaitDatabaseWait(String queryFragment, int expectedCount,
             Future<?> expectedBlockedWork) {
-        Instant deadline = Instant.now().plusSeconds(10);
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plusSeconds(10);
+        while (DatabaseInstant.now().isBefore(deadline)) {
             if (expectedBlockedWork != null && expectedBlockedWork.isDone()) {
                 try {
                     expectedBlockedWork.get();

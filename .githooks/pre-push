@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# Runs the repository gates before a push leaves this machine.
+#
+# The gates are fast because the slow half — the backend and Python suites — belongs in CI,
+# where it runs on every push and cannot be skipped. What this hook buys is the twenty-six
+# seconds that catch matrix, debt, contract and naming drift while the change is still in your
+# hands, instead of after a round trip.
+#
+# It calls the same script a developer runs by hand rather than re-listing the gates, because a
+# second list would drift from the first and the drifted copy is always the one nobody reads.
+#
+# Install with scripts/install-git-hooks.sh. Bypass with `git push --no-verify` only when you
+# have already run the gate another way — CI will run it regardless, so a bypass buys time, not
+# permission.
+
+set -euo pipefail
+
+repository_root="$(git rev-parse --show-toplevel)"
+cd "$repository_root"
+
+# The gate validates the daily learning note for a date. Anchoring on the newest note in the
+# working tree keeps the hook meaningful on days that have not opened a note yet, and matches
+# what CI does.
+learning_day="$(ls docs/learning/daily 2>/dev/null \
+  | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' \
+  | sort \
+  | tail -1 \
+  | sed 's/\.md$//')"
+
+if [[ -z "$learning_day" ]]; then
+  echo "pre-push: no daily learning note found under docs/learning/daily" >&2
+  exit 1
+fi
+
+echo "pre-push: running repository gates for $learning_day (tests run in CI)"
+
+if ! bash scripts/commit-readiness-check.sh "$learning_day"; then
+  cat >&2 <<'BLOCKED'
+
+pre-push: the commit readiness gate failed. The push was not sent.
+
+Fix the reported gate, or re-run it yourself to see the detail:
+
+    bash scripts/commit-readiness-check.sh <YYYY-MM-DD>
+
+BLOCKED
+  exit 1
+fi
+
+echo "pre-push: repository gates passed"

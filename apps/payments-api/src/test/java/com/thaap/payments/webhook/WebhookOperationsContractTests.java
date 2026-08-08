@@ -15,6 +15,7 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -168,7 +169,7 @@ class WebhookOperationsContractTests {
         OperatorAccess foreignManager = createOperator(foreign, "foreign-manager", "RISK_MANAGER");
         EndpointAccess endpoint = createEndpoint(merchant, "redelivery-endpoint");
         WebhookEvent event = new WebhookEventEnvelopeFactory(objectMapper).create(
-                merchant.id(), WebhookEventType.REFUND_CREATED, UUID.randomUUID(), Instant.now());
+                merchant.id(), WebhookEventType.REFUND_CREATED, UUID.randomUUID(), DatabaseInstant.now());
         eventRepository.saveAndFlush(event);
         WebhookDelivery delivery = new WebhookDelivery(merchant.id(), endpoint.id(), event.getId(),
                 event.getEventType(), event.getResourceId(), event.getOccurredAt());
@@ -187,7 +188,7 @@ class WebhookOperationsContractTests {
         assertThat(deadLetters).contains(delivery.getId().toString(), event.getId().toString())
                 .doesNotContain(originalPayload, endpoint.url(), endpoint.signingSecret(), "payload");
         mockMvc.perform(get("/risk/webhook-dead-letters")
-                        .header(RISK_KEY, manager.secret()).param("cursorCreatedAt", Instant.now().toString()))
+                        .header(RISK_KEY, manager.secret()).param("cursorCreatedAt", DatabaseInstant.now().toString()))
                 .andExpect(status().isBadRequest());
         assertThat(objectMapper.readTree(mockMvc.perform(get("/risk/webhook-dead-letters")
                         .header(RISK_KEY, foreignManager.secret()))
@@ -212,7 +213,7 @@ class WebhookOperationsContractTests {
         assertThat(eventRepository.count()).isOne();
 
         WebhookEvent operatorEvent = new WebhookEventEnvelopeFactory(objectMapper).create(
-                merchant.id(), WebhookEventType.REFUND_CREATED, UUID.randomUUID(), Instant.now());
+                merchant.id(), WebhookEventType.REFUND_CREATED, UUID.randomUUID(), DatabaseInstant.now());
         eventRepository.saveAndFlush(operatorEvent);
         WebhookDelivery operatorDelivery = new WebhookDelivery(
                 merchant.id(), endpoint.id(), operatorEvent.getId(), operatorEvent.getEventType(),
@@ -265,7 +266,7 @@ class WebhookOperationsContractTests {
         EndpointAccess endpointAccess = createEndpoint(merchant, "verification-expiry");
         WebhookEndpoint endpoint = endpointRepository.findById(endpointAccess.id()).orElseThrow();
         UUID challengeId = UUID.randomUUID();
-        Instant createdAt = Instant.now().minusSeconds(180);
+        Instant createdAt = DatabaseInstant.now().minusSeconds(180);
         Instant expiresAt = createdAt.plusSeconds(60);
         jdbcTemplate.update("""
                 INSERT INTO webhook_endpoint_verifications

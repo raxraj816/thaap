@@ -1,6 +1,7 @@
 package com.thaap.payments.merchant;
 
 import com.thaap.payments.security.SecretHasher;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -42,7 +43,7 @@ public class Merchant {
         this.status = MerchantStatus.ACTIVE;
         this.apiKeyPrefix = SecretHasher.prefix(rawApiKey);
         this.apiKeyHash = SecretHasher.sha256(rawApiKey);
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

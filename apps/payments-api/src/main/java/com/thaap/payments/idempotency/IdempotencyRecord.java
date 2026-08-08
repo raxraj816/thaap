@@ -1,5 +1,6 @@
 package com.thaap.payments.idempotency;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -80,7 +81,7 @@ public class IdempotencyRecord {
 
     public IdempotencyRecord(UUID merchantId, String key, String operation, String requestHash, Instant expiresAt) {
         this(merchantId, key, operation, requestHash, "v1", UUID.randomUUID(),
-                Instant.now().plus(Duration.ofSeconds(30)), Instant.now(), expiresAt);
+                DatabaseInstant.now().plus(Duration.ofSeconds(30)), DatabaseInstant.now(), expiresAt);
     }
 
     public IdempotencyRecord(UUID merchantId, String key, String operation, String requestHash,

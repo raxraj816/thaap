@@ -172,8 +172,8 @@ cross-cutting rows are `GAP` and carry `TD-0008`.
 | | Rows |
 |---|---|
 | GAP rows since proven and returned to `PASS` | 8 |
-| GAP rows with new partial proof, still `PARTIAL` | 2 |
-| GAP rows still wholly unproven | 13 |
+| GAP rows with new partial proof, still `PARTIAL` | 9 |
+| GAP rows still wholly unproven (all `TD-0008`, Chapter 52) | 6 |
 
 Proven: `C44-OBS-001`, `C46-OBS-001`, `C50-OBS-001`, `C51-OBS-001`, `C46-SEC-001`,
 `C50-SEC-001`. Partially proven: `C51-CON-001`. Three production changes were required
@@ -267,3 +267,44 @@ repository and belongs in its own reviewed change, not inside an audit.
 fails closed on any that does not exist. The only exemption is an explicit `TD-NNNN`
 citation, which moves the gap into a register that `scripts/technical-debt-check.py`
 holds to an owner, a trigger and done criteria. A row can no longer close on a name.
+
+#### Third pass (2026-08-07)
+
+The remaining five `TD-0007` rows gained suites: `C45-OPS-001`, `C46-OPS-001`,
+`C46-AUTH-001`, `C46-CON-001` and `C46-DATA-001`. With this pass **every one of the
+seventeen `TD-0007` rows now names a suite that exists and runs.** None of the five
+returned to `PASS`, and each says in its own row why.
+
+Two of them fail for a reason no test could have fixed. `C45-OPS-001` and `C46-OPS-001`
+both describe a producer-version readiness gate governing mixed-version rollout. There is
+no producer-version configuration in the codebase. Both rows' implementation lines had
+made the gate conditional — "only if integration requires new constraints", "unless the
+matrix reopens" — and the condition was never met, so the rollout mechanism was never
+built. What exists is the publication outbox, whose disabled state is the default of the
+`test` profile, and the catalogue's single supported version. Both are now proven; the
+gate is not, and the rows say so rather than dressing an outbox toggle up as a version
+rollout. **This is the second distinct failure mode the audit has surfaced: not a missing
+test, and not a missing seam, but a promised mechanism that no chapter ever built.**
+
+The other three are scope statements. `C46-AUTH-001` proves the invariant that actually
+belonged to the event boundary — that event insertion grants no new permission — by
+asserting over *every* public producer method that authority arrives as a typed
+authenticated context and never as a caller-supplied actor, and that no method accepts a
+platform context at all. It does not re-prove the role matrix, which each mutation's own
+service and suite already own. `C46-CON-001` proves the stream allocates gap-free versions
+under forced contention in both arrival orders and that a rolled-back transition leaves no
+event, publication or stream-head evidence and releases its version rather than burning
+it; the per-domain orderings stay with their own suites. `C46-DATA-001` proves the
+producer's mapping preserves availability separately from occurrence, names the superseded
+label, keeps traffic origin a typed server-owned field outside the payload, and attributes
+automatic transitions to a system actor.
+
+Two structural assertions in this pass are worth naming as a technique, because both make a
+claim that cannot rot. `C46-OPS-001` asserts that `RiskOperationsEventProducer` has exactly
+one constructor parameter and one THAAP-typed field, both `DomainEventWriter` — so the
+chapter's "no Kafka, inbox, projection, rebuild or dataset behavior" claim fails a test the
+moment someone adds a dependency, rather than surviving until a reviewer notices.
+`C46-AUTH-001` asserts the authority shape of every public producer method by reflection,
+so a method added later cannot quietly opt out of the rule the row exists to enforce.
+**A structural invariant asserted over a whole class is worth more than the same invariant
+sampled on the three methods that existed the day it was written.**

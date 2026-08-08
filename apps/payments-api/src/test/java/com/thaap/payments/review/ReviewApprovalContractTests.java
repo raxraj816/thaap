@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -141,7 +142,7 @@ class ReviewApprovalContractTests {
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(5))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(5))))
                 .andExpect(status().isBadRequest());
 
         JsonNode resolution = objectMapper.readTree(mockMvc.perform(
@@ -277,7 +278,7 @@ class ReviewApprovalContractTests {
                   "reasonCode":"MANUAL_REVIEW_APPROVED",
                   "evidenceOccurredAt":"%s"
                 }
-                """.formatted(classification, Instant.now().minusSeconds(5));
+                """.formatted(classification, DatabaseInstant.now().minusSeconds(5));
     }
 
     private String value(String sql, Object... arguments) {

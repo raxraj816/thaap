@@ -19,6 +19,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -216,7 +217,7 @@ class ReviewOperationInsightContractTests {
      * separately on real PostgreSQL rather than assumed here.
      */
     private void backdateActivityIntoTheWindow() {
-        java.time.Instant shifted = java.time.Instant.now()
+        java.time.Instant shifted = DatabaseInstant.now()
                 .atZone(java.time.ZoneOffset.UTC).toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC)
                 .toInstant().minus(2, java.time.temporal.ChronoUnit.DAYS);
         jdbcTemplate.update("UPDATE review_assignment_events SET created_at = ? WHERE merchant_id = ?",

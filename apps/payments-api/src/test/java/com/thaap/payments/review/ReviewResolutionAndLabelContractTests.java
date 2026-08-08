@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
@@ -94,7 +95,7 @@ class ReviewResolutionAndLabelContractTests {
                 .andExpect(status().isCreated());
 
         int authorizationCountBefore = count("authorizations");
-        String evidenceTime = Instant.now().minusSeconds(5).toString();
+        String evidenceTime = DatabaseInstant.now().minusSeconds(5).toString();
         JsonNode resolved = objectMapper.readTree(mockMvc.perform(post("/risk/reviews/{id}/resolve",
                         review.reviewCaseId()).header(RISK_KEY, analyst.secret())
                         .header(IDEMPOTENCY_KEY, "resolve-review").contentType(APPLICATION_JSON)
@@ -198,7 +199,7 @@ class ReviewResolutionAndLabelContractTests {
 
         assign(analyst, review.reviewCaseId(), "cancel-only-assign", 0L, null)
                 .andExpect(status().isOk());
-        String evidenceTime = Instant.now().minusSeconds(5).toString();
+        String evidenceTime = DatabaseInstant.now().minusSeconds(5).toString();
         String cancelBody = """
                 {
                   "outcome":"CANCEL",
@@ -325,7 +326,7 @@ class ReviewResolutionAndLabelContractTests {
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(1))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(1))))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(post("/risk/reviews/{id}/resolve", review.reviewCaseId())
                         .header(RISK_KEY, analyst.secret()).header(IDEMPOTENCY_KEY, "invalid-cancel-reason")
@@ -336,7 +337,7 @@ class ReviewResolutionAndLabelContractTests {
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(1))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(1))))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(post("/risk/reviews/{id}/resolve", review.reviewCaseId())
                         .header(RISK_KEY, analyst.secret()).header(IDEMPOTENCY_KEY, "mismatched-fraud-reason")
@@ -348,7 +349,7 @@ class ReviewResolutionAndLabelContractTests {
                                   "reasonCode":"ACCOUNT_TAKEOVER_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(1))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(1))))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(post("/risk/reviews/{id}/resolve", review.reviewCaseId())
                         .header(RISK_KEY, analyst.secret()).header(IDEMPOTENCY_KEY, "future-evidence")
@@ -360,7 +361,7 @@ class ReviewResolutionAndLabelContractTests {
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().plusSeconds(3600))))
+                                """.formatted(DatabaseInstant.now().plusSeconds(3600))))
                 .andExpect(status().isBadRequest());
         assertThat(count("review_annotations")).isZero();
         assertThat(count("review_resolutions")).isZero();
@@ -477,7 +478,7 @@ class ReviewResolutionAndLabelContractTests {
                 UPDATE risk_operator_credentials
                 SET replay_expires_at = ?
                 WHERE risk_operator_id = ?
-                """, Instant.now().minusSeconds(1), analyst.id());
+                """, DatabaseInstant.now().minusSeconds(1), analyst.id());
         mockMvc.perform(post("/risk/operators").header(API_KEY, merchant.apiKey())
                         .header(IDEMPOTENCY_KEY, "credential-lifecycle")
                         .contentType(APPLICATION_JSON).content("{\"role\":\"ANALYST\"}"))
@@ -509,7 +510,7 @@ class ReviewResolutionAndLabelContractTests {
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(5))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(5))))
                 .andExpect(status().isOk());
 
         List<String> legacySubscriptions = jdbcTemplate.queryForList("""

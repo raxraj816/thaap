@@ -26,6 +26,7 @@ import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.webhook.WebhookDelivery;
 import com.thaap.payments.webhook.WebhookDeliveryAttempt;
 import com.thaap.payments.webhook.WebhookDeliveryAttemptRepository;
@@ -389,7 +390,7 @@ class DatabaseMigrationTests {
                 merchantA.getId(), "https://merchant-a.example/webhooks"));
         UUID resourceId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
-        Instant occurredAt = Instant.now();
+        Instant occurredAt = DatabaseInstant.now();
         String payload = "{\"id\":\"" + eventId + "\"}";
         WebhookEvent eventA = webhookEventRepository.saveAndFlush(new WebhookEvent(
                 eventId, merchantA.getId(), WebhookEventType.PAYMENT_INTENT_CREATED,
@@ -977,7 +978,7 @@ class DatabaseMigrationTests {
 
     private IdempotencyRecord idempotencyRecord(UUID merchantId, String key, String requestHash) {
         return new IdempotencyRecord(merchantId, key, "test.operation", requestHash,
-                Instant.now().plus(1, ChronoUnit.DAYS));
+                DatabaseInstant.now().plus(1, ChronoUnit.DAYS));
     }
 
     private record UpgradeDatabase(DataSource dataSource, JdbcTemplate jdbcTemplate) {

@@ -38,6 +38,7 @@ import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -166,7 +167,7 @@ class ProjectionConsumerAnalyticsContractTests {
     @Test
     void labelAvailabilityUpdatesOriginalCohortAndOriginPoliciesRemainExplicit() {
         MerchantFixture owner = merchant("analytics-labels");
-        Instant intentOccurredAt = Instant.now().minus(3, ChronoUnit.HOURS)
+        Instant intentOccurredAt = DatabaseInstant.now().minus(3, ChronoUnit.HOURS)
                 .truncatedTo(ChronoUnit.MICROS);
         PaymentFixture live = payment(owner, "USD", 5_000,
                 TrafficOrigin.MERCHANT_API, intentOccurredAt);
@@ -211,7 +212,7 @@ class ProjectionConsumerAnalyticsContractTests {
                 createdPayload(synthetic));
         consumerService.process(transported(syntheticCreated, nextOffset++));
         DomainEvent incident = append(owner, UUID.randomUUID(), DomainStreamType.RISK_INCIDENT,
-                DomainEventType.RISK_INCIDENT_OPENED, Instant.now().minusSeconds(1),
+                DomainEventType.RISK_INCIDENT_OPENED, DatabaseInstant.now().minusSeconds(1),
                 incidentPayload(), TrafficOrigin.MERCHANT_API);
         consumerService.process(transported(incident, nextOffset++));
 
@@ -550,7 +551,7 @@ class ProjectionConsumerAnalyticsContractTests {
     @Test
     void analyticsRangesAndEveryCollectionCursorAreClosedAndLossless() {
         MerchantFixture owner = merchant("analytics-pagination");
-        Instant intervalStart = Instant.now().minus(2, ChronoUnit.HOURS)
+        Instant intervalStart = DatabaseInstant.now().minus(2, ChronoUnit.HOURS)
                 .truncatedTo(ChronoUnit.HOURS);
         PaymentFixture usd = payment(owner, "USD", 1_000, TrafficOrigin.MERCHANT_API,
                 intervalStart.plusSeconds(1));
@@ -567,7 +568,7 @@ class ProjectionConsumerAnalyticsContractTests {
                 ownerContext, null, null, "ALL");
         assertThat(defaultSummary.currencies()).extracting(value -> value.currency())
                 .containsExactly("EUR", "USD");
-        assertThat(defaultSummary.to()).isAfter(Instant.now());
+        assertThat(defaultSummary.to()).isAfter(DatabaseInstant.now());
 
         RiskAnalyticsService.MerchantSummary summaryFirst = analyticsService.merchantSummary(
                 ownerContext, intervalStart, rangeEnd, "ALL", 1, null);
@@ -608,10 +609,10 @@ class ProjectionConsumerAnalyticsContractTests {
         assertBadRequest(() -> analyticsService.merchantTimeSeries(ownerContext,
                 intervalStart, rangeEnd.minusSeconds(1), "HOUR", "ALL", 100));
         assertBadRequest(() -> analyticsService.merchantSummary(ownerContext,
-                intervalStart, Instant.now().plus(2, ChronoUnit.HOURS)
+                intervalStart, DatabaseInstant.now().plus(2, ChronoUnit.HOURS)
                         .truncatedTo(ChronoUnit.HOURS), "ALL"));
         assertBadRequest(() -> analyticsService.merchantSummary(ownerContext,
-                intervalStart, Instant.now().plusNanos(1), "ALL"));
+                intervalStart, DatabaseInstant.now().plusNanos(1), "ALL"));
         assertBadRequest(() -> analyticsService.merchantSummary(ownerContext,
                 intervalStart, rangeEnd, "LIVE_ONLY", 1, summaryFirst.nextCursor()));
         assertBadRequest(() -> analyticsService.merchantTimeSeries(ownerContext,
@@ -666,7 +667,7 @@ class ProjectionConsumerAnalyticsContractTests {
     private PaymentFixture payment(MerchantFixture owner, String currency, long amount,
             TrafficOrigin origin) {
         return payment(owner, currency, amount, origin,
-                Instant.now().minusSeconds(2).truncatedTo(ChronoUnit.MICROS));
+                DatabaseInstant.now().minusSeconds(2).truncatedTo(ChronoUnit.MICROS));
     }
 
     private PaymentFixture payment(MerchantFixture owner, String currency, long amount,

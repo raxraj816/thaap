@@ -20,6 +20,7 @@ import com.thaap.payments.risk.RiskOperatorService;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -173,7 +174,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 merchant.getId(), "creation-reclaim-race", merchant.getApiKeyPrefix());
         String idempotencyKey = "creation-reclaim-key";
         String url = "https://merchant.example/reclaim-race";
-        Instant staleStartedAt = Instant.now().minusSeconds(120);
+        Instant staleStartedAt = DatabaseInstant.now().minusSeconds(120);
         WebhookEndpointCreationRecord staleRecord = new WebhookEndpointCreationRecord(
                 merchant.getId(),
                 sensitiveValueHasher.hmacSha256(
@@ -504,7 +505,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
 
@@ -554,7 +555,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
             createDeliveries(noisyMerchant.getId());
         }
         createDeliveries(quietMerchant.getId());
-        Instant claimAt = Instant.now().plusSeconds(1);
+        Instant claimAt = DatabaseInstant.now().plusSeconds(1);
 
         List<WebhookDeliveryClaim> merchantRound = claimService.claimDue(claimAt, 2);
 
@@ -580,7 +581,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         createDeliveries(endpointMerchant.getId());
 
         List<WebhookDeliveryClaim> endpointRound = claimService.claimDue(
-                Instant.now().plusSeconds(1), 2);
+                DatabaseInstant.now().plusSeconds(1), 2);
 
         assertThat(endpointRound).hasSize(2);
         assertThat(endpointRound)
@@ -742,7 +743,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         assertThat(deliveryRepository.findAll()).singleElement()
                 .satisfies(delivery -> assertThat(delivery.getStatus())
                         .isEqualTo(WebhookDeliveryStatus.EXHAUSTED));
-        assertThat(claimService.claimDue(Instant.now().plusSeconds(60), 10)).isEmpty();
+        assertThat(claimService.claimDue(DatabaseInstant.now().plusSeconds(60), 10)).isEmpty();
     }
 
     @Test
@@ -809,7 +810,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now();
+        Instant claimedAt = DatabaseInstant.now();
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(claim, claimedAt)).isTrue();
         CountDownLatch deliveryLocked = new CountDownLatch(1);
@@ -870,7 +871,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().minusSeconds(60)
+        Instant claimedAt = DatabaseInstant.now().minusSeconds(60)
                 .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
@@ -927,9 +928,9 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                                 lease_expires_at = ?
                             WHERE id = ?
                             """,
-                            java.sql.Timestamp.from(Instant.now()),
+                            java.sql.Timestamp.from(DatabaseInstant.now()),
                             UUID.randomUUID(),
-                            java.sql.Timestamp.from(Instant.now().plusSeconds(30)),
+                            java.sql.Timestamp.from(DatabaseInstant.now().plusSeconds(30)),
                             delivery.getId());
                     assertThat(updated).isEqualTo(1);
                     claimOwnsDeliveryLock.countDown();
@@ -1040,7 +1041,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
                 UPDATE webhook_deliveries SET delivery_generation = 4 WHERE id = ?
                 """, delivery.getId()))
                 .hasMessageContaining("Invalid webhook manual redelivery generation transition");
-        assertThat(claimService.claimDue(Instant.now().plusSeconds(60), 10)).isEmpty();
+        assertThat(claimService.claimDue(DatabaseInstant.now().plusSeconds(60), 10)).isEmpty();
     }
 
     @Test
@@ -1203,7 +1204,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
         doAnswer(invocation -> {
             WebhookEndpointVerificationService.PreparedChallenge prepared =
                     invocation.getArgument(1);
-            Instant terminalAt = Instant.now();
+            Instant terminalAt = DatabaseInstant.now();
             transaction.executeWithoutResult(status -> {
                 jdbcTemplate.update("""
                         UPDATE webhook_endpoints
@@ -1271,7 +1272,7 @@ class WebhookDeliveryPostgreSqlConcurrencyTests {
     }
 
     private WebhookEndpointService endpointService(SensitiveValueHasher hasher) {
-        return endpointService(hasher, Clock.systemUTC());
+        return endpointService(hasher, DatabaseInstant.tick(Clock.systemUTC()));
     }
 
     private WebhookEndpointService endpointService(

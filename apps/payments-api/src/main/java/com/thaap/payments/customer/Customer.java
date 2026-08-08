@@ -1,5 +1,6 @@
 package com.thaap.payments.customer;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -43,7 +44,7 @@ public class Customer {
         this.emailHash = emailHash;
         this.emailDomainHash = emailDomainHash;
         this.phoneHash = phoneHash;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

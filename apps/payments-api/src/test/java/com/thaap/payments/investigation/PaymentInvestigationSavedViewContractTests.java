@@ -19,6 +19,7 @@ import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
+import com.thaap.payments.time.DatabaseInstant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -409,7 +410,7 @@ class PaymentInvestigationSavedViewContractTests {
                 """, generationId, active.get("definition_id"),
                 ((Number) active.get("generation_number")).longValue() + 1,
                 active.get("handler_version"),
-                java.sql.Timestamp.from(java.time.Instant.now()));
+                java.sql.Timestamp.from(DatabaseInstant.now()));
         return generationId;
     }
 

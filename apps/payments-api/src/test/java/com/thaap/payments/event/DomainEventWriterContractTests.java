@@ -9,6 +9,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -161,7 +162,7 @@ class DomainEventWriterContractTests {
             ObjectNode payload) {
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, streamId,
                 DomainEventType.PAYMENT_INTENT_CREATED,
-                DomainEventCatalogue.INITIAL_EVENT_VERSION, Instant.now().minusSeconds(1),
+                DomainEventCatalogue.INITIAL_EVENT_VERSION, DatabaseInstant.now().minusSeconds(1),
                 "event-writer-contract", null, "request-event-writer", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM, "test-owned-probe"),
                 TrafficOrigin.MERCHANT_API, payload);

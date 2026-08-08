@@ -18,6 +18,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -244,7 +245,7 @@ class PaymentInvestigationLineageTests {
                 VALUES (?, ?, ?, ?, 'REBUILD', 'BUILDING', ?)
                 """, generationId, active.get("definition_id"),
                 ((Number) active.get("generation_number")).longValue() + 1,
-                active.get("handler_version"), Timestamp.from(Instant.now()));
+                active.get("handler_version"), Timestamp.from(DatabaseInstant.now()));
         return generationId;
     }
 
@@ -264,7 +265,7 @@ class PaymentInvestigationLineageTests {
                 """, UUID.randomUUID(), current.get("action"), current.get("reason_code"),
                 current.get("condition_type"), current.get("feature_code"),
                 current.get("currency_feature_code"), current.get("currency_value"),
-                Timestamp.from(Instant.now()));
+                Timestamp.from(DatabaseInstant.now()));
     }
 
     private JsonNode detail(Payment payment) throws Exception {

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.security.SensitiveValueHasher;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,7 +56,7 @@ class RiskContextContractTests {
                 "userAgent":"%s","deviceId":"%s","sessionId":"%s","shippingCountry":"CA",
                 "checkoutChannel":"WEB","customerAccountAgeDays":120,"loginAgeMinutes":4,
                 "botScoreBps":321,"captchaOutcome":"PASSED","observedAt":"%s"}}
-                """.formatted(fixture.paymentMethodId(), ip, userAgent, device, session, Instant.now());
+                """.formatted(fixture.paymentMethodId(), ip, userAgent, device, session, DatabaseInstant.now());
 
         String first = confirm(fixture, "full-confirm", request, 201);
         String replay = confirm(fixture, "full-confirm", request, 201);
@@ -116,7 +117,7 @@ class RiskContextContractTests {
     @Test
     void unknownForbiddenAndFarFutureContextFailsBeforeCreatingPaymentTruth() throws Exception {
         Fixture fixture = createFixture("invalid");
-        String future = Instant.now().plusSeconds(3600).toString();
+        String future = DatabaseInstant.now().plusSeconds(3600).toString();
         String request = """
                 {"paymentMethodId":"%s","riskContext":{"ipAddress":"203.0.113.9",
                 "observedAt":"%s","email":"forbidden@example.com"}}

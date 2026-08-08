@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -130,7 +131,7 @@ class FraudListPostgreSqlTests {
                 VALUES (?, ?, ?, ?, 'CARD_FINGERPRINT', NULL, ?, 'v1', 'BLOCK', 'KNOWN_FRAUD',
                         ?, NULL, ?, ?)
                 """, UUID.randomUUID(), owner.id(), listId, versionId, "a".repeat(64),
-                Instant.now(), foreignManager.id(), Instant.now()))
+                DatabaseInstant.now(), foreignManager.id(), DatabaseInstant.now()))
                 .isInstanceOf(DataAccessException.class);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
@@ -139,7 +140,7 @@ class FraudListPostgreSqlTests {
                      lifecycle_target_id, event_type, actor_operator_id, occurred_at, created_at)
                 VALUES (?, ?, ?, ?, NULL, ?, 'VERSION_DEACTIVATED', ?, ?, ?)
                 """, UUID.randomUUID(), foreign.id(), listId, versionId, versionId,
-                foreignManager.id(), Instant.now(), Instant.now()))
+                foreignManager.id(), DatabaseInstant.now(), DatabaseInstant.now()))
                 .isInstanceOf(DataAccessException.class);
     }
 
@@ -189,7 +190,7 @@ class FraudListPostgreSqlTests {
                  WHERE merchant_id = ? AND id = ?
                 """)) {
             disabling.setAutoCommit(false);
-            update.setTimestamp(1, Timestamp.from(Instant.now()));
+            update.setTimestamp(1, Timestamp.from(DatabaseInstant.now()));
             update.setObject(2, merchant.id());
             update.setObject(3, manager.id());
             assertThat(update.executeUpdate()).isOne();
@@ -251,7 +252,7 @@ class FraudListPostgreSqlTests {
         UUID firstVersionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM fraud_list_versions WHERE merchant_id = ? AND fraud_list_id = ?",
                 UUID.class, merchant.id(), listId);
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         jdbcTemplate.update("""
                 INSERT INTO fraud_list_lifecycle_events
                     (id, merchant_id, fraud_list_id, fraud_list_version_id, fraud_list_entry_id,
@@ -326,7 +327,7 @@ class FraudListPostgreSqlTests {
             lifecycle.setAutoCommit(false);
             merchantLock.setObject(1, merchant.id());
             merchantLock.executeQuery();
-            Instant now = Instant.now();
+            Instant now = DatabaseInstant.now();
             insert.setObject(1, UUID.randomUUID());
             insert.setObject(2, merchant.id());
             insert.setObject(3, listId);

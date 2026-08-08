@@ -1,5 +1,6 @@
 package com.thaap.payments.api;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
@@ -201,7 +202,7 @@ public class GlobalApiExceptionHandler {
             HttpServletRequest request, HttpServletResponse response, List<ApiErrorField> fieldErrors,
             boolean retryable, String recoveryAction) {
         String requestId = requestId(request, response);
-        ApiErrorResponse body = new ApiErrorResponse(requestId, Instant.now(), status.value(), error, message,
+        ApiErrorResponse body = new ApiErrorResponse(requestId, DatabaseInstant.now(), status.value(), error, message,
                 request.getRequestURI(), fieldErrors, retryable, recoveryAction);
         return ResponseEntity.status(status).body(body);
     }

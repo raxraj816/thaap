@@ -19,6 +19,7 @@ import com.thaap.payments.audit.AuditLogService;
 import com.thaap.payments.ledger.LedgerEntry;
 import com.thaap.payments.ledger.LedgerEntryRepository;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import com.thaap.payments.webhook.WebhookEndpointRepository;
 import java.time.Instant;
 import java.util.List;
@@ -93,11 +94,11 @@ class PostAuthorizationContractTests {
         CapturedPayment reviewRecommendation = createCapturedPayment(merchant, "review-recommendation");
 
         JsonNode noActionSignal = signal(merchant, noAction.paymentIntentId(), "signal-no-action",
-                "NO_ACTION", "MERCHANT_RISK_ALERT", Instant.now());
+                "NO_ACTION", "MERCHANT_RISK_ALERT", DatabaseInstant.now());
         JsonNode refundSignal = signal(merchant, refundRecommendation.paymentIntentId(), "signal-refund",
-                "REFUND", "CUSTOMER_REPORTED_FRAUD", Instant.now());
+                "REFUND", "CUSTOMER_REPORTED_FRAUD", DatabaseInstant.now());
         JsonNode reviewSignal = signal(merchant, reviewRecommendation.paymentIntentId(), "signal-review",
-                "REVIEW", "ACCOUNT_TAKEOVER_INDICATOR", Instant.now());
+                "REVIEW", "ACCOUNT_TAKEOVER_INDICATOR", DatabaseInstant.now());
 
         assertThat(noActionSignal.get("actionTaken").asText()).isEqualTo("NONE");
         assertThat(refundSignal.get("actionTaken").asText()).isEqualTo("NONE");
@@ -117,7 +118,7 @@ class PostAuthorizationContractTests {
     void laterReviewCannotRewriteEarlierNoActionSignalResponseLineage() throws Exception {
         Merchant merchant = createMerchant("post-authorization-stable-lineage");
         CapturedPayment payment = createCapturedPayment(merchant, "stable-lineage");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode noAction = signal(merchant, payment.paymentIntentId(), "stable-no-action",
                 "NO_ACTION", "MERCHANT_RISK_ALERT", evidenceTime);
         JsonNode review = signal(merchant, payment.paymentIntentId(), "later-review",
@@ -147,7 +148,7 @@ class PostAuthorizationContractTests {
     void riskManagerRefundAndReportFraudCreatesOneBalancedReusableTruth() throws Exception {
         Merchant merchant = createMerchant("post-authorization-manager-refund");
         CapturedPayment payment = createCapturedPayment(merchant, "manager-refund");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "manager-refund-signal",
                 "REVIEW", "ACCOUNT_TAKEOVER_INDICATOR", evidenceTime);
         Operator manager = createOperator(merchant, "manager-refund-operator", "RISK_MANAGER");
@@ -198,7 +199,7 @@ class PostAuthorizationContractTests {
     void analystCannotRefundButCanResolveAssignedNoActionWithoutLabel() throws Exception {
         Merchant merchant = createMerchant("post-authorization-role-matrix");
         CapturedPayment payment = createCapturedPayment(merchant, "role-matrix");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "role-matrix-signal",
                 "REVIEW", "MERCHANT_RISK_ALERT", evidenceTime);
         Operator analyst = createOperator(merchant, "role-matrix-analyst", "ANALYST");
@@ -238,7 +239,7 @@ class PostAuthorizationContractTests {
                                 + "\",\"amount\":4200}"))
                 .andExpect(status().isCreated());
         int ledgerBefore = count("ledger_entries");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "refund-reuse-signal",
                 "REVIEW", "MERCHANT_RISK_ALERT", evidenceTime);
         Operator manager = createOperator(merchant, "refund-reuse-manager", "RISK_MANAGER");
@@ -264,7 +265,7 @@ class PostAuthorizationContractTests {
         Merchant owner = createMerchant("post-authorization-owner");
         Merchant foreign = createMerchant("post-authorization-foreign");
         CapturedPayment payment = createCapturedPayment(owner, "strict");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         String body = signalBody(payment.paymentIntentId(), "REVIEW", "CARD_TESTING_INDICATOR", evidenceTime);
         String first = mockMvc.perform(post("/post_authorization_signals")
                         .header(API_KEY, owner.apiKey()).header(IDEMPOTENCY_KEY, "strict-signal-key")
@@ -306,7 +307,7 @@ class PostAuthorizationContractTests {
                 WHERE pa.payment_intent_id = ?
                 """, Instant.class, payment.paymentIntentId());
         Instant olderEvidence = authorizationTime.plusNanos(1_000);
-        Instant newerEvidence = Instant.now();
+        Instant newerEvidence = DatabaseInstant.now();
 
         signal(merchant, payment.paymentIntentId(), "newer-arrived-first",
                 "NO_ACTION", "MERCHANT_RISK_ALERT", newerEvidence);
@@ -319,7 +320,7 @@ class PostAuthorizationContractTests {
                 """, Instant.class)).containsExactly(newerEvidence, olderEvidence);
         assertThat(count("manual_review_cases")).isZero();
 
-        Instant future = Instant.now().plusSeconds(60);
+        Instant future = DatabaseInstant.now().plusSeconds(60);
         mockMvc.perform(post("/post_authorization_signals")
                         .header(API_KEY, merchant.apiKey()).header(IDEMPOTENCY_KEY, "future-time")
                         .contentType(APPLICATION_JSON)
@@ -339,7 +340,7 @@ class PostAuthorizationContractTests {
     void concurrentIdenticalExternalEventsSerializeAndConvergeToOneSignalAndReview() throws Exception {
         Merchant merchant = createMerchant("post-authorization-concurrent-signal");
         CapturedPayment payment = createCapturedPayment(merchant, "concurrent-signal");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         String body = signalBody(payment.paymentIntentId(), "REVIEW", "CARD_TESTING_INDICATOR", evidenceTime)
                 .replace("strict-event", "concurrent-external-event");
         CountDownLatch start = new CountDownLatch(1);
@@ -378,7 +379,7 @@ class PostAuthorizationContractTests {
             throws Exception {
         Merchant merchant = createMerchant("post-authorization-taxonomy");
         CapturedPayment payment = createCapturedPayment(merchant, "taxonomy");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "taxonomy-signal",
                 "REVIEW", "CUSTOMER_REPORTED_FRAUD", evidenceTime);
         Operator manager = createOperator(merchant, "taxonomy-manager", "RISK_MANAGER");
@@ -406,7 +407,7 @@ class PostAuthorizationContractTests {
     void postAuthorizationSignalRefundAndActionHistoryAreAppendOnlyAtPostgreSql() throws Exception {
         Merchant merchant = createMerchant("post-authorization-append-only");
         CapturedPayment payment = createCapturedPayment(merchant, "append-only");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "append-only-signal",
                 "REVIEW", "CARD_TESTING_INDICATOR", evidenceTime);
         Operator manager = createOperator(merchant, "append-only-manager", "RISK_MANAGER");
@@ -438,7 +439,7 @@ class PostAuthorizationContractTests {
             throws Exception {
         Merchant merchant = createMerchant("post-authorization-resolution-race");
         CapturedPayment payment = createCapturedPayment(merchant, "resolution-race");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "resolution-race-signal",
                 "REVIEW", "MERCHANT_RISK_ALERT", evidenceTime);
         Operator manager = createOperator(merchant, "resolution-race-manager", "RISK_MANAGER");
@@ -496,7 +497,7 @@ class PostAuthorizationContractTests {
             throws Exception {
         Merchant merchant = createMerchant("post-authorization-merchant-race");
         CapturedPayment payment = createCapturedPayment(merchant, "merchant-race");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "merchant-race-signal",
                 "REVIEW", "MERCHANT_RISK_ALERT", evidenceTime);
         Operator manager = createOperator(merchant, "merchant-race-manager", "RISK_MANAGER");
@@ -554,7 +555,7 @@ class PostAuthorizationContractTests {
     void ledgerFailureRollsBackResolutionRefundActionLabelAuditWebhookAndPayment() throws Exception {
         Merchant merchant = createMerchant("post-authorization-ledger-rollback");
         CapturedPayment payment = createCapturedPayment(merchant, "ledger-rollback");
-        Instant evidenceTime = Instant.now();
+        Instant evidenceTime = DatabaseInstant.now();
         JsonNode signal = signal(merchant, payment.paymentIntentId(), "ledger-rollback-signal",
                 "REVIEW", "CUSTOMER_REPORTED_FRAUD", evidenceTime);
         Operator manager = createOperator(merchant, "ledger-rollback-manager", "RISK_MANAGER");
@@ -570,7 +571,7 @@ class PostAuthorizationContractTests {
     void auditAndWebhookFailuresEachRollBackAllPostAuthorizationMoneyTruth() throws Exception {
         Merchant auditMerchant = createMerchant("post-authorization-audit-rollback");
         CapturedPayment auditPayment = createCapturedPayment(auditMerchant, "audit-rollback");
-        Instant auditEvidence = Instant.now();
+        Instant auditEvidence = DatabaseInstant.now();
         JsonNode auditSignal = signal(auditMerchant, auditPayment.paymentIntentId(), "audit-rollback-signal",
                 "REVIEW", "MERCHANT_RISK_ALERT", auditEvidence);
         Operator auditManager = createOperator(auditMerchant, "audit-rollback-manager", "RISK_MANAGER");
@@ -584,7 +585,7 @@ class PostAuthorizationContractTests {
         databaseCleaner.clean();
         Merchant webhookMerchant = createMerchant("post-authorization-webhook-rollback");
         CapturedPayment webhookPayment = createCapturedPayment(webhookMerchant, "webhook-rollback");
-        Instant webhookEvidence = Instant.now();
+        Instant webhookEvidence = DatabaseInstant.now();
         JsonNode webhookSignal = signal(webhookMerchant, webhookPayment.paymentIntentId(),
                 "webhook-rollback-signal", "REVIEW", "MERCHANT_RISK_ALERT", webhookEvidence);
         Operator webhookManager = createOperator(webhookMerchant, "webhook-rollback-manager", "RISK_MANAGER");

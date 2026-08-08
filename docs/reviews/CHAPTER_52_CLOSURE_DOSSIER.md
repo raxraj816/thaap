@@ -44,11 +44,31 @@ and gates jointly enforce the release.
 
 ## Exact proof
 
-Backend regression covers 854 tests and the repository Python suite covers 166
-tests, all with zero failures or skips; all real PostgreSQL/Kafka suites, 22 UI
-tests and production build, migration proof, in-app browser proof, source scans,
-and repository gates passed. Exact final command results are recorded in the
-2026-08-01 learning note.
+An aggregate regression count stood here, and it is what hid `ER-0099`: a total
+says a suite ran, never that a row's own claim was asserted. Six of this
+chapter's rows named suites that did not exist while this section reported a
+passing total. Each row now names the suite that carries it, and what that
+suite asserts.
+
+| Row | Suite | What it asserts |
+|---|---|---|
+| `C52-PAY-001` | `PhaseFiveSourceNonInterferenceIntegrationTests` | Full-content digest per source family per merchant, unchanged across build/reconcile/activate/rollback with two tenants present; ledger balanced at zero for both; zero `ProcessorAdapter` and `WebhookHttpTransport` interaction. Populated families asserted non-empty first. |
+| `C52-TEN-001` | `PhaseFiveTenantIsolationIntegrationTests` | Copied foreign identifier absent rather than forbidden; platform authority cannot create merchant payments; platform administrator cannot run the data plane; merchant credential cannot start a rebuild; a rebuilt generation carries each tenant completely with no cross-attributed row. |
+| `C52-SEC-001` | `PhaseFivePrivacySinkIntegrationTests` | Twelve operational sinks scanned for distinct canaries per prohibited class — both API keys, both operator credentials, both platform credentials, card number, contact addresses — plus a companion test asserting the sinks and the canaries genuinely exist. |
+| `C52-CON-001` | `PhaseFiveFailureSequenceIntegrationTests` | Lease takeover mid-rebuild leaves no projection rows and moves neither tenant's source truth or balance; a cancel arriving during activation is asserted to actually wait, then lose, leaving one active generation carrying both tenants. |
+| `C52-DATA-001` | `PhaseFiveLineageTraceabilityIntegrationTests` | Per tenant: stream position to exact event with matching record digest and version, generation to cutoff manifest digest and handler version, label to chargeback evidence with availability at or after occurrence; no position resolves through another tenant's event. |
+| `C52-OBS-001` | `PhaseFiveOperationalSignalsIntegrationTests` | Rebuild signals emitted and distinguishable; every tag on every meter in the registry free of merchant, payment, credential and identifier values; each Phase 5 readiness contributor returns a status and actionable detail. |
+| `C52-API-001` | Python contract tests and `scripts/demo-payment-risk-analytics.py` | Unchanged; see the demo evidence section below. |
+
+All six suites share `PhaseFiveClosureFixture`, which builds two merchants
+through the real HTTP surface — payment, fraud decision, chargeback-derived
+label, webhook endpoint, ledger entries — and drives every event through the
+live projection consumer so a shadow rebuild reconciles against real live
+truth. Two tenants is the minimum that can fail: one tenant cannot distinguish
+"the query is scoped" from "there was only ever one merchant's data to return".
+
+Repository totals are reported in the learning note for the day rather than
+here, because a total is context for these rows and not a substitute for them.
 
 ## Migration evidence
 

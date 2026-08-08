@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Literal search across markdown that does not require ripgrep. See the equivalent note in
+# scripts/commit-readiness-check.sh: a gate that cannot run because a tool is missing reports the
+# same failure as a gate that found something, which makes it unreadable exactly when it matters.
+search_markdown_literal() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n --glob '*.md' --fixed-strings "$pattern" "$@"
+  else
+    grep -rnF --include='*.md' -- "$pattern" "$@"
+  fi
+}
+
 if [[ "$#" -eq 0 ]]; then
   targets=(docs/blog/drafts docs/blog/published)
 else
@@ -66,7 +79,7 @@ echo
 failed=0
 
 for pattern in "${patterns[@]}"; do
-  if rg -n --glob '*.md' --fixed-strings "$pattern" "${targets[@]}"; then
+  if search_markdown_literal "$pattern" "${targets[@]}"; then
     failed=1
   fi
 done

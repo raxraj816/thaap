@@ -1,5 +1,6 @@
 package com.thaap.payments.fraud;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -111,7 +112,7 @@ public class FraudDecision {
         this.maxFeatureAgeMs = maxFeatureAgeMs;
         this.reasonCodes = List.copyOf(decision.reasonCodes());
         this.trafficOrigin = trafficOrigin;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

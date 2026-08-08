@@ -85,6 +85,31 @@ scripts/commit-readiness-check.sh --deep-dive-required \
   --closure-dossier=docs/reviews/CHAPTER_N_CLOSURE_DOSSIER.md
 ```
 
+## Gate Enforcement
+
+The readiness gate is enforced by machine, not by remembering to run it.
+
+- **CI** (`.github/workflows/commit-readiness.yml`) runs
+  `scripts/commit-readiness-check.sh <newest-learning-day> --run-tests` on every
+  push and pull request, and fails the run if Docker is unavailable, because a
+  runner without Docker silently skips every PostgreSQL concurrency, migration
+  and restart proof while still reporting success.
+- **Pre-push** (`.githooks/pre-push`) runs the same script without tests — about
+  twenty-six seconds — so matrix, debt, contract and naming drift is caught
+  before the push leaves the machine. Install once per clone:
+
+```bash
+scripts/install-git-hooks.sh
+```
+
+Both call the one script rather than re-listing its gates, because a duplicated
+list drifts and the drifted copy is the one nobody reads.
+
+This exists because it did not. The gate was run by hand, its exit code was
+never read, and a merged commit message claimed it passed while it had been
+exiting `1` for a missing tool. **Never report a gate as passing from its
+output; report it from its exit code, and prefer a gate that runs itself.**
+
 ## Git Workflow
 
 For feature work, always create branches from `develop` and name them with the

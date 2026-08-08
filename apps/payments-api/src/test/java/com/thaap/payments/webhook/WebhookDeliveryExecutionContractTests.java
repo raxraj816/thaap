@@ -18,6 +18,7 @@ import com.thaap.payments.payment.PaymentIntentRepository;
 import com.thaap.payments.payment.PaymentIntentStatus;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -171,7 +172,7 @@ class WebhookDeliveryExecutionContractTests {
 
         WebhookDelivery initial = deliveryRepository.findAll().getFirst();
         WebhookEvent event = eventRepository.findById(initial.getWebhookEventId()).orElseThrow();
-        Instant firstAttemptAt = Instant.now().plusSeconds(10);
+        Instant firstAttemptAt = DatabaseInstant.now().plusSeconds(10);
 
         assertThat(executor.processDueDeliveries(firstAttemptAt, 10)).isEqualTo(1);
 
@@ -248,7 +249,7 @@ class WebhookDeliveryExecutionContractTests {
                     deliveryService.createDeliveriesInCurrentTransaction(
                             merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
             WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-            Instant attemptAt = Instant.now()
+            Instant attemptAt = DatabaseInstant.now()
                     .truncatedTo(java.time.temporal.ChronoUnit.MICROS)
                     .plusSeconds(1);
 
@@ -320,7 +321,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant firstClaimAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant firstClaimAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim first = claimService.claimDue(firstClaimAt, 1).getFirst();
         WebhookDeliveryClaim recovered = claimService.claimDue(firstClaimAt.plusSeconds(31), 1).getFirst();
@@ -356,7 +357,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant firstClaimAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant firstClaimAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim first = claimService.claimDue(firstClaimAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(first, firstClaimAt.plusSeconds(1))).isTrue();
@@ -387,7 +388,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Instant completedAt = claimedAt.plusSeconds(2);
 
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
@@ -422,7 +423,7 @@ class WebhookDeliveryExecutionContractTests {
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         WebhookDeliveryClaim staleClaim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(staleClaim.signingSecretGeneration())
                 .isEqualTo(created.endpoint().getSigningSecretGeneration());
@@ -474,7 +475,7 @@ class WebhookDeliveryExecutionContractTests {
         jdbcTemplate.update(
                 "UPDATE webhook_deliveries SET attempt_count = 4, generation_attempt_count = 4 WHERE id = ?",
                 delivery.getId());
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         WebhookDeliveryClaim staleFinalClaim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(staleFinalClaim.attemptNumber()).isEqualTo(WebhookRetryPolicy.MAX_ATTEMPTS);
         assertThat(staleFinalClaim.signingSecretGeneration())
@@ -529,7 +530,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().minusSeconds(10);
+        Instant claimedAt = DatabaseInstant.now().minusSeconds(10);
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         assertThat(claimService.prepareForDispatch(claim, claimedAt)).isTrue();
 
@@ -578,7 +579,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant claimedAt = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
         WebhookEndpointSecretService endpointSecretService = mock(WebhookEndpointSecretService.class);
         when(endpointSecretService.loadForDelivery(claim.merchantId(), claim.endpointId()))
@@ -619,7 +620,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimedAt = Instant.now().minusSeconds(60)
+        Instant claimedAt = DatabaseInstant.now().minusSeconds(60)
                 .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
         WebhookDeliveryClaim claim = claimService.claimDue(claimedAt, 1).getFirst();
@@ -654,7 +655,7 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant claimAt = Instant.now().minusSeconds(300);
+        Instant claimAt = DatabaseInstant.now().minusSeconds(300);
         double unknownBefore = meterRegistry.counter("thaap.webhook.attempts",
                 "event.type", "refund.created", "outcome", "OUTCOME_UNKNOWN").count();
         double exhaustedBefore = meterRegistry.counter("thaap.webhook.delivery.terminal",
@@ -710,18 +711,18 @@ class WebhookDeliveryExecutionContractTests {
                 deliveryService.createDeliveriesInCurrentTransaction(
                         merchant.getId(), "refund.created", java.util.UUID.randomUUID()));
         WebhookDelivery delivery = deliveryRepository.findAll().getFirst();
-        Instant dueAt = Instant.now();
+        Instant dueAt = DatabaseInstant.now();
 
         for (int attempt = 1; attempt <= WebhookRetryPolicy.MAX_ATTEMPTS; attempt++) {
             assertThat(executor.processDueDeliveries(dueAt, 1)).isEqualTo(1);
             WebhookDelivery current = deliveryRepository.findById(delivery.getId()).orElseThrow();
             if (attempt < WebhookRetryPolicy.MAX_ATTEMPTS) {
                 assertThat(current.getStatus()).isEqualTo(WebhookDeliveryStatus.RETRY_SCHEDULED);
-                Instant fastForwardedDueAt = Instant.now().minusSeconds(1);
+                Instant fastForwardedDueAt = DatabaseInstant.now().minusSeconds(1);
                 jdbcTemplate.update(
                         "UPDATE webhook_deliveries SET next_attempt_at = ? WHERE id = ?",
                         java.sql.Timestamp.from(fastForwardedDueAt), delivery.getId());
-                dueAt = Instant.now();
+                dueAt = DatabaseInstant.now();
             }
         }
 

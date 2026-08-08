@@ -19,6 +19,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -89,9 +90,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("race-idem"),
-                sixtyFourChars("race-digest"), 1, Instant.now());
+                sixtyFourChars("race-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "race-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -178,9 +179,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("lost-idem"),
-                sixtyFourChars("lost-digest"), 1, Instant.now());
+                sixtyFourChars("lost-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "lost-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -228,9 +229,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("nd-idem"),
-                sixtyFourChars("nd-digest"), 1, Instant.now());
+                sixtyFourChars("nd-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "nd-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -271,9 +272,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("actor-idem"),
-                sixtyFourChars("actor-digest"), 1, Instant.now());
+                sixtyFourChars("actor-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "actor-disable-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -313,9 +314,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_OPERATOR, otherAnalyst.id(),
-                sixtyFourChars("target-idem"), sixtyFourChars("target-digest"), 1, Instant.now());
+                sixtyFourChars("target-idem"), sixtyFourChars("target-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "target-disable-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -354,9 +355,9 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("resolve-idem"),
-                sixtyFourChars("resolve-digest"), 1, Instant.now());
+                sixtyFourChars("resolve-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "resolve-race-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 
@@ -375,7 +376,7 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
                                   "reasonCode":"CARD_TESTING_CONFIRMED",
                                   "evidenceOccurredAt":"%s"
                                 }
-                                """.formatted(Instant.now().minusSeconds(5))))
+                                """.formatted(DatabaseInstant.now().minusSeconds(5))))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .status().isOk());
 
@@ -416,12 +417,12 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("unrelated-idem"),
-                sixtyFourChars("unrelated-digest"), 2, Instant.now());
+                sixtyFourChars("unrelated-digest"), 2, DatabaseInstant.now());
         // Ordinal 1 is the case a competing transaction holds; ordinal 2 is untouched.
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, blocked.reviewCaseId(), 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, free.reviewCaseId(), 0, 2,
-                Instant.now());
+                DatabaseInstant.now());
 
         CountDownLatch rowLocked = new CountDownLatch(1);
         CountDownLatch releaseHolder = new CountDownLatch(1);
@@ -465,8 +466,8 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
     }
 
     private void awaitDatabaseLockWait(String relation) throws InterruptedException {
-        Instant deadline = Instant.now().plusSeconds(5);
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plusSeconds(5);
+        while (DatabaseInstant.now().isBefore(deadline)) {
             Integer waiting = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*) FROM pg_stat_activity
                     WHERE datname = current_database() AND wait_event_type = 'Lock'

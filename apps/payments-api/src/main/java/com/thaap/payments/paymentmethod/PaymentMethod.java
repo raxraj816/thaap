@@ -1,5 +1,6 @@
 package com.thaap.payments.paymentmethod;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -66,7 +67,7 @@ public class PaymentMethod {
         this.cardLast4 = cardLast4;
         this.cardFunding = cardFunding;
         this.cardCountry = cardCountry;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

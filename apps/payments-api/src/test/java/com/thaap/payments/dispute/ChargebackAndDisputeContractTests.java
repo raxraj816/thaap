@@ -52,6 +52,7 @@ import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.paymentmethod.PaymentMethodRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.MerchantContext;
+import com.thaap.payments.time.DatabaseInstant;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -150,7 +151,7 @@ class ChargebackAndDisputeContractTests {
     @Test
     void capturedFraudChargebackCreatesBalancedAllocationLabelEvidenceAndExactReplay() throws Exception {
         CapturedFixture fixture = captured("chargeback-fraud", 6400L);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         String request = chargebackRequest("network-event-1", fixture.paymentIntentId(), 6400L,
                 "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(3600), receivedAt,
                 receivedAt.plusSeconds(86400));
@@ -273,7 +274,7 @@ class ChargebackAndDisputeContractTests {
             PaymentIntent paymentIntent = paymentIntentRepository.findById(fixture.paymentIntentId()).orElseThrow();
             paymentIntent.refund();
         });
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "chargeback-refunded-key",
                 chargebackRequest("network-event-refunded", fixture.paymentIntentId(), 7200L,
                         "PRODUCT_NOT_RECEIVED", receivedAt.minusSeconds(3600), receivedAt,
@@ -291,7 +292,7 @@ class ChargebackAndDisputeContractTests {
     void duplicateExternalEventConflictingBodyAndForeignReadAreRejected() throws Exception {
         CapturedFixture fixture = captured("chargeback-dedup", 5000L);
         CapturedFixture foreign = captured("chargeback-foreign", 5100L);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         String firstRequest = chargebackRequest("same-event", fixture.paymentIntentId(), 1000L, "GENERAL",
                 receivedAt.minusSeconds(60), receivedAt, receivedAt.plusSeconds(600));
         JsonNode first = postChargeback(fixture.apiKey(), "dedup-key-1", firstRequest, 201);
@@ -318,7 +319,7 @@ class ChargebackAndDisputeContractTests {
                 "FRAUDULENT_FIRST_PARTY_MISUSE", "FIRST_PARTY_MISUSE");
         List<String> nonFraudReasons = List.of(
                 "PRODUCT_NOT_RECEIVED", "DUPLICATE", "CREDIT_NOT_PROCESSED", "GENERAL");
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
 
         for (Map.Entry<String, String> reason : fraudReasons.entrySet()) {
             CapturedFixture fixture = captured("reason-" + reason.getKey().toLowerCase(), 2300L);
@@ -346,7 +347,7 @@ class ChargebackAndDisputeContractTests {
     @Test
     void strictGrammarAmountStateCurrencyAndIndependentExternalDedupAreEnforced() throws Exception {
         CapturedFixture fixture = captured("strict-grammar", 5000L);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         String valid = chargebackRequest("machine.event:1", fixture.paymentIntentId(), 1L, "GENERAL",
                 receivedAt.minusSeconds(1), receivedAt, receivedAt.plusSeconds(600));
         JsonNode first = postChargeback(fixture.apiKey(), "strict-first", valid, 201);
@@ -380,7 +381,7 @@ class ChargebackAndDisputeContractTests {
     @Test
     void expiredEvidenceAndAppendOnlyMutationAreRejectedAndMetricsStayBounded() throws Exception {
         CapturedFixture fixture = captured("expired-evidence", 4100L);
-        Instant receivedAt = Instant.now().minusSeconds(120);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(120);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "expired-create", chargebackRequest(
                 "expired.event", fixture.paymentIntentId(), 4100L, "GENERAL",
                 receivedAt.minusSeconds(1), receivedAt, receivedAt.plusSeconds(1)), 201);
@@ -416,7 +417,7 @@ class ChargebackAndDisputeContractTests {
         doThrow(new IllegalStateException("injected chargeback ledger failure"))
                 .when(ledgerEntryRepository).saveAll(org.mockito.ArgumentMatchers.<LedgerEntry>anyList());
 
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         postChargeback(fixture.apiKey(), "rollback-ledger-key", chargebackRequest("rollback.ledger",
                 fixture.paymentIntentId(), 4700L, "FRAUDULENT_CARD_TESTING",
                 receivedAt.minusSeconds(1), receivedAt, receivedAt.plusSeconds(600)), 500);
@@ -432,7 +433,7 @@ class ChargebackAndDisputeContractTests {
         doThrow(new IllegalStateException("injected chargeback audit failure"))
                 .when(auditLogRepository).save(any(AuditLog.class));
 
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         postChargeback(fixture.apiKey(), "rollback-audit-key", chargebackRequest("rollback.audit",
                 fixture.paymentIntentId(), 4800L, "FRAUDULENT_ACCOUNT_TAKEOVER",
                 receivedAt.minusSeconds(1), receivedAt, receivedAt.plusSeconds(600)), 500);
@@ -456,7 +457,7 @@ class ChargebackAndDisputeContractTests {
                             any(UUID.class), anyString());
             default -> throw new IllegalArgumentException("Unknown rollback boundary " + boundary);
         }
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         postChargeback(fixture.apiKey(), "rollback-" + boundary + "-key",
                 chargebackRequest("rollback." + boundary, fixture.paymentIntentId(), 4900L,
                         "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(1), receivedAt,
@@ -470,7 +471,7 @@ class ChargebackAndDisputeContractTests {
         CapturedFixture fixture = captured("race-refund-first", 5200L);
         CountDownLatch refundOwnsPaymentLock = new CountDownLatch(1);
         CountDownLatch releaseRefundCommit = new CountDownLatch(1);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> refund = executor.submit(() -> {
@@ -516,7 +517,7 @@ class ChargebackAndDisputeContractTests {
         CapturedFixture fixture = captured("race-chargeback-first", 5300L);
         CountDownLatch chargebackOwnsPaymentLock = new CountDownLatch(1);
         CountDownLatch releaseChargebackCommit = new CountDownLatch(1);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> chargeback = executor.submit(() -> {
@@ -555,7 +556,7 @@ class ChargebackAndDisputeContractTests {
     @Test
     void forcedConcurrentIdenticalExternalEventsWaitThenConvergeToOneFinancialTruth() throws Exception {
         CapturedFixture fixture = captured("race-external-dedup", 5400L);
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         String body = chargebackRequest("race.external.same", fixture.paymentIntentId(), 5400L,
                 "FRAUDULENT_CARD_TESTING", receivedAt.minusSeconds(1), receivedAt,
                 receivedAt.plusSeconds(600));
@@ -601,7 +602,7 @@ class ChargebackAndDisputeContractTests {
         OperatorAccess viewer = createOperator(fixture, "dispute-viewer", "VIEWER");
         OperatorAccess analyst = createOperator(fixture, "dispute-analyst", "ANALYST");
         OperatorAccess manager = createOperator(fixture, "dispute-manager", "RISK_MANAGER");
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         Instant callerClaimedDueAt = receivedAt.plusSeconds(86400);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-operations-create",
                 chargebackRequest("dispute.operations.created", fixture.paymentIntentId(), 6100L,
@@ -667,7 +668,7 @@ class ChargebackAndDisputeContractTests {
                 .contentType(APPLICATION_JSON).content("{\"expectedEvidenceVersion\":2}")), 200);
         assertThat(submitted.get("lifecycleStatus").asText()).isEqualTo("SUBMITTED");
 
-        Instant outcomeAt = Instant.now();
+        Instant outcomeAt = DatabaseInstant.now();
         String outcomeBody = "{\"externalEventKey\":\"dispute.outcome.1\",\"outcome\":\"WON\","
                 + "\"occurredAt\":\"" + outcomeAt + "\"}";
         mockMvc.perform(post("/simulator/disputes/{id}/outcomes", chargebackId)
@@ -712,7 +713,7 @@ class ChargebackAndDisputeContractTests {
     void forcedConcurrentSubmissionsSerializeToOneSubmittedVersionAndEvent() throws Exception {
         CapturedFixture fixture = captured("dispute-submit-race", 6200L);
         OperatorAccess manager = createOperator(fixture, "submit-race-manager", "RISK_MANAGER");
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "submit-race-chargeback",
                 chargebackRequest("dispute.submit.race", fixture.paymentIntentId(), 6200L,
                         "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
@@ -778,7 +779,7 @@ class ChargebackAndDisputeContractTests {
         RiskOperatorContext managerContext = new RiskOperatorContext(
                 merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
                 manager.operator().getRole(), manager.credentialPrefix());
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-operator-disable-create",
                 chargebackRequest("dispute.operator.disable", fixture.paymentIntentId(), 6300L,
                         "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
@@ -858,7 +859,7 @@ class ChargebackAndDisputeContractTests {
         RiskOperatorContext managerContext = new RiskOperatorContext(
                 merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
                 manager.operator().getRole(), manager.credentialPrefix());
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-submit-operator-disable-create",
                 chargebackRequest("dispute.submit.operator.disable", fixture.paymentIntentId(), 6350L,
                         "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
@@ -950,7 +951,7 @@ class ChargebackAndDisputeContractTests {
         RiskOperatorContext managerContext = new RiskOperatorContext(
                 merchant.getId(), manager.operator().getId(), manager.operator().getOperatorCode(),
                 manager.operator().getRole(), manager.credentialPrefix());
-        Instant receivedAt = Instant.now().minusSeconds(60);
+        Instant receivedAt = DatabaseInstant.now().minusSeconds(60);
         JsonNode chargeback = postChargeback(fixture.apiKey(), "dispute-disabled-completed-replay-create",
                 chargebackRequest("dispute.disabled.completed.replay", fixture.paymentIntentId(), 6375L,
                         "FRAUDULENT_STOLEN_CREDENTIAL", receivedAt.minusSeconds(60), receivedAt,
@@ -1059,7 +1060,7 @@ class ChargebackAndDisputeContractTests {
                     amount, "USD", captureMethod));
             PaymentAttempt attempt = paymentAttemptRepository.save(new PaymentAttempt(merchant.getId(), intent.getId(),
                     method.getId(), "confirm-" + name, 1));
-            Instant decisionTime = Instant.now().minusSeconds(120);
+            Instant decisionTime = DatabaseInstant.now().minusSeconds(120);
             FraudDecision decision = fraudDecisionRepository.save(new FraudDecision(merchant.getId(), attempt.getId(),
                     new ConfirmDecision(FraudDecisionAction.ALLOW, BigDecimal.ZERO, FraudRiskLevel.LOW,
                             "rules_v1", null, List.of(FraudDecisionReasonCode.NO_RULE_MATCH)),

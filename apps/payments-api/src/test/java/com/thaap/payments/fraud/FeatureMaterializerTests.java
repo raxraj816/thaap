@@ -11,6 +11,7 @@ import com.thaap.payments.paymentattempt.PaymentAttempt;
 import com.thaap.payments.paymentmethod.CardFunding;
 import com.thaap.payments.paymentmethod.PaymentMethod;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ class FeatureMaterializerTests {
     @Test
     void featureCatalogueRejectsEveryProhibitedSourceAndProducesLexicalSnapshot() {
         Fixture fixture = fixture(null);
-        Instant decisionStart = Instant.now();
+        Instant decisionStart = DatabaseInstant.now();
 
         MaterializedFeatureSet materialized = fixture.materializer().materialize(
                 fixture.paymentIntent(), fixture.paymentAttempt(), fixture.paymentMethod(), decisionStart);
@@ -76,13 +77,13 @@ class FeatureMaterializerTests {
     @Test
     void staleAndFutureTimestampPartitionsAreDistinct() {
         Fixture staleFixture = fixture(1L);
-        Instant old = Instant.now().minusSeconds(10);
+        Instant old = DatabaseInstant.now().minusSeconds(10);
         ReflectionTestUtils.setField(staleFixture.paymentIntent(), "createdAt", old);
         ReflectionTestUtils.setField(staleFixture.paymentMethod(), "createdAt", old);
         ReflectionTestUtils.setField(staleFixture.paymentAttempt(), "createdAt", old);
 
         MaterializedFeatureSet stale = staleFixture.materializer().materialize(staleFixture.paymentIntent(),
-                staleFixture.paymentAttempt(), staleFixture.paymentMethod(), Instant.now());
+                staleFixture.paymentAttempt(), staleFixture.paymentMethod(), DatabaseInstant.now());
         assertThat(stale.freshnessStatus()).isEqualTo(FeatureFreshnessStatus.STALE);
         assertThat(stale.staleFeatureNames()).containsExactly("card.country");
         assertThat(stale.maxFeatureAgeMs()).isGreaterThanOrEqualTo(9_000L);

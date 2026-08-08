@@ -6,6 +6,7 @@ import com.thaap.payments.fraud.FraudDecisionAction;
 import com.thaap.payments.fraud.FraudDecision;
 import com.thaap.payments.postauth.PostAuthorizationSignal;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -68,7 +69,7 @@ public class ManualReviewCase {
         this.trafficOrigin = trafficOrigin;
         this.reviewStage = ReviewStage.PRE_AUTHORIZATION;
         this.assignmentVersion = 0;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
         this.updatedAt = this.createdAt;
     }
 
@@ -154,7 +155,7 @@ public class ManualReviewCase {
         if (status != ManualReviewCaseStatus.OPEN && status != ManualReviewCaseStatus.ASSIGNED) {
             conflict("canceled");
         }
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         this.assignedOperatorId = null;
         this.status = ManualReviewCaseStatus.CANCELED;
         this.cancellationReason = ManualReviewCancellationReason.MERCHANT_CANCELED;

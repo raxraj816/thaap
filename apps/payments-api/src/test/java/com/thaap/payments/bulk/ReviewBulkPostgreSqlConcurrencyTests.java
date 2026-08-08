@@ -9,6 +9,7 @@ import com.thaap.payments.risk.RiskOperator;
 import com.thaap.payments.risk.RiskOperatorRepository;
 import com.thaap.payments.risk.RiskOperatorRole;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -94,7 +95,7 @@ class ReviewBulkPostgreSqlConcurrencyTests extends ReviewBulkPostgreSqlTestBase 
     void expiredLeaseReclaimsClaimedItemAndFencesStaleCompletionAgainstTerminalTruth() {
         Fixture fixture = fixture("lease-recovery");
         store.insertItem(UUID.randomUUID(), fixture.merchantId(), fixture.requestId(),
-                UUID.randomUUID(), 0, 1, Instant.now());
+                UUID.randomUUID(), 0, 1, DatabaseInstant.now());
         ReviewBulkActionStore.Lease staleLease = store.claim(fixture.requestId(), "stale-worker");
         ReviewBulkActionStore.ClaimedItem staleItem = store.claimNext(staleLease);
         Instant expiredAt = clock.instant().minusSeconds(1);
@@ -132,17 +133,17 @@ class ReviewBulkPostgreSqlConcurrencyTests extends ReviewBulkPostgreSqlTestBase 
         Merchant merchant = merchantRepository.save(new Merchant(
                 "bulk-postgres-" + name, "sk_test_" + UUID.randomUUID()));
         RiskOperator operator = operatorRepository.save(new RiskOperator(merchant.getId(),
-                RiskOperatorRole.RISK_MANAGER, merchant.getApiKeyPrefix(), Instant.now()));
+                RiskOperatorRole.RISK_MANAGER, merchant.getApiKeyPrefix(), DatabaseInstant.now()));
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.getId(), operator.getId(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, "a".repeat(64),
-                "b".repeat(64), 1, Instant.now());
+                "b".repeat(64), 1, DatabaseInstant.now());
         return new Fixture(merchant.getId(), requestId);
     }
 
     private void awaitDatabaseLockWait(String relation) throws InterruptedException {
-        Instant deadline = Instant.now().plusSeconds(5);
-        while (Instant.now().isBefore(deadline)) {
+        Instant deadline = DatabaseInstant.now().plusSeconds(5);
+        while (DatabaseInstant.now().isBefore(deadline)) {
             Integer waiting = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*) FROM pg_stat_activity
                     WHERE datname = current_database() AND wait_event_type = 'Lock'

@@ -13,6 +13,7 @@ import com.thaap.payments.processor.ProcessorAuthorizationRequest;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.simulation.RiskSimulationCandidateSnapshotService;
 import com.thaap.payments.simulation.RiskSimulationCandidateType;
+import com.thaap.payments.time.DatabaseInstant;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -170,9 +171,9 @@ class MerchantRiskPolicyContractTests {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM authorizations WHERE payment_attempt_id = ?",
                 Integer.class, UUID.fromString(attempt.get("id").asText()))).isZero();
 
-        Instant validFrom = Instant.now().minusSeconds(86_400)
+        Instant validFrom = DatabaseInstant.now().minusSeconds(86_400)
                 .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
-        Instant expiresAt = Instant.now().plusSeconds(86_400)
+        Instant expiresAt = DatabaseInstant.now().plusSeconds(86_400)
                 .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         String exceptionBody = "{\"code\":\"TRUSTED_CARD\",\"sourceRuleVersionId\":\"" + ruleId
                 + "\",\"paymentMethodId\":\"" + methodId
@@ -425,7 +426,7 @@ class MerchantRiskPolicyContractTests {
             String candidateType, UUID candidateId) {
         RiskSimulationCandidateSnapshotService.FrozenCandidate candidate = simulationCandidateSnapshotService.freeze(
                 merchantId, RiskSimulationCandidateType.valueOf(candidateType), candidateId);
-        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant now = DatabaseInstant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         UUID runId = UUID.randomUUID();
         jdbcTemplate.update("""
                 INSERT INTO risk_simulation_runs

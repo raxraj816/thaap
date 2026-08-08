@@ -17,6 +17,7 @@ import com.thaap.payments.support.RiskWorkspaceScenario;
 import com.thaap.payments.support.RiskWorkspaceScenario.Merchant;
 import com.thaap.payments.support.RiskWorkspaceScenario.Operator;
 import com.thaap.payments.support.RiskWorkspaceScenario.Payment;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,9 +83,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("fence-idem"),
-                sixtyFourChars("fence-digest"), 1, Instant.now());
+                sixtyFourChars("fence-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "atomicity-test-worker");
         assertThat(lease).isNotNull();
@@ -135,11 +136,11 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("exec-idem"),
-                sixtyFourChars("exec-digest"), 1, Instant.now());
+                sixtyFourChars("exec-digest"), 1, DatabaseInstant.now());
         // The review case's real assignment version is 0; requesting version 7 is the
         // "stale expected version" adversarial case the matrix names explicitly.
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 7, 1,
-                Instant.now());
+                DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "executor-test-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
@@ -180,9 +181,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("ok-idem"),
-                sixtyFourChars("ok-digest"), 1, Instant.now());
+                sixtyFourChars("ok-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "success-test-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
@@ -232,9 +233,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.RELEASE, null, sixtyFourChars("rel-idem"),
-                sixtyFourChars("rel-digest"), 1, Instant.now());
+                sixtyFourChars("rel-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 1, 1,
-                Instant.now());
+                DatabaseInstant.now());
 
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "release-test-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
@@ -268,9 +269,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID firstRequestId = UUID.randomUUID();
         store.insertRequest(firstRequestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("noop-first-idem"),
-                sixtyFourChars("noop-first-digest"), 1, Instant.now());
+                sixtyFourChars("noop-first-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), firstRequestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease firstLease = store.claim(firstRequestId, "noop-worker-one");
         itemExecutor.execute(store.claimNext(firstLease));
         store.finalizeRequest(firstLease);
@@ -285,9 +286,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID secondRequestId = UUID.randomUUID();
         store.insertRequest(secondRequestId, merchant.id(), manager.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("noop-second-idem"),
-                sixtyFourChars("noop-second-digest"), 1, Instant.now());
+                sixtyFourChars("noop-second-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), secondRequestId, reviewCaseId, 1, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease secondLease = store.claim(secondRequestId, "noop-worker-two");
         itemExecutor.execute(store.claimNext(secondLease));
         store.finalizeRequest(secondLease);
@@ -320,9 +321,9 @@ class ReviewBulkActionAtomicityPostgreSqlTests extends ReviewBulkPostgreSqlTestB
         UUID requestId = UUID.randomUUID();
         store.insertRequest(requestId, merchant.id(), analyst.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("metric-idem"),
-                sixtyFourChars("metric-digest"), 1, Instant.now());
+                sixtyFourChars("metric-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
-                Instant.now());
+                DatabaseInstant.now());
         ReviewBulkActionStore.Lease lease = store.claim(requestId, "metric-worker");
         ReviewBulkActionStore.ClaimedItem item = store.claimNext(lease);
 

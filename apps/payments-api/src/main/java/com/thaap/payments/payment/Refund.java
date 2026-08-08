@@ -1,5 +1,6 @@
 package com.thaap.payments.payment;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -89,7 +90,7 @@ public class Refund {
         this.reasonCatalogVersion = 1;
         this.reasonCode = reasonCode;
         this.sourceReviewResolutionId = sourceReviewResolutionId;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

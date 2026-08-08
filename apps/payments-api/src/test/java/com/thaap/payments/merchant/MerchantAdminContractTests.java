@@ -12,6 +12,7 @@ import com.thaap.payments.api.RequestIdFilter;
 import com.thaap.payments.security.SecretHasher;
 import com.thaap.payments.security.SensitiveValueHasher;
 import com.thaap.payments.support.DatabaseCleaner;
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.EntityManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -231,7 +232,7 @@ class MerchantAdminContractTests {
             throws Exception {
         String idempotencyKey = "merchant-create-stranded";
         String merchantName = "Recovered Merchant";
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         UUID abandonedLeaseToken = UUID.randomUUID();
         MerchantCreationRecord strandedRecord = new MerchantCreationRecord(
                 sensitiveValueHasher.hmacSha256(
@@ -268,7 +269,7 @@ class MerchantAdminContractTests {
     void merchantCreationDoesNotStealAnActiveReservation() throws Exception {
         String idempotencyKey = "merchant-create-active";
         String merchantName = "Active Merchant";
-        Instant now = Instant.now();
+        Instant now = DatabaseInstant.now();
         MerchantCreationRecord activeRecord = new MerchantCreationRecord(
                 sensitiveValueHasher.hmacSha256(
                         "merchant.creation.idempotency", idempotencyKey),

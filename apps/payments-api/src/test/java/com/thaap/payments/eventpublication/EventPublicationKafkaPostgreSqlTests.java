@@ -16,6 +16,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -158,7 +159,7 @@ class EventPublicationKafkaPostgreSqlTests {
             throws Exception {
         append("ack-before-finalize", UUID.randomUUID());
         Map<String, Long> sourceTruthBefore = sourceTruthCounts();
-        Instant firstClaimAt = Instant.now().plusSeconds(1);
+        Instant firstClaimAt = DatabaseInstant.now().plusSeconds(1);
         PublicationClaim first = claim(firstClaimAt, "crashing-worker");
 
         PublicationSendResult lostAcknowledgement = sender.send(first);
@@ -195,7 +196,7 @@ class EventPublicationKafkaPostgreSqlTests {
     @Order(3)
     void competingPostgreSqlClaimSkipsTheLockedPublication() throws Exception {
         append("postgres-skip-locked", UUID.randomUUID());
-        Instant claimAt = Instant.now().plusSeconds(1);
+        Instant claimAt = DatabaseInstant.now().plusSeconds(1);
         CountDownLatch firstClaimed = new CountDownLatch(1);
         CountDownLatch releaseFirstTransaction = new CountDownLatch(1);
         TransactionTemplate firstTransaction = new TransactionTemplate(
@@ -241,7 +242,7 @@ class EventPublicationKafkaPostgreSqlTests {
             throws Exception {
         append("broker-outage-recovery", UUID.randomUUID());
         Map<String, Long> sourceTruthBefore = sourceTruthCounts();
-        Instant firstClaimAt = Instant.now().plusSeconds(1);
+        Instant firstClaimAt = DatabaseInstant.now().plusSeconds(1);
         PublicationClaim first = claim(firstClaimAt, "outage-worker");
         PublicationSendResult outageResult;
 
@@ -255,7 +256,7 @@ class EventPublicationKafkaPostgreSqlTests {
         assertThat(outageResult.outcome()).isIn(PublicationOutcome.UNKNOWN,
                 PublicationOutcome.RETRYABLE_FAILURE);
         PublicationFinalization outageFinalization = finalize(first, outageResult,
-                Instant.now());
+                DatabaseInstant.now());
         Instant recoveryClaimAt;
         if (outageFinalization == PublicationFinalization.APPLIED) {
             recoveryClaimAt = jdbcTemplate.queryForObject("""
@@ -323,7 +324,7 @@ class EventPublicationKafkaPostgreSqlTests {
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, streamId,
                 DomainEventType.PAYMENT_INTENT_CREATED,
                 DomainEventCatalogue.INITIAL_EVENT_VERSION,
-                Instant.now().minusSeconds(1), correlationId, null,
+                DatabaseInstant.now().minusSeconds(1), correlationId, null,
                 correlationId + "-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM,
                         "kafka-postgres-proof"), TrafficOrigin.MERCHANT_API, payload);

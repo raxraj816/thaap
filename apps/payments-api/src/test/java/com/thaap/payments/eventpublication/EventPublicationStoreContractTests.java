@@ -15,6 +15,7 @@ import com.thaap.payments.merchant.Merchant;
 import com.thaap.payments.merchant.MerchantRepository;
 import com.thaap.payments.support.DatabaseCleaner;
 import com.thaap.payments.tenant.TrafficOrigin;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +56,7 @@ class EventPublicationStoreContractTests {
         Merchant merchant = merchant("publication-fence");
         UUID streamId = UUID.randomUUID();
         append(merchant.getId(), streamId, "fence-event");
-        Instant claimTime = Instant.now().plusSeconds(1);
+        Instant claimTime = DatabaseInstant.now().plusSeconds(1);
 
         PublicationClaim first = claim(claimTime, "worker-one", 1).getFirst();
         PublicationClaim takeover = claim(claimTime.plusSeconds(31),
@@ -96,7 +97,7 @@ class EventPublicationStoreContractTests {
             append(unrelated.getId(), UUID.randomUUID(), "unrelated-" + index);
         }
 
-        List<PublicationClaim> claims = claim(Instant.now().plusSeconds(1),
+        List<PublicationClaim> claims = claim(DatabaseInstant.now().plusSeconds(1),
                 "fair-worker", 100);
         Map<UUID, Long> byTenant = claims.stream().collect(Collectors.groupingBy(
                 PublicationClaim::merchantId, Collectors.counting()));
@@ -118,7 +119,7 @@ class EventPublicationStoreContractTests {
     void tenScheduledRetriesAllowRetryTenThenBlockWithoutDeletingEvent() {
         Merchant merchant = merchant("publication-retry-ceiling");
         append(merchant.getId(), UUID.randomUUID(), "retry-event");
-        Instant dueAt = Instant.now().plusSeconds(1);
+        Instant dueAt = DatabaseInstant.now().plusSeconds(1);
         List<PublicationClaim> attempts = new ArrayList<>();
 
         for (int attempt = 1; attempt <= 11; attempt++) {
@@ -170,7 +171,7 @@ class EventPublicationStoreContractTests {
         return new DomainEventCommand(merchantId, DomainStreamType.PAYMENT, streamId,
                 DomainEventType.PAYMENT_INTENT_CREATED,
                 DomainEventCatalogue.INITIAL_EVENT_VERSION,
-                Instant.now().minusSeconds(1), correlationId, null,
+                DatabaseInstant.now().minusSeconds(1), correlationId, null,
                 correlationId + "-request", null,
                 new DomainEventActor(DomainEventActorType.SYSTEM,
                         "publication-contract"), TrafficOrigin.MERCHANT_API, payload);

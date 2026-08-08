@@ -15,6 +15,7 @@ import com.thaap.payments.monitoring.MonitoringCoverageStatus;
 import com.thaap.payments.monitoring.MonitoringTrafficOriginPolicy;
 import com.thaap.payments.risk.RiskOperatorContext;
 import com.thaap.payments.risk.RiskOperatorRole;
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Instant;
 import java.sql.Timestamp;
 import java.util.LinkedHashMap;
@@ -575,7 +576,7 @@ class PostgreSqlMigrationTests {
                 """, merchantId, "monitoring-query-" + merchantId);
         RiskOperatorContext context = new RiskOperatorContext(merchantId, operatorId,
                 "monitoring-query-viewer", RiskOperatorRole.VIEWER, "risk_");
-        Instant asOf = Instant.now().minusSeconds(1);
+        Instant asOf = DatabaseInstant.now().minusSeconds(1);
 
         SummaryView liveOnly = monitoringQueryService.summary(context,
                 new MonitoringRequest(asOf.minusSeconds(3600), asOf, asOf,
@@ -608,7 +609,7 @@ class PostgreSqlMigrationTests {
         UUID customerId = UUID.randomUUID();
         UUID paymentMethodId = UUID.randomUUID();
         UUID paymentIntentId = UUID.randomUUID();
-        Instant asOf = Instant.now().minusSeconds(1);
+        Instant asOf = DatabaseInstant.now().minusSeconds(1);
         insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
                 paymentIntentId, asOf.minusSeconds(3600));
         insertMonitoringAuthorization(merchantId, paymentMethodId, paymentIntentId,
@@ -667,7 +668,7 @@ class PostgreSqlMigrationTests {
         UUID customerId = UUID.randomUUID();
         UUID paymentMethodId = UUID.randomUUID();
         UUID paymentIntentId = UUID.randomUUID();
-        Instant asOf = Instant.now().minusSeconds(1);
+        Instant asOf = DatabaseInstant.now().minusSeconds(1);
         Instant windowStart = asOf.minusSeconds(60);
         insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
                 paymentIntentId, windowStart.minusSeconds(60));
@@ -731,7 +732,7 @@ class PostgreSqlMigrationTests {
         UUID customerId = UUID.randomUUID();
         UUID paymentMethodId = UUID.randomUUID();
         UUID paymentIntentId = UUID.randomUUID();
-        Instant asOf = Instant.now().minusSeconds(1);
+        Instant asOf = DatabaseInstant.now().minusSeconds(1);
         Instant windowStart = asOf.minusSeconds(60);
         insertMonitoringPaymentFixture(merchantId, customerId, paymentMethodId,
                 paymentIntentId, windowStart.minusSeconds(60));

@@ -1,5 +1,6 @@
 package com.thaap.payments.rules;
 
+import com.thaap.payments.time.DatabaseInstant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -78,7 +79,7 @@ public class FraudRule {
         this.currencyValue = currencyValue;
         this.longThreshold = longThreshold;
         this.status = status;
-        this.createdAt = Instant.now();
+        this.createdAt = DatabaseInstant.now();
     }
 
     public UUID getId() {

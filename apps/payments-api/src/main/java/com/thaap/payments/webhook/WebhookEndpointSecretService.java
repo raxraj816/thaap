@@ -1,5 +1,6 @@
 package com.thaap.payments.webhook;
 
+import com.thaap.payments.time.DatabaseInstant;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,7 +26,7 @@ public class WebhookEndpointSecretService {
 
     WebhookEndpointSecretService(WebhookEndpointRepository endpointRepository,
             WebhookSecretCipher secretCipher) {
-        this(endpointRepository, secretCipher, Clock.systemUTC());
+        this(endpointRepository, secretCipher, DatabaseInstant.tick(Clock.systemUTC()));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
