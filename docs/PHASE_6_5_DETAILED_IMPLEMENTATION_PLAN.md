@@ -1,9 +1,13 @@
 # Phase 6.5 Detailed Implementation Plan
 
 - Phase: Phase 6.5 — Production Release And AWS Deployment
-- Status: DRAFT — AWAITING FOUNDER CONFIRMATION
+- Status: IN PROGRESS — Chapters 60–62 complete; Chapter 63 gated on Section 17
+  decisions 1, 2, 3 and 5 and on the external prerequisites in Section 13.1
 - Entry gate: SATISFIED by Phase 6 / Chapter 59 closure and merge
-- Promise freeze: PENDING (Section 17 decisions)
+- Promise freeze: CONFIRMED for Section 3. The build, release and runtime
+  promises have been implemented and proven; the deployment promises are frozen
+  and unbuilt. Section 17 remains a decision list, not a freeze gate, and its
+  open items are named below rather than blocking the whole document
 - Merchant-facing product destination: FOUNDER CONFIRMED 2026-07-27
 - Market destination: FOUNDER CONFIRMED 2026-08-08 — global, multi-rail, with
   India and its UPI rail a first-class market rather than the sole target
@@ -14,9 +18,14 @@
   promise is claimed by this phase
 - Planned chapters: Chapters 60–66
 - Planned forward migrations: none — Phase 6.5 adds no schema
-- First dependency-ready chapter after confirmation: Chapter 60
-- Frozen proof artifacts: Chapter 60–66 `PRE_IMPLEMENTATION` matrices under
-  `docs/reviews/`
+- Next dependency-ready chapter: Chapter 63, once decisions 1, 2, 3 and 5 are
+  confirmed and the external prerequisites exist
+- Frozen proof artifacts: `docs/reviews/CHAPTER_60_INVARIANT_PROOF_MATRIX.md`
+  (closed) and `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md` (frozen
+  2026-08-08, all rows `PENDING`, covering Chapters 63–66). **One matrix for the
+  phase, per Section 13.1 — not one per chapter.** This line said the opposite
+  until 2026-08-08; it was written before Section 13.1 replaced per-chapter
+  matrices and was never updated, which is the drift `ER-0105` records
 - Deployment region: `ap-south-1` (Mumbai) first, region-parameterised
 
 Phase 6.5 implementation status: CHAPTERS 60–62 COMPLETE
@@ -138,6 +147,11 @@ fix is one commit and the phase's entire purpose is build integrity.
   procedures with recorded rehearsals — not tribal knowledge.
 - Production routing and local development routing derive from one list, so
   they cannot drift.
+- An unauthenticated request from outside the operator allowlist is refused
+  before it reaches any THAAP surface, and no origin hostname is a way around
+  that. Added 2026-08-08 under `ER-0106`: this was the property Section 5 claimed
+  and Section 3 never promised, which is how it came to have no owner and no
+  proof.
 
 ## 4. Scope And Named Exclusions
 
@@ -157,7 +171,7 @@ fix is one commit and the phase's entire purpose is build integrity.
 
 | Excluded | Owner | Unblock evidence |
 |---|---|---|
-| Public unauthenticated access | Phase 6.5 follow-on | WAF, per-key quotas, scheduled tenant reset, and cost alarms proven before the URL is published |
+| Public unauthenticated access | Phase 6.5 follow-on | Per-key quotas, abuse rate limiting, scheduled tenant reset, and cost alarms proven before the URL is offered to anyone outside the operator allowlist. **The WAF is no longer on this list — it moved into Chapter 63, because it is what makes the deployment private in the first place. See Section 5.1.** |
 | Multi-AZ / HA PostgreSQL | Phase 9 | A measured availability requirement from a real design partner |
 | Managed Kafka (MSK) | Phase 11 | A real merchant pilot boundary, per Section 5 |
 | Kubernetes manifests | Phase 9 (scale) | `infra/kubernetes/` is **retained** by explicit instruction (2026-08-08). ADR-0012 records ECS Fargate as the near-term target without closing the EKS path; the directory's README is updated to name ECS as current and EKS as the scale-trigger option, so it documents a real position rather than an unowned promise. Unblock evidence: a measured throughput, availability or multi-service requirement that Fargate cannot meet. |
@@ -177,7 +191,7 @@ fix is one commit and the phase's entire purpose is build integrity.
 | Static UI | S3 + CloudFront | The UI is a pure SPA. Serving it from the API container would put a static asset path inside a payment service's blast radius. |
 | IaC | Terraform | Reviewable in pull requests, and the state of the system is diffable against the repository. |
 | Egress | No NAT Gateway | Tasks run in public subnets with security groups admitting only the ALB. Saves ~$32/mo. Recorded as a deliberate tradeoff, not an oversight. |
-| Exposure | Private / invite-only | The UI authenticates by a human pasting `X-Risk-Operator-Key` or `X-Api-Key` into a browser field. That is acceptable for a controlled demo and not acceptable for an open URL. |
+| Exposure | Private / invite-only, **enforced at the edge** | A WAF WebACL on the CloudFront distribution, default `BLOCK`, admitting an operator IP set; the ALB accepts only requests carrying a CloudFront-injected shared secret. Authentication — a human pasting `X-Risk-Operator-Key` or `X-Api-Key` — sits behind that, not instead of it. See Section 5.1. |
 
 Single-broker Kafka is not highly available. This is recorded honestly rather
 than described as "production-grade", with a named replacement trigger in the
@@ -185,13 +199,54 @@ style ADR-0009 requires: **replace with MSK when a real merchant pilot begins
 (Phase 11), or earlier if a broker restart is observed to lose an event that the
 outbox cannot replay.**
 
+## 5.1 Exposure Is A Mechanism, Not An Intention
+
+This section exists because the first draft of this plan did not have it. It
+called exposure "private / invite-only" and "a deliberate control", and named no
+mechanism whatsoever. The only thing described was authentication — a human
+pasting an operator key — and the implicit control was that nobody would know the
+hostname.
+
+**The hostname is public the moment the certificate is issued.** ACM issues
+publicly-trusted certificates, and publicly-trusted certificates are submitted to
+Certificate Transparency logs. That is not a setting worth turning off: a
+certificate without CT proof is untrusted in Chrome and Safari, so opting out
+trades a private hostname for a browser warning on every visit. CT logs are
+streamed by public services, and newly issued hostnames are probed within
+minutes. "We have not published the URL" is therefore not a control, and a plan
+that relies on it is relying on nothing.
+
+Chapter 63 delivers the actual control, in three layers:
+
+| Layer | Control | What it stops |
+|---|---|---|
+| Edge | WAF WebACL on the CloudFront distribution, default `BLOCK`, admitting an operator IP set | A CT-log scanner, or anyone else, reaching the workspace, the actuator endpoints or the OpenAPI document |
+| Origin | ALB accepts only requests carrying a shared secret header injected by CloudFront, held in Secrets Manager | The `*.elb.amazonaws.com` name being a way around the edge entirely |
+| Network | Task security groups admit the ALB security group by reference, not by CIDR | A task in a public subnet being addressable directly, since there is no NAT Gateway |
+
+The origin layer is the one a WAF-only implementation silently omits, and it is
+the one that matters most: the WebACL is attached to CloudFront, so an ALB
+reachable by its own hostname is protected by nothing at all. It is also what
+makes `server.forward-headers-strategy: framework`, set in Chapter 62, safe — a
+caller who can reach the ALB directly can choose its own `X-Forwarded-For` and
+defeat both the per-IP rate limiter and the per-IP fraud velocity signal.
+
+`C63-SEC-001` in `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md` owns the
+proof, and requires it to be executed from an address genuinely outside the
+allowlist rather than from a shell inside the VPC.
+
+Until all three layers exist and have been proven, the deployment is **not**
+private, and no document in this repository may describe it as such.
+
 ## 6. AWS Topology
 
 ```text
 Route53
   -> CloudFront
+       [WAF WebACL: default BLOCK, operator IP set — Section 5.1]
        -> S3 origin            (default behavior: the SPA)
        -> ALB origin           (seven API path patterns, Section 9)
+            [accepts only the CloudFront-injected shared secret header]
             -> ECS service: payments-api  (2 tasks, 1 vCPU / 2 GB)
                  -> RDS PostgreSQL 16
                  -> ElastiCache Redis
@@ -200,7 +255,12 @@ Route53
 ```
 
 Supporting resources: ECR repository, Secrets Manager entries, CloudWatch log
-groups and alarms, S3 + DynamoDB for Terraform remote state and locking.
+groups and alarms, S3 + DynamoDB for Terraform remote state and locking, and the
+WAF WebACL and IP set.
+
+The two bracketed lines are the exposure control. They are drawn inside the
+topology rather than listed beside it because a diagram that shows Route53 →
+CloudFront → ALB and nothing else is a diagram of a public system.
 
 Two API tasks are safe without leader election. All eight `@Scheduled` worker
 classes coordinate through database leases with fencing epochs, already proven
@@ -220,12 +280,22 @@ Monthly estimate, `ap-south-1`, at two API tasks:
 | RDS `db.t4g.micro` + 20 GB gp3 | ~$13 |
 | ElastiCache `cache.t4g.micro` | ~$11 |
 | S3 + CloudFront | ~$2 |
-| Secrets Manager (8 secrets) | ~$3 |
+| Secrets Manager (9 secrets) | ~$4 |
+| WAF WebACL + IP-set rule (Section 5.1) | ~$7 |
+| CloudWatch Logs ingestion and storage | ~$5 |
+| Data transfer out | ~$2 |
 | Route53 | ~$1 |
-| **Total** | **~$120** |
+| **Total** | **~$134** |
 
-At one API task the total is approximately $85. A billing alarm is part of
+At one API task the total is approximately $99. A billing alarm is part of
 Chapter 65 rather than an afterthought.
+
+Three of these lines were missing from the first draft and are recorded here
+rather than discovered on an invoice: the WAF that Section 5.1 makes mandatory,
+CloudWatch Logs — which this system feeds by design, since nothing is written to
+a container filesystem — and egress. The ninth secret is the CloudFront-to-ALB
+shared header. None is large; the point is that a cost model precise to the
+dollar everywhere else should not omit whole categories.
 
 ## 8. Runtime Configuration And Secret Contract
 
@@ -250,6 +320,38 @@ when any is absent, empty, or below a minimum entropy length. This mirrors
 it cannot serve rather than dropping events — the repository's established
 position that a component which cannot do its job must fail loudly rather than
 serve a weaker promise.
+
+**The threat model above was incomplete, and implementation found it.** Absent,
+empty and low-entropy are the failures that are easy to name; the highest-
+probability one is none of them. It is a **known-published** value. This
+repository deliberately publishes working secrets — in `infra/docker/compose.yml`,
+in both READMEs and in `application-test.yml` — so that a stranger with only
+Docker can start THAAP, which is a Chapter 60 promise worth keeping. The
+consequence is that the likeliest route to a deployed system holding a known key
+is somebody copying a quickstart that was written to be copied. The three
+published KEKs are genuinely random 32-byte keys and pass every entropy rule that
+could be written about them; only a list can reject them.
+
+Chapter 62 therefore shipped three rules this section did not ask for, and they
+are recorded here so the Chapter 66 dossier reconciles against what was built:
+
+1. **No published value.** Every secret this repository commits is refused, with
+   a test that scrapes those four files and fails if a newly committed default is
+   missing from the list.
+2. **No reuse across two secrets.** Each must be independently rotatable and
+   independently compromisable. Sharing `THAAP_HASH_PEPPER` with
+   `THAAP_CORRELATION_PEPPER` would tie credential rotation to fraud identity, so
+   a routine key roll would silently split every customer's history in two.
+3. **No placeholder markers**, scoped honestly to opaque tokens: every marker
+   contains a hyphen or a letter outside the hexadecimal alphabet, so neither
+   generator can trip it and it cannot reach a Base64 KEK at all.
+
+`THAAP_POSTGRES_PASSWORD` is deliberately outside this contract. It is
+security-relevant, but a wrong database password fails loudly on its own — it
+cannot produce the silently-degraded system the eight above can. That reasoning
+is a judgement call and is written down in
+`docs/references/RUNTIME_CONFIGURATION_REFERENCE.md` so the next reader can
+disagree with it.
 
 Rotation variables (`THAAP_PREVIOUS_HASH_PEPPERS`,
 `THAAP_WEBHOOK_SECRET_DECRYPTION_KEYS`, `THAAP_REVIEW_NOTE_DECRYPTION_KEYS`,
@@ -352,30 +454,44 @@ it:
   instance metadata endpoint. The existing `SocketWebhookHttpTransport` address
   pinning is the control that makes this safe, and it must be verified against
   the deployed network before execution is enabled.
-- Private exposure is a deliberate control, not an unfinished feature. Opening
-  the URL is a separate decision with its own promises.
+- Private exposure is a deliberate control, not an unfinished feature — but only
+  once Section 5.1's three layers exist. Until then the hostname is reachable by
+  anyone who reads a Certificate Transparency log, and this document said
+  otherwise in its first draft. Opening the URL further is a separate decision
+  with its own promises.
 
-## 13.1 Schedule — One Week
+## 13.1 Schedule — Seven Working Days, Externally Gated
 
-Target set 2026-08-08: the whole phase end to end in seven days.
+Target set 2026-08-08.
 
-| Day | Chapters | Output |
-|---|---|---|
-| 1 | 60 | Images build; `docker compose up` starts THAAP end to end |
-| 2 | 61, 62 | `1.0.0` tagged with provenance; fail-fast secret contract proven |
-| 3–4 | 63 | Terraform topology complete and applied to a scratch stack |
-| 5 | 64 | First real deploy, migration, sixteen indicators `UP`, demos green against the URL |
-| 6 | 65 | Seeded multi-currency tenant, runbook, ADR-0012, rehearsed rollback and restore |
-| 7 | 66 | Integrated matrix, dossier, gates, roadmap updates |
+| Day | Chapters | Output | State |
+|---|---|---|---|
+| 1 | 60 | Images build; `docker compose up` starts THAAP end to end | **Done 2026-08-08** |
+| 1 | 61, 62 | `1.0.0` tagged with provenance; fail-fast secret contract proven | **Done 2026-08-08** — pulled forward a day |
+| — | — | AWS account, domain, hosted zone | **Gating.** Not started; nothing below can begin |
+| G+1, G+2 | 63 | Terraform topology, exposure control, applied to a scratch stack | Blocked |
+| G+3 | 64 | First real deploy, migration, sixteen indicators `UP`, demos green against the URL | Blocked |
+| G+4 | 65 | Seeded multi-currency tenant, runbook, ADR-0012, rehearsed rollback and restore | Blocked |
+| G+5 | 66 | Integrated matrix closed, dossier, gates, roadmap updates | Blocked |
 
-Two things govern whether this holds.
+Days are numbered from the gate rather than from the start, because they are not
+the same clock and pretending otherwise produces a plan that reports itself
+"behind" for a reason nobody on it can fix.
 
 **The external dependency is on the critical path and cannot be compressed.**
 An AWS account with billing enabled, a registered domain, and a Route53 hosted
-zone are prerequisites for Day 3 onward. ACM certificate validation and DNS
-propagation are wall-clock delays no amount of parallelism removes. These must
-be in place by end of Day 2, and none of them can be done on the operator's
-behalf.
+zone are prerequisites for Chapter 63 onward. ACM certificate validation and DNS
+propagation are wall-clock delays no amount of parallelism removes — nameserver
+repointing at a third-party registrar can take up to 48 hours on its own — and
+none of them can be done on the operator's behalf.
+
+**Status on 2026-08-08: Chapters 60–62 are complete and none of the three
+prerequisites exists.** The phase is not late; it is gated, and those are
+different states. The original plan asked for the prerequisites "by end of Day
+2", which has arrived unmet, so the schedule is rebased on the gate rather than
+quietly carried forward. Terraform authoring for Chapter 63 does not require an
+account — only `apply` and the second-region `plan` do — so that work may proceed
+against the gate, provided the chapter stays open until both have run.
 
 **Process ceremony is the compressible cost, and proof is not.** Seven chapters
 under the full Quality Closure Operating System means seven eight-lens matrices
@@ -386,10 +502,29 @@ is document duplication rather than evidence.
 Phase 6.5 therefore uses **one integrated invariant matrix and one closure
 dossier for the phase**, not one per chapter. Every invariant in Section 3 is
 still proven at its real enforcement boundary with a recorded run, and
-`C60-PAY-001` — that behaviour is unchanged and the same 1387 tests still pass —
-remains the anchor that makes the compression safe. The already-frozen
-`CHAPTER_60_INVARIANT_PROOF_MATRIX.md` is folded into the phase matrix at
-closure.
+`C60-PAY-001` — that behaviour is unchanged and the whole backend suite still
+passes at an exactly stated count — remains the anchor that makes the compression
+safe. The already-closed `CHAPTER_60_INVARIANT_PROOF_MATRIX.md` is folded into
+the phase matrix at closure.
+
+**The phase matrix is drafted before the work it covers, not at closure.** As
+first written this section said only *what* the compression was, never *when* the
+one matrix gets written, and the omission was not cosmetic: a matrix authored at
+Chapter 66 covering work finished in Chapters 63–65 could not honestly carry
+`Matrix provenance: PRE_IMPLEMENTATION`, and the only other value the checker
+accepts is reserved for the Chapter 19 legacy recovery. Followed literally, this
+section required Chapter 66 to mislabel a retroactive matrix to pass its own
+gate — which is the exact substitution the Quality Closure Operating System
+forbids. `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md` was therefore drafted
+and committed on 2026-08-08, before any Terraform existed, with every row
+`PENDING`. Recorded as `ER-0105`.
+
+Chapters 61 and 62 shipped before that correction and have **no**
+pre-implementation matrix. Their proof is real and executed, and it is recorded
+in Section 14 and in `docs/learning/daily/2026-08-08.md` §12–§20 — but it was
+written after the fact and the Chapter 66 dossier must present it that way rather
+than fold it in as though it had been planned. That is the cost of finding this
+late, and hiding it would cost more.
 
 This is a deliberate, recorded scope decision about documentation structure. It
 does not weaken any proof obligation, and it does not apply to Phase 6.6 or
@@ -397,7 +532,7 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 
 ## 14. Chapter Execution Plan
 
-### Chapter 60 — Reproducible Build Artifacts
+### Chapter 60 — Reproducible Build Artifacts — COMPLETE 2026-08-08
 
 - **Delivers:** `apps/payments-api/Dockerfile` (multi-stage, digest-pinned
   `eclipse-temurin:25-jdk` → `25-jre`, layered jar, non-root, JRE-only final
@@ -409,7 +544,9 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 - **Invariants:** `C60-OPS-001`, `C60-OPS-002`, `C60-SEC-001`, `C60-API-001`,
   `C60-PAY-001`, `C60-TEN-001`, `C60-CON-001`, `C60-OBS-001`.
 - **Matrix:** `docs/reviews/CHAPTER_60_INVARIANT_PROOF_MATRIX.md` — frozen
-  2026-08-08, all rows `PENDING`.
+  2026-08-08 before any Dockerfile existed, and closed the same day with all
+  eight rows `PASS` on artifacts that exist and have recorded runs. Two escaped
+  findings were raised by the work and resolved: `ER-0103` and `ER-0104`.
 
 ### Chapter 61 — Release Identity — COMPLETE 2026-08-08
 
@@ -466,7 +603,15 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 ### Chapter 63 — AWS Infrastructure As Code
 
 - **Delivers:** `infra/terraform/` covering the Section 6 topology, remote state
-  with locking, and the Section 9 routing-drift check.
+  with locking, the Section 9 routing-drift check, and the Section 5.1 exposure
+  control.
+- **Exposure:** all three Section 5.1 layers — the CloudFront WAF WebACL with an
+  operator IP set, the CloudFront-to-ALB shared secret header, and task security
+  groups admitting the ALB security group by reference. This moved into this
+  chapter from a "Phase 6.5 follow-on" line in Section 4.2, because it is not an
+  enhancement to a private deployment; it is the thing that makes the deployment
+  private. `C63-SEC-001` owns the proof and requires it to run from outside the
+  allowlist.
 - **Retains:** `infra/kubernetes/`, with its README updated to state that ECS
   Fargate is the current target and EKS remains the scale-trigger path.
 - **Region:** every region, availability-zone and ARN reference is a variable or
@@ -475,9 +620,11 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
   product; infrastructure that names one region in fifty places is the first
   thing a second region forces someone to rewrite, and by then it is load-bearing.
 - **Proves:** `terraform apply` from zero produces a working stack, the following
-  `plan` is clean, and `terraform plan` against a second region variable resolves
+  `plan` is clean, `terraform plan` against a second region variable resolves
   without a code change — proving the parameterisation is real rather than
-  cosmetic, without paying to run a second stack.
+  cosmetic, without paying to run a second stack — and a request from a
+  non-allowlisted address is refused at the edge while the ALB's own hostname
+  refuses a request that did not come through CloudFront.
 
 ### Chapter 64 — First Deploy, Migration, And Smoke Proof
 
@@ -498,36 +645,68 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 
 ### Chapter 66 — Phase 6.5 Closure
 
-- **Folds in, per Section 13.1:** `CHAPTER_60_INVARIANT_PROOF_MATRIX.md`, and the
-  Chapter 61–62 evidence recorded in this section and in
-  `docs/learning/daily/2026-08-08.md` §12–§20 and its deep dive §15. Chapters 61
-  and 62 deliberately produced no matrix of their own — this phase uses one
-  integrated matrix, and a per-chapter matrix written after the fact could not
-  honestly carry `Matrix provenance: PRE_IMPLEMENTATION`.
-- **Delivers:** the integrated matrix and dossier, infra gates added to
+- **Closes:** `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md`, which was
+  drafted and frozen on 2026-08-08 before any Terraform existed and holds ten
+  `PENDING` rows across Chapters 63–65. Chapter 66 moves each to `PASS` on
+  executed evidence, sets `Review status: VERIFIED`, and completes the
+  traceability, hostile and boundary-family passes the matrix currently records
+  as `PENDING`. It introduces no product invariant of its own.
+- **Folds in:** `CHAPTER_60_INVARIANT_PROOF_MATRIX.md`, already closed with all
+  eight rows `PASS`.
+- **Must state plainly, not fold in silently:** Chapters 61 and 62 have no
+  pre-implementation matrix. They shipped under Section 13.1 as originally
+  written, before `ER-0105` established when the phase matrix is drafted. Their
+  evidence is executed and recorded in Section 14 and in
+  `docs/learning/daily/2026-08-08.md` §12–§20 with its deep dive §15, and the
+  dossier must present it as evidence gathered after the fact.
+- **Delivers:** the closed matrix and the phase dossier, infra gates added to
   `scripts/commit-readiness-check.sh`, and updates to
   `docs/THAAP_VISION_COVERAGE_MATRIX.md` and
   `docs/IMPLEMENTATION_MASTER_PLAN.md`.
+- **Closure mechanics to expect:** the phase matrix carries `Chapter: Chapter 66`
+  so it resolves to one coordinate, and `scripts/chapter-closure-check.py`
+  requires the README and the master plan to mark Chapter 66 complete and refuses
+  a dossier whose matrix is still `IN_PROGRESS` or still holds a `PENDING` row.
 - **Proves:** the phase closes against executed evidence, with no row citing a
   gate that has never been run.
 
 ## 15. Verification
 
-1. `docker compose up` starts THAAP end to end locally.
-2. `mvn -f apps/payments-api/pom.xml test` → 1387 pass, 0 skipped;
-   `npm test` → 83 pass.
+Items marked ✅ have been executed and their result recorded. Counts are stated
+exactly, because a reduced count that still reports success is the condition the
+CI Docker check already exists to prevent.
+
+1. ✅ `docker compose up` starts THAAP end to end locally —
+   `scripts/compose-stack-check.sh`, readiness `UP`, seven prefixes routed, 91
+   migrations on a fresh database.
+2. ✅ `mvn -f apps/payments-api/pom.xml test` → **1457 pass, 0 failures, 0
+   skipped** (1387 at phase entry, 1392 after Chapter 60, 1457 after Chapters
+   61–62); `npm test` → **86 pass** (83 at entry).
 3. `terraform apply` from an empty account yields a reachable HTTPS URL.
-4. `/actuator/health/readiness` → all sixteen indicators `UP`.
-5. `/actuator/info` → reports `1.0.0` and the deployed commit SHA.
-6. Every `scripts/demo-*.py` passes against the deployed URL.
-7. The workspace loads over CloudFront and reaches all seven API prefixes.
+4. `/actuator/health/readiness` → all sixteen indicators `UP`, including after an
+   idle window longer than the previous staleness threshold.
+5. ✅ `/actuator/info` → reports `1.0.0` and the deployed commit SHA. Proven at
+   the image boundary by `scripts/release-identity-check.sh` and over HTTP by
+   `scripts/compose-stack-check.sh`; re-asserted against the deployed URL in
+   Chapter 64.
+6. Every `scripts/demo-*.py` passes against the deployed URL, with the count of
+   demos executed asserted rather than described.
+7. The workspace loads over CloudFront and reaches all seven API prefixes, with
+   each response proven to come from the API rather than from the SPA fallback.
 8. Two tasks start simultaneously; Flyway migrates exactly once.
 9. A task is killed mid-work; lease fencing recovers it without duplicate
    effect.
-10. RDS is restored from an automated backup into a scratch instance and the
-    Flyway state is confirmed.
-11. Each of the eight secrets is removed in turn; startup fails each time.
-12. `scripts/commit-readiness-check.sh` passes with the new infra gates.
+10. RDS is restored from an automated backup into a scratch instance, the Flyway
+    state is confirmed, and a decision made before the backup is re-explained
+    end to end through an application instance served by it.
+11. ✅ Each of the eight secrets is removed in turn; startup fails each time —
+    `RuntimeSecretContractGateTests`, driven from the enum so a ninth secret
+    cannot be added without its own case. Also proven against the released
+    container under `SPRING_PROFILES_ACTIVE=aws`.
+12. A request from outside the operator allowlist is refused at the edge, and the
+    ALB's own hostname refuses a request that did not come through CloudFront
+    (Section 5.1).
+13. `scripts/commit-readiness-check.sh` passes with the new infra gates.
 
 ## 16. What Follows
 
@@ -535,8 +714,9 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
 `cardFingerprint`, `cardBin`, `cardLast4`, `cardFunding` and `cardCountry`
 directly on the entity. ADR-0004 promised the model would "avoid assumptions
 that make later payment methods impossible"; it did not hold. A pure refactor
-behind a rail type, zero behaviour change, all 1392 tests still green. This is
-the gate for all UPI work.
+behind a rail type, zero behaviour change, the whole backend suite still green at
+whatever exact count Phase 6.5 closes on — 1457 as of 2026-08-08. This is the
+gate for all UPI work.
 
 The seam must be genuinely multi-rail rather than a card/UPI branch. THAAP is a
 global product, so SEPA, ACH, PIX and local wallets are all eventual rails, and
@@ -616,8 +796,12 @@ Phase 6.5 may not begin Chapter 61 until these are confirmed as one set:
 3. Accept single-AZ RDS and no NAT Gateway as deliberate cost tradeoffs.
 4. Release as `1.0.0` with the Section 13 boundary stated wherever the version
    is published.
-5. Keep the deployment private and invite-only; opening it is a separate
-   decision with its own frozen promises.
+5. Keep the deployment private and invite-only, **enforced by the three Section
+   5.1 layers rather than by an unpublished hostname**, and accept the ~$7/month
+   the WAF costs. Opening it further is a separate decision with its own frozen
+   promises. This decision was amended on 2026-08-08: as originally written it
+   asked only for a policy, and a policy with no mechanism is what the amendment
+   corrects.
 6. Retain `infra/kubernetes/` and update its README to name ECS Fargate as the
    current target and EKS as the scale-trigger path (instructed 2026-08-08).
 7. Renumber the roadmap: UPI becomes Phase 7, ML becomes Phase 8, and the

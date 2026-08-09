@@ -267,5 +267,17 @@ proven, deployable simulator and not a system licensed to process real payments.
 Chapters 63–66 — Terraform topology, first deploy, seeded demo tenant and phase
 closure — are the remaining work, and the AWS account, domain and hosted zone
 they depend on are external prerequisites.
+A 2026-08-08 review of the Phase 6.5 plan against the three chapters that had
+shipped raised `ER-0105` and `ER-0106`. The first: the plan's decision to use one
+integrated matrix never said when that matrix is drafted, and the matrix checker
+could not represent a frozen-but-unproven matrix at all, so a pre-implementation
+matrix could not be committed. Both are fixed, and
+`docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md` is now frozen with ten
+`PENDING` rows covering Chapters 63–66. The second: the plan called the
+deployment "private and invite-only" and named no mechanism, relying implicitly
+on an unpublished hostname that Certificate Transparency publishes within minutes
+of certificate issuance. Chapter 63 now owns a three-layer exposure control, and
+until it exists the deployment is not private and no document here describes it
+as one.
 
 </details>

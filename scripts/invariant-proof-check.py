@@ -41,7 +41,18 @@ REQUIRED_ENTRY_FIELDS = {
 # (`ER-0099`). A `PARTIAL` row must name the debt that owns the missing proof, and a
 # phase cannot close while one exists: honest at chapter closure, blocking at phase
 # closure.
-ALLOWED_ENTRY_STATUSES = {"PASS", "PARTIAL"}
+#
+# `PENDING` means the invariant is frozen and nothing has been built yet. The working
+# agreement requires every matrix to be drafted before implementation, and until
+# `ER-0105` this checker could not represent that state at all: rows had to be `PASS` or
+# `PARTIAL` and the review verdicts had to be `PASS`, so a genuinely pre-implementation
+# matrix could not be committed. The consequence was that pre-implementation matrices
+# lived in uncommitted working trees, unreviewable, and a matrix written after the fact
+# was indistinguishable from one written first — precisely the substitution the process
+# forbids. A `PENDING` row is rejected at phase closure alongside `PARTIAL`, and a matrix
+# holding one may not claim `Review status: VERIFIED`.
+ALLOWED_ENTRY_STATUSES = {"PASS", "PARTIAL", "PENDING"}
+PENDING_STATUS = "PENDING"
 REQUIRED_LENSES = {
     "PAYMENT_FRAUD",
     "TENANT_ISOLATION",
@@ -153,25 +164,45 @@ def validate_matrix(
     elif provenance == "RETROACTIVE_RECOVERY" and chapter_match.group(1) != "19":
         errors.append(
             f"{path}: RETROACTIVE_RECOVERY is allowed only for the documented Chapter 19 recovery")
-    if metadata.get("Scope status") != "FROZEN":
-        errors.append(f"{path}: Scope status must be FROZEN")
-    if metadata.get("Review status") != "VERIFIED":
-        errors.append(f"{path}: Review status must be VERIFIED")
+    # A matrix under review has not finished its review passes, and saying so is the
+    # point of the state. A verified matrix has, and every verdict below is then held to
+    # its final value exactly as before.
+    review_status = metadata.get("Review status")
+    if review_status not in {"IN_PROGRESS", "VERIFIED"}:
+        errors.append(f"{path}: Review status must be IN_PROGRESS or VERIFIED")
+    under_review = review_status == "IN_PROGRESS"
+
+    if metadata.get("Scope status") not in {"FROZEN", "DRAFT"}:
+        errors.append(f"{path}: Scope status must be FROZEN or DRAFT")
+    elif metadata.get("Scope status") == "DRAFT" and not under_review:
+        errors.append(
+            f"{path}: Scope status DRAFT requires Review status IN_PROGRESS; a verified "
+            "matrix has agreed scope by definition")
+    # Frozen promises and the failure inventory are inputs to drafting, not outputs of
+    # implementation, so they are required in every state. A matrix drafted without them
+    # is a matrix reconstructed from the code, which is the substitution being prevented.
     if metadata.get("Promise freeze") != "CONFIRMED":
         errors.append(f"{path}: Promise freeze must be CONFIRMED")
     if metadata.get("Failure inventory") != "COMPLETE":
         errors.append(f"{path}: Failure inventory must be COMPLETE")
-    if metadata.get("Traceability review") != "PASS":
-        errors.append(f"{path}: Traceability review must be PASS")
-    if metadata.get("Fresh hostile review") != "PASS":
-        errors.append(f"{path}: Fresh hostile review must be PASS")
-    if metadata.get("Boundary family review") != "PASS":
-        errors.append(f"{path}: Boundary family review must be PASS")
+    for verdict in ("Traceability review", "Fresh hostile review", "Boundary family review"):
+        value = metadata.get(verdict)
+        if value == "PASS":
+            continue
+        if under_review and value == PENDING_STATUS:
+            continue
+        errors.append(
+            f"{path}: {verdict} must be PASS"
+            + (" or PENDING while the matrix is IN_PROGRESS" if under_review else ""))
     if metadata.get("Custom infrastructure review") not in {"PASS", "NOT_APPLICABLE"}:
         errors.append(
             f"{path}: Custom infrastructure review must be PASS or NOT_APPLICABLE")
-    if metadata.get("Escaped review assessment") != "COMPLETE":
-        errors.append(f"{path}: Escaped review assessment must be COMPLETE")
+    escaped_assessment = metadata.get("Escaped review assessment")
+    if escaped_assessment != "COMPLETE" and not (
+            under_review and escaped_assessment == PENDING_STATUS):
+        errors.append(
+            f"{path}: Escaped review assessment must be COMPLETE"
+            + (" or PENDING while the matrix is IN_PROGRESS" if under_review else ""))
     if PLACEHOLDER.search(metadata_text):
         errors.append(f"{path}: metadata contains an unresolved placeholder")
     if not matches:
@@ -211,11 +242,26 @@ def validate_matrix(
                 errors.append(
                     f"{path}: {entry_id} is PARTIAL ({debt.group(0)}); a phase cannot "
                     "close on partial proof")
+        elif status == PENDING_STATUS:
+            if not under_review:
+                errors.append(
+                    f"{path}: {entry_id} is PENDING, so the matrix may not claim "
+                    "Review status VERIFIED")
+            if reject_partial:
+                errors.append(
+                    f"{path}: {entry_id} is PENDING; a phase cannot close on an "
+                    "invariant nothing has proven")
         if PLACEHOLDER.search(entry_text):
             errors.append(f"{path}: {entry_id} contains an unresolved placeholder")
-        for artifact in unresolved_artifacts(entry.get("Proof", ""), root, artifacts):
-            errors.append(
-                f"{path}: {entry_id} Proof names '{artifact}', which does not exist")
+        # A pending row names the proof it intends to build, which by definition does not
+        # exist yet. Requiring it to resolve would make a pre-implementation matrix
+        # impossible to write, which is the defect this state was added to fix. The
+        # `ER-0099` obligation is unchanged where it matters: a row that closes must name
+        # an artifact that exists.
+        if status != PENDING_STATUS:
+            for artifact in unresolved_artifacts(entry.get("Proof", ""), root, artifacts):
+                errors.append(
+                    f"{path}: {entry_id} Proof names '{artifact}', which does not exist")
 
     missing_lenses = sorted(REQUIRED_LENSES - covered_lenses)
     if missing_lenses:
