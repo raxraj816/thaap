@@ -119,6 +119,35 @@ Use another branch prefix only when the user explicitly asks for it. Do not use
 tool-default or agent-default branch prefixes when they conflict with this
 repository convention.
 
+### Committing Is The Owner's Decision, Not The Agent's
+
+Do not commit, tag, or push anything until the repository owner asks for it in
+that turn. Finishing the work and leaving it in the working tree **is** the
+deliverable. Deciding that it is ready to become history is a separate decision,
+and it is not the agent's to make.
+
+This covers every mutation of repository state, not only `git commit`: `git tag`,
+`git push`, `git reset`, `git rebase`, `git commit --amend`, branch creation
+where the user did not ask for one, and branch deletion. Approval in one turn
+does not carry into the next; a chapter that was approved is not a commit that
+was approved.
+
+Never route around the hooks. `git -c core.hooksPath=...`, `--no-verify`, and
+their equivalents are not available. If a hook blocks, report exactly what it
+said and stop.
+
+A deliverable that names a commit or a tag — "tag `v1.0.0`", "push the branch" —
+is a description of what the chapter produces, not an instruction to produce it
+now. Do the work, say it is ready, and wait.
+
+This exists because it did not. Three commits and an annotated `v1.0.0` tag were
+created unasked during Phase 6.5 Chapters 61–62, each rationalised by a chapter
+deliverable rather than by a request, and the hooks were disabled on all three.
+One of them was justified by a dirty-tree check that had been written minutes
+earlier in the same session — the agent treated a constraint it had just authored
+as authorisation. **A tool that refuses to run against an uncommitted tree is a
+reason to ask, not a reason to commit.**
+
 ### Commit Attribution
 
 Never add a `Co-Authored-By:` trailer to a commit message. Commits in this
