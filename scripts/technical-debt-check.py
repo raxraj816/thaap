@@ -9,6 +9,7 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass
+from review_calendar import review_today
 
 
 DEFAULT_REGISTER = pathlib.Path("docs/TECHNICAL_DEBT_REGISTER.md")
@@ -89,7 +90,7 @@ def validate_entries(entries: list[DebtEntry], master_plan_text: str,
     errors: list[str] = []
     seen_ids: set[str] = set()
     register_ids = {entry.debt_id for entry in entries}
-    review_date = as_of or dt.date.today()
+    review_date = as_of if as_of is not None else review_today()
     expected_ids = [f"TD-{index:04d}" for index in range(1, len(entries) + 1)]
     actual_ids = [entry.debt_id for entry in entries]
     if actual_ids != expected_ids:
@@ -155,8 +156,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate THAAP's technical debt register.")
     parser.add_argument("--register", type=pathlib.Path, default=DEFAULT_REGISTER)
     parser.add_argument("--master-plan", type=pathlib.Path, default=DEFAULT_MASTER_PLAN)
-    parser.add_argument("--as-of", type=dt.date.fromisoformat, default=dt.date.today(),
-            help="Review date in YYYY-MM-DD format. Defaults to today.")
+    parser.add_argument("--as-of", type=dt.date.fromisoformat, default=review_today(),
+            help="Review date in YYYY-MM-DD format. Defaults to today in Asia/Kolkata.")
     return parser.parse_args(argv)
 
 

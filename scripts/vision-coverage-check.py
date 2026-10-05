@@ -9,6 +9,7 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass
+from review_calendar import review_today
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -102,7 +103,7 @@ def validate(entries: list[VisionEntry], matrix_text: str, master_plan_text: str
              as_of: dt.date | None = None,
              minimum_promises: int = MINIMUM_REGISTERED_PROMISES) -> list[str]:
     errors: list[str] = []
-    review_date = as_of or dt.date.today()
+    review_date = as_of if as_of is not None else review_today()
     expected_ids = [f"VP-{number:03d}" for number in range(1, len(entries) + 1)]
     actual_ids = [entry.vision_id for entry in entries]
     if len(entries) < minimum_promises:
@@ -179,8 +180,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--master-plan", type=pathlib.Path, default=DEFAULT_MASTER_PLAN)
     parser.add_argument("--vision", type=pathlib.Path, default=DEFAULT_VISION)
     parser.add_argument(
-        "--as-of", type=dt.date.fromisoformat, default=dt.date.today(),
-        help="Review date in YYYY-MM-DD format. Defaults to today.")
+        "--as-of", type=dt.date.fromisoformat, default=review_today(),
+        help="Review date in YYYY-MM-DD format. Defaults to today in Asia/Kolkata.")
     return parser.parse_args(argv)
 
 

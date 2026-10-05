@@ -24,6 +24,12 @@ This is a coordinate correction, not new pre-implementation provenance for old r
 Add machine-enforced current-scope selection so CI/pre-push cannot validate only historical
 matrices or omit a non-trivial dossier. Chapter 66 and the integrated phase remain open.
 
+Scope reopened before ER-0119 implementation on 2026-10-06: governance review dates must
+use the repository's India calendar on every host. Freeze the midnight UTC/India rollover,
+month/year/leap boundaries, same-day/future/stale partitions, CLI/default-validation paths
+and explicit historical replay. A timezone repair must not waive future dates or the 35-day
+review limit, and must not change payment/event-time UTC semantics.
+
 Scope reopened on 2026-10-06 before the ER-0110 repair: exact demo catalogue assertions
 must reflect the current allowlisted typed features, while still rejecting missing/extra features,
 wrong values and post-decision observations. This is a repair of proof, not a feature-schema change.
@@ -74,8 +80,8 @@ under the same Docker memory ceiling. This is not an AWS sizing/HA certification
 - Lens: OPERATIONS_RESILIENCE
 - Invariant: Every ordinary readiness invocation validates the registered current matrix and dossier; a complete local repair cannot be mistaken for an incomplete cloud chapter or certify it by omission.
 - Failure sequence: CI/pre-push call readiness without selectors and silently skip the current dossier; an explicit stale pair replaces it; malformed/duplicate-key/escaping/symlinked scope paths point outside the repository; local repairs claim Chapter 66 completion without cloud evidence.
-- Implementation: Versioned current-scope manifest, strict selector/path/date validation and automatic resolution in the existing readiness gate; recovery coordinate 60R in README/master plan while Chapters 63–66 remain open.
-- Proof: `scripts/readiness_scope_check_tests.py`, `scripts/commit_readiness_check_tests.py`, `scripts/chapter_closure_check_tests.py`, full named readiness plus the exact no-selector pre-push command.
+- Implementation: Versioned current-scope manifest, strict selector/path/date validation and automatic resolution in the existing readiness gate; recovery coordinate 60R in README/master plan while Chapters 63–66 remain open. Shared aware-instant India review calendar for vision and debt default CLI/validation paths.
+- Proof: `scripts/readiness_scope_check_tests.py`, `scripts/commit_readiness_check_tests.py`, `scripts/chapter_closure_check_tests.py`, full named readiness plus the exact no-selector pre-push command. ER-0119 adds `scripts/review_calendar_tests.py` and both governance checkers' default/future/stale tests, including real CLI subprocesses at the exact failed CI instant on Python 3.12/Linux/UTC.
 - Adversarial evidence: Missing/invalid manifests and selectors fail before any success claim; real pending/dossier/source contradictions remain rejected (no-selector exit 1 before closure). After closure, full named readiness and ordinary no-selector readiness both exit 0 and enforce the registered pair plus inherited Phase 6 proof. No hook bypass, Git publication or AWS mutation is authorized by this repair.
 - Status: PASS
 

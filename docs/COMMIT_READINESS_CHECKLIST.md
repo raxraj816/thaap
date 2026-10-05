@@ -5,6 +5,11 @@ The common readiness gate now always validates the current matrix/dossier regist
 Explicit selectors must match this current registration. A local recovery slice does not
 close its parent phase: retain all unexecuted cloud promises and the owner's launch gate.
 
+Governance review dates use the Asia/Kolkata calendar on all hosts, resolved from an aware
+current instant by `scripts/review_calendar.py`. UTC runners must not backdate evidence or
+waive future/stale checks. `--as-of` remains an explicit historical replay option, not the
+default clock source. This policy does not change payment timestamps or UTC insight windows.
+
 Use this before saying a change is ready to commit.
 
 ## Required Checks

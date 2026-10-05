@@ -26,6 +26,11 @@ as its review coordinate. Recovery slice 60R owns these frozen local promises; m
 readiness must select it explicitly/by registered manifest. No cloud promise is removed
 from the integrated phase matrix and no applied-deployment status is promoted.
 
+Reopened before ER-0119 repair: PR #38's actual UTC runner rejected India-calendar review
+dates as future. Governance defaults must share the India calendar without backdating records,
+relaxing future/staleness checks, trusting an arbitrary manifest date or changing event-time UTC.
+Month/year/leap rollovers, host-TZ independence and explicit historical replay require proof.
+
 ## Failure inventory
 
 Occupied container/volume/network; missing public route shared by every router;
@@ -193,3 +198,30 @@ ER-0118 is resolved; no TD entry was added or changed by this recovery. This adv
 VP-016 (developer quality), VP-018 (honest simulator boundaries) and VP-019 (learning).
 VP-021 hosted control-plane readiness is not promoted: deployment/launch proof remains open.
 Changes remain uncommitted and unpushed.
+
+## PR Calendar Boundary Repair
+
+PR #38 run 37374489672/job 111979507685 failed at vision coverage, before any backend
+tests: the UTC clock was October 5 while India review records correctly used October 6.
+ER-0119 reopens the governance clock family, not payment timestamps or analytics windows.
+`scripts/review_calendar.py` converts an aware UTC instant to the explicit India calendar;
+both vision and debt CLI/default validation use it. Explicit `--as-of` replay is preserved,
+and future dates and the exact 35/36-day stale boundary remain enforced. No review record
+was backdated and no CI guard was bypassed. The existing manifest cannot set the clock.
+
+Six calendar tests plus ten vision and eight debt tests pass on Python 3.12/Linux with
+`TZ=UTC`, exit 0, including genuine CLI subprocesses and the exact failed timestamp.
+Initial test-fixture duplication of the matrix header was caught and corrected before
+closure; fixtures now carry one ACTIVE header and cannot depend on future live review dates.
+Separate traceability and later hostile review confirm all default paths use the shared
+clock, timezone input representations agree, and UTC event-time semantics are untouched.
+Full UTC readiness is rerun before owner-authorized commit/push. Hosted CI results remain
+separate from local results; no cloud deployment or new technical-debt entry is introduced.
+
+Final repair proof: `TZ=UTC bash scripts/commit-readiness-check.sh 2026-10-06
+--deep-dive-required --invariant-matrix=docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md
+--closure-dossier=docs/reviews/CHAPTER_60R_CLOSURE_DOSSIER.md` exited 0, with 1457 backend
+tests (zero failures/errors/skips) and 305 Python tests. Local log:
+`/tmp/thaap-pr38-full-utc-readiness.log`. Existing no-publication statements above describe
+earlier implementation handoffs; the owner explicitly authorized this PR repair's commit/push.
+The new remote run must independently certify hosted CI; a local exit 0 is not a remote pass.

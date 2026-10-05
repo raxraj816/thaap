@@ -2013,3 +2013,20 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Register the exact current scope, resolve it on every normal gate run, reject stale/malformed selectors with executable negative partitions, and use a separate recovery coordinate without promoting parent-phase status.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-10-06
+
+## ER-0119
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: PR #38 commit-readiness job 111979507685, run 37374489672.
+- Invariant: Governance dates use one explicit India-calendar review boundary on local and UTC CI hosts without weakening future-date or 35-day staleness refusal.
+- Finding: At 2026-10-05T21:13Z the UTC runner rejected all 23 October 6 vision review dates as future, while the founder's India calendar was already October 6. Debt validation uses the same host-local default and belongs to the reopened family.
+- Why prior review missed it: Local tests supplied explicit dates or ran on the India-time laptop; no forced midnight/host-timezone partition exercised actual default CLI validation.
+- Resolution evidence: Both vision and debt default CLI/validation paths use scripts/review_calendar.py with an aware UTC instant and explicit UTC+05:30 India calendar. Six calendar, ten vision and eight debt tests pass on Python 3.12/Linux/TZ=UTC, exit 0, including real CLI subprocesses at the exact failed timestamp; future-date and 35/36-day staleness partitions remain enforced. Host TZ, month/year/leap rollover, equivalent instant representations and historical replay are covered. No dates were backdated and payment UTC semantics are unchanged.
+- Process correction: Test default clock policy across UTC and India date boundaries, including both governance checkers, future/stale refusal and historical replay; never backdate evidence to satisfy a runner.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
