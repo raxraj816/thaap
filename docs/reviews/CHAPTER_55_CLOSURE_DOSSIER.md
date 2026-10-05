@@ -208,7 +208,7 @@ The detailed and master plans, the matrix, the learning trail, and this dossier
 agree that Chapter 55 is implemented and proven, with all thirteen rows holding
 on executed evidence and the matrix `VERIFIED`. Chapter 55 does not claim any
 Chapter 56–59 capability: insights, the developer contract, the SDK, and
-integrated phase closure remain open with their own dossiers.
+integrated phase closure are proven by their own dossiers.
 
 ## Merge recommendation
 
@@ -218,5 +218,5 @@ holds on executed evidence, the public demo runs through published routes only
 and shows a mixed per-item result, operational signals are bounded and a stuck
 run is visible, and source reconciliation is complete.
 
-Phase 6 as a whole remains open: Chapters 56, 57, and 58 are implemented and
-under proof, and Chapter 59 integrated closure has not started.
+Phase 6 integrated closure is complete in the Chapter 59 dossier. This dossier
+certifies only Chapter 55's assignment and saved-view boundaries.

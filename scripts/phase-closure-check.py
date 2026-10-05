@@ -117,6 +117,8 @@ PHASE_6_STALE_CLAIMS = (
     "Phase 6 implementation has not started",
     "Phase 6 is not implemented",
     "Chapters 54-56 wait on their declared dependencies",
+    "Phase 6 as a whole remains open",
+    "Chapter 59 integrated closure has not started",
 )
 
 
@@ -138,10 +140,19 @@ def validate_phase_6_repository() -> list[str]:
             errors.append(
                 f"{path}: missing exact completion marker "
                 f"'{PHASE_6_COMPLETION_MARKER}'")
-        normalized_text = text.casefold()
+        normalized_text = " ".join(text.casefold().split())
         for stale_claim in PHASE_6_STALE_CLAIMS:
             if stale_claim.casefold() in normalized_text:
                 errors.append(f"{path}: stale Phase 6 claim remains: '{stale_claim}'")
+
+    for coordinate in PHASE_6_COORDINATES:
+        dossier = ROOT / "docs/reviews" / f"CHAPTER_{coordinate}_CLOSURE_DOSSIER.md"
+        if not dossier.is_file():
+            continue  # validate_phase reports missing inherited dossiers.
+        normalized_text = " ".join(dossier.read_text(encoding="utf-8").casefold().split())
+        for stale_claim in PHASE_6_STALE_CLAIMS:
+            if stale_claim.casefold() in normalized_text:
+                errors.append(f"{dossier}: stale Phase 6 claim remains: '{stale_claim}'")
 
     # The SDK must be generated from the contract that is actually committed. Comparing
     # the stamped digest here means a closure run cannot pass while the published client

@@ -126,12 +126,20 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.assertEqual([], never_invoked)
 
     def test_chapter_52_runs_phase_5_aggregate_closure(self):
+        self.assert_phase_aggregate_closure(52, 5, 0)
+
+    def test_chapter_59_runs_phase_6_aggregate_closure_and_propagates_failure(self):
+        for gate_exit_code in (0, 9):
+            with self.subTest(gate_exit_code=gate_exit_code):
+                self.assert_phase_aggregate_closure(59, 6, gate_exit_code)
+
+    def assert_phase_aggregate_closure(self, chapter, phase, gate_exit_code):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = pathlib.Path(temporary_directory)
             self.create_required_files(root)
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
-            phase_marker = root / "phase-5-ran"
+            phase_marker = root / f"phase-{phase}-ran"
             self.write_executable(fake_bin / "git", "#!/usr/bin/env bash\nexit 0\n")
             self.write_executable(fake_bin / "rg", "#!/usr/bin/env bash\nexit 1\n")
             for checker in (
@@ -154,8 +162,9 @@ class CommitReadinessCheckTests(unittest.TestCase):
             self.write_executable(
                 root / "scripts" / "phase-closure-check.py",
                 "#!/usr/bin/env bash\n"
-                "[[ \"$#\" -eq 1 && \"$1\" == \"--phase-5\" ]] || exit 7\n"
-                f"touch '{phase_marker}'\n")
+                f"[[ \"$#\" -eq 1 && \"$1\" == \"--phase-{phase}\" ]] || exit 7\n"
+                f"touch '{phase_marker}'\n"
+                f"exit {gate_exit_code}\n")
 
             environment = os.environ.copy()
             environment["PATH"] = str(fake_bin) + os.pathsep + environment["PATH"]
@@ -163,8 +172,8 @@ class CommitReadinessCheckTests(unittest.TestCase):
                 [
                     str(SCRIPT_PATH),
                     "2026-07-27",
-                    "--invariant-matrix=docs/reviews/CHAPTER_52_INVARIANT_PROOF_MATRIX.md",
-                    "--closure-dossier=docs/reviews/CHAPTER_52_CLOSURE_DOSSIER.md",
+                    f"--invariant-matrix=docs/reviews/CHAPTER_{chapter}_INVARIANT_PROOF_MATRIX.md",
+                    f"--closure-dossier=docs/reviews/CHAPTER_{chapter}_CLOSURE_DOSSIER.md",
                 ],
                 cwd=root,
                 env=environment,
@@ -172,7 +181,7 @@ class CommitReadinessCheckTests(unittest.TestCase):
                 text=True,
                 check=False)
 
-            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(gate_exit_code, result.returncode, result.stderr)
             self.assertTrue(phase_marker.is_file())
 
     def create_required_files(self, root: pathlib.Path):

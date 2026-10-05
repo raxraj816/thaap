@@ -1809,3 +1809,37 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: A security posture stated as an adjective is not a control. Any claim of the form "the deployment is private/internal/restricted" must name the enforcing mechanism, the boundary it sits at, and the test that fails when it is removed — and must be written in the topology, not beside it. The specific generalisation is that hostname secrecy is never a control, because certificate issuance publishes it: any future phase that reaches for an unpublished URL as protection is repeating this finding. The wider one is that the review that finds this class of defect is the one that asks "what breaks if an attacker knows everything the design document says", which is now part of the hostile pass for any chapter that changes network exposure.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-08-08
+
+## ER-0107
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 59; integrated Phase 6 completion governance
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Phase 6 aggregate closure and Chapter 59 commit readiness.
+- Invariant: A Phase 6 completion claim must reconcile all source-of-truth documents and inherited closure dossiers, and an aggregate closure failure must stop Chapter 59 readiness.
+- Finding: The master plan retained an implementation-not-started claim split across Markdown lines, while the Chapter 55 and 56 dossier summaries still described Phase 6 as open. The aggregate checker matched literal spaces and did not scan inherited dossier prose. Chapter 59 readiness also did not invoke the Phase 6 aggregate check at all.
+- Why prior review missed it: Completion markers and structural matrix validation were mistaken for semantic reconciliation; the negative fixtures did not cover line wrapping or contradictory inherited summaries, and readiness lacked an invocation assertion for Phase 6.
+- Resolution evidence: The plan and inherited summaries now agree with completed Chapters 53–59. `scripts/phase-closure-check.py` normalizes whitespace before stale-claim matching and scans all inherited Phase 6 dossiers. `scripts/phase_closure_check_tests.py` exercises space, LF, CRLF, paragraph and tab boundaries, contradictory inherited dossier text, a valid repository and SDK digest drift. `scripts/commit_readiness_check_tests.py` asserts the exact `--phase-6` invocation for Chapter 59 and propagation of a nonzero aggregate exit. The focused 19-test run exited 0 on 2026-10-06; the real `scripts/phase-closure-check.py --phase-6` run exited 0. No runtime payment, fraud, tenant or migration behavior was changed.
+- Process correction: Test representation boundaries in governance documents, not just happy-path status markers. For each integrated phase, test both invocation of its aggregate checker and failure propagation through readiness. Historical phase evidence remains dated rather than presented as a fresh runtime run.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0108
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 59; source-of-truth reconciliation across Phase 5 prerequisites and Phase 7 entry
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Vision coverage and integrated source-of-truth review.
+- Invariant: Vision prerequisites and debt ownership must distinguish implemented product truth, resolved proof debt and unimplemented model/hosted capabilities.
+- Finding: VP-022 listed model timeout fallback as existing evidence even though the investigation explanation publishes `NOT_CONFIGURED` and VP-002 correctly assigns serving fallback to Phase 7. VP-008 called the offline dataset builder unimplemented after Chapter 51 closed it. The Phase 7 master-plan entry still called `TD-0007` and `TD-0008` open although the canonical register records their resolution. Several prerequisite descriptions also retained planning-only language after Phases 5–6 completed.
+- Why prior review missed it: Future-owner rows were retained unchanged at phase closure without reconciling their prerequisite sentences against delivered capabilities; the structural checker verifies fields and ownership, not whether prose describes the current implementation.
+- Resolution evidence: `docs/reviews/VISION_COVERAGE_REVIEW_2026-10-06.md` records all 23 dispositions, artifact inventory, current gaps and review limits. Chapter 51's dossier and `OfflineReplayDatasetService` establish the built replay substrate; `PaymentInvestigationService` explicitly emits `NOT_CONFIGURED`; the canonical debt register and current Phase 5 aggregate check establish resolved proof debt. Coverage now reflects these boundaries, and the Phase 7 entry agrees with the register. Aggregate Phases 4.5, 5 and 6 and `scripts/vision-coverage-check.py` each exited 0. Existing statuses and future owners remain unchanged; no trained model, hosted production or real PSP capability is invented.
+- Process correction: Review both directions of capability truth: implemented prerequisites must not remain marked unbuilt, and future capabilities must not be listed as implemented evidence. Record entry-level dispositions before advancing review dates; read canonical debt state rather than copying historical deferral prose. Structural passes do not substitute for this semantic review.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06

@@ -1,13 +1,14 @@
 # THAAP Vision Coverage Matrix
 
 - Status: ACTIVE
-- Last reviewed: 2026-08-02
+- Last reviewed: 2026-10-06
 - Product destination: FOUNDER CONFIRMED 2026-07-27
 - Phase 5 implementation-decision freeze: FOUNDER CONFIRMED 2026-07-27
 - Phase 6 implementation-decision freeze: FOUNDER CONFIRMED 2026-08-02
 - Canonical vision: `docs/VISION.md`
 - Implementation source: `docs/IMPLEMENTATION_MASTER_PLAN.md`
 - Validation: `scripts/vision-coverage-check.py`
+- Latest evidence-and-ownership review: `docs/reviews/VISION_COVERAGE_REVIEW_2026-10-06.md`
 
 This matrix prevents phase sequencing from quietly shrinking THAAP's mission.
 It maps every challenger promise to current evidence, the exact remaining gap,
@@ -42,7 +43,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start exposure simulation after Phase 7 produces governed outcome data; start the real adapter only after Phase 9 production-trust closure and an approved design-partner boundary.
 - Done evidence: Money-affecting simulations preserve balanced ledger truth, and an external-adapter contract proves idempotency, ambiguity, compatibility, rollback, and no raw-card expansion without claiming real settlement.
 - Merchant / analyst demo: Run one risky payment from confirm through processor, capture, refund or dispute, ledger reconciliation, decision explanation, and downstream outcome without source reading.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-002: Bounded Real-Time Decision Quality
 
@@ -56,13 +57,13 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Begin after Phase 5 closes the point-in-time dataset and event/projection lineage boundary.
 - Done evidence: Shadow and active scoring record model/version/reasons/latency, rules-only fallback wins on timeout or invalid response, segment and calibration gates pass, and rollback restores the prior champion without rewriting decisions.
 - Merchant / analyst demo: Confirm identical attempts under healthy, slow, unavailable, and rolled-back model states and explain the exact decision source and fallback.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-003: Privacy-Safe Network Intelligence
 
 - Status: PLANNED_OWNER_ASSIGNED
 - Vision promise: THAAP progresses beyond isolated merchant rules through governed, privacy-safe cross-merchant aggregate intelligence without exposing raw tenant objects or identifiers.
-- Current evidence: Server-assigned traffic origin, merchant-scoped HMAC identities, tenant isolation, synthetic scenarios, point-in-time features, and the Phase 5 event plan provide prerequisites; no cross-merchant product feature exists.
+- Current evidence: Server-assigned traffic origin, merchant-scoped HMAC identities, tenant isolation, synthetic scenarios, point-in-time features, and the implemented Phase 5 event/lineage boundary provide prerequisites; no cross-merchant product feature exists.
 - Remaining gap: Consent/scope, anonymity threshold, cohort eligibility, contribution bounds, retention, explainability, tenant opt-out, and reconstruction resistance are not frozen.
 - Owner phase: Phase 8
 - Owner slice: Privacy-Safe Network Aggregate Intelligence
@@ -70,7 +71,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 7 proves merchant-scoped datasets and segment evaluation, with enough synthetic multi-merchant coverage to test privacy partitions.
 - Done evidence: Approved privacy ADR and matrix prove aggregate-only output, minimum cohort/contribution rules, tenant opt-out, no reconstruction, point-in-time availability, segment impact, and safe degradation.
 - Merchant / analyst demo: Show a synthetic cross-merchant attack where an aggregate signal improves an explainable decision while neither merchant can inspect the other's raw data.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-004: Explainable Controls And Decisions
 
@@ -86,7 +87,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
   with every row `PASS` and their dossiers recommend `MERGE`.
 - Done evidence: One tenant-scoped read model and UI reconcile payment, attempt, processor, rule/model, review, label, dispute, webhook, and ledger evidence with source links, freshness, empty/stale states, and privacy proof.
 - Merchant / analyst demo: `scripts/demo-payment-investigation.py` opens a risky attempt and explains every decision input, the winning control and why weaker or unavailable ones did not win, the later analyst action, the label, and the money effect from one route.
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-10-06
 
 ## VP-005: Analyst Operations Depth
 
@@ -102,7 +103,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
   with every row `PASS` and their dossiers recommend `MERGE`.
 - Done evidence: Role-safe search/detail/timeline, saved views, bounded bulk actions, related pivots, workload/SLA/outcome metrics, accessibility, partial failure, audit, and two-tenant proof pass.
 - Merchant / analyst demo: `scripts/demo-saved-views-and-bulk-review.py` triages a queue and runs a bounded bulk assignment that ends `PARTIAL` with per-item `SUCCEEDED`/`STALE`/`NOT_FOUND` truth; `scripts/demo-workspace-insights.py` shows the outcome and SLA impact with exact denominators.
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-10-06
 
 ## VP-006: Post-Authorization Protection
 
@@ -116,7 +117,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 7 supplies calibrated model/outcome evaluation and Phase 8 dispute workflow prerequisites are frozen.
 - Done evidence: Point-in-time warnings and recommendations show eligibility, expected loss/benefit, reason, approval, money constraints, measured outcome, rollback, and no rewrite of original decision or ledger truth.
 - Merchant / analyst demo: Take a captured risky payment from warning through recommendation, approved action, dispute/friendly-fraud outcome, and measured feedback.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-007: Rule And Policy Governance
 
@@ -130,21 +131,21 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start when the first shadow model and model card are available.
 - Done evidence: One governance surface compares rule/policy/model candidates, segment and label coverage, latency/fallback risk, approver separation, canary/shadow evidence, activation, and rollback target.
 - Merchant / analyst demo: Compare a candidate rule and model against the same cohort, approve with a second manager, canary or shadow it, and roll back without changing historical decisions.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-008: ML Feedback And Model Lifecycle
 
 - Status: PLANNED_OWNER_ASSIGNED
 - Vision promise: Models use point-in-time datasets and delayed labels, publish calibrated and segment-aware evidence, run safely, drift visibly, and retain registry/card/rollback lineage.
-- Current evidence: Feature snapshots, label availability, traffic origin, historical simulation, and the Phase 5 offline dataset plan establish prerequisites; no trained or served model is product truth.
-- Remaining gap: Dataset builder, data quality, time split, baseline training, calibration, registry, cards, serving, shadow/canary, champion/challenger, drift, and rollback remain unimplemented.
+- Current evidence: Feature snapshots, label availability, traffic origin, historical simulation, and Chapter 51's implemented offline replay dataset builder and immutable manifests establish prerequisites; no trained or served model is product truth.
+- Remaining gap: Training-scale dataset/generator governance, model data-quality reports, time split, baseline training, calibration, registry, cards, serving, shadow/canary, champion/challenger, drift, and rollback remain unimplemented. Phase 7 extends the existing replay substrate rather than rebuilding it.
 - Owner phase: Phase 7
 - Owner slice: Governed ML Baseline And Lifecycle
 - Primary DRI: ML Architecture
 - Trigger: Start after Phase 5 Chapter 51 proves point-in-time dataset manifests and simulation compatibility.
 - Done evidence: Dataset/model cards, leakage tests, baseline comparison, calibration, threshold and segment reports, MLflow registry, shadow serving, timeout fallback, champion/challenger approval, drift alerts, and rollback pass.
 - Merchant / analyst demo: Train from a sealed dataset, inspect the model card, shadow-score live synthetic traffic, promote through approval, observe drift, and roll back safely.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-009: Graph And Pattern Intelligence
 
@@ -158,7 +159,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after privacy-safe network scope is approved and Phase 5 event replay is stable.
 - Done evidence: Idempotent temporal graph ingestion, tenant/privacy enforcement, synthetic ring detection, path/neighbor explanations, latency, rebuild, deletion, and governed feature contribution proof pass.
 - Merchant / analyst demo: Investigate a synthetic fraud ring, traverse explainable links, and show how a bounded graph signal would affect a decision without exposing another merchant's objects.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-010: Adaptive Intelligence With Human Authority
 
@@ -172,7 +173,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 6 investigation APIs, Phase 7 model governance, and Phase 8 graph evidence are stable.
 - Done evidence: Offline evaluations, adversarial tool tests, source citations, audit, budget limits, tenant isolation, human approval, and executable proof that agents cannot mutate live payment/rule/model state pass.
 - Merchant / analyst demo: Ask an agent to investigate a case, verify cited evidence, simulate a recommendation, and show that execution still requires an authorized human workflow.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-011: Security, Privacy, Tenant Trust, And Operational Resilience
 
@@ -186,7 +187,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start detailed planning after Phases 5–8 establish event, UI, model, and graph operational assets requiring shared controls.
 - Done evidence: Hosted identity and least privilege, SLO telemetry, load/chaos, encrypted backup/restore, retention/deletion, release compatibility, blue-green rollback, incident runbooks, merchant support ownership, and pilot incident/rollback proof pass at their real enforcement boundaries.
 - Merchant / analyst demo: Operate the platform through a dependency failure, credential disable, version rollout, restore, and rollback while preserving tenant and payment truth.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-012: Merchant Risk, Underwriting, And Exposure Controls
 
@@ -200,7 +201,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 7 produces calibrated merchant/outcome features and Phase 5 analytics provides durable exposure inputs.
 - Done evidence: Versioned underwriting cases, safe evidence, manager approval, exposure calculation, reserve/hold ledger simulation, release/escalation, tenant isolation, rollback, and no false real-settlement claim pass.
 - Merchant / analyst demo: Onboard a synthetic risky merchant, show the evidence and exposure, apply an approved simulated reserve/hold, and later release or escalate it with balanced ledger and audit truth.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-013: Card-Testing And Enumeration Defense
 
@@ -214,7 +215,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start network expansion after privacy-safe aggregate approval; start operational rehearsal when hosted credentials and SLO telemetry exist.
 - Done evidence: Synthetic distributed campaigns are detected without tenant leakage, mitigations show measured impact, graph/network explanations pass, and credential-leak/runaway-retry drills preserve availability and audit truth.
 - Merchant / analyst demo: Run a distributed synthetic card-testing campaign, detect and investigate it, apply a bounded mitigation, and show recovery plus outcome metrics.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-014: Dispute, Representment, And Friendly-Fraud Operations
 
@@ -228,7 +229,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 7 outcome models and Phase 5 analytics support point-in-time dispute performance cohorts; external files require an approved document-security boundary.
 - Done evidence: Reason-specific immutable packets, safe document boundary or explicit text-free mode, simulated representment submission, pre-dispute/friendly-fraud decisions, outcome reporting, deadlines, audit, and ledger non-interference pass.
 - Merchant / analyst demo: Investigate a friendly-fraud candidate, assemble and submit a versioned simulator packet, record a trusted outcome, and inspect performance without claiming card-network acceptance.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-015: Identity, Session, Device, And Bot Intelligence
 
@@ -242,7 +243,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Start after Phase 7 proves feature governance and Phase 8 privacy scope defines permissible identity linkage.
 - Done evidence: Versioned privacy review, minimization/rotation/retention, point-in-time feature lineage, bot/account-takeover scenarios, explanation, segment impact, deletion, and safe fallback proof pass.
 - Merchant / analyst demo: Run account-takeover and bot scenarios whose safe session/device evidence changes an explainable decision without exposing raw identifiers.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-016: Developer Product Quality
 
@@ -262,7 +263,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
   versioned clients, and Phase 10 PSP guidance only after partner/adapter scope.
 - Done evidence: OpenAPI and examples match executable contracts, error catalogue is complete, one supported SDK/reference client passes generated contract tests, onboarding works without source reading, and compatibility/rollback CI rejects breaking changes.
 - Merchant / analyst demo: `clients/python/thaap_sdk/examples/sandbox_quickstart.py` is run as published by `test_the_published_quickstart_runs_from_environment_alone`, so the zero-source-reading journey is an executed test rather than a claim; `scripts/python-sdk-package-check.py` proves it installs offline into a clean environment first.
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-10-06
 
 ## VP-017: Durable Event, Analytics, And Replay Lineage
 
@@ -276,7 +277,7 @@ cannot satisfy a merchant, analyst, ML, or investigation promise.
 - Trigger: Satisfied; Chapters 44–52 are complete under their frozen `PRE_IMPLEMENTATION` contracts.
 - Done evidence: Every Chapter 44–52 matrix/dossier passes, in-scope mutations emit atomically, consumers restart safely, analytics expose freshness/coverage, rebuild activation reconciles, and the public source-to-rebuild demo passes.
 - Merchant / analyst demo: Create a risky payment, observe its projection, survive broker/consumer restart and duplicate delivery, rebuild a shadow generation, activate it, and prove source payment/fraud/ledger counts unchanged.
-- Last reviewed: 2026-08-01
+- Last reviewed: 2026-10-06
 
 Phase 5 implementation status: COMPLETE
 
@@ -294,21 +295,21 @@ Phase 6 implementation status: COMPLETE
 - Trigger: Review at every promise freeze, scope change, public demo, and phase closure.
 - Done evidence: Current matrices, dossiers, demos, READMEs, and APIs name simulator/source boundaries; unsupported real-money/network/compliance claims are absent; any expansion has an approved security and truth boundary.
 - Merchant / analyst demo: Every public workflow visibly distinguishes deterministic simulator facts, merchant facts, analyst actions, THAAP decisions, and authenticated PSP/network facts THAAP actually received.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-019: Staff-Engineering And Domain-Mastery Apprenticeship
 
 - Status: PROVEN_CURRENT_SCOPE
 - Vision promise: Building THAAP teaches payment, fraud, ML, security, data, product, and operations from first principles with executable proof rather than code delivery alone.
-- Current evidence: Chapter plans, invariant matrices, closure dossiers, concept notes, daily/deep-dive/weekly learning trails, public demos, and hostile reviews are maintained through Phase 4.5 and Phase 5 planning.
-- Remaining gap: Phase 5 event, Phase 6 UI/developer, Phase 7 ML, Phase 8 graph/network, Phase 9 agent/scale, and Phase 10 real-merchant pilot slices must preserve the same explain-back, code-reading, failure-model, and real-boundary proof discipline.
+- Current evidence: Chapter plans, invariant matrices, closure dossiers, concept notes, daily/deep-dive/weekly learning trails, public demos, and hostile reviews are maintained through completed Phases 5–6 and the current closure-maintenance learning trail.
+- Remaining gap: Phase 6.5 deployment, Phase 7 ML, Phase 8 graph/network, Phase 9 agent/scale, and Phase 10 real-merchant pilot slices must preserve the same explain-back, code-reading, failure-model, and real-boundary proof discipline.
 - Owner phase: Every phase
 - Owner slice: Daily Learning, Deep Dive, Concept, Weekly Review, And Integrated Closure
 - Primary DRI: Founding Staff Engineering and Founder
 - Trigger: Execute for every non-trivial plan, implementation slice, escaped finding, and phase closure.
 - Done evidence: Learning gates pass, durable notes explain first principles and tradeoffs, tests map to invariants, and the founder can explain the system in a Stripe/Mastercard-style review.
 - Merchant / analyst demo: Explain one end-to-end payment-risk workflow, its failure modes, security boundaries, data lineage, tests, and intentional exclusions without relying on chat history.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-020: External PSP Integration And Source Provenance
 
@@ -322,7 +323,7 @@ Phase 6 implementation status: COMPLETE
 - Trigger: Start after Phase 9 production-trust closure and approval of one design partner, PSP, permitted data boundary, incident owner, and rollback plan.
 - Done evidence: Contract fixtures plus PSP sandbox and controlled live evidence prove authenticated ingestion, idempotency, duplicate/out-of-order/correction handling, reconciliation, rate-limit recovery, version compatibility, replay, no raw PAN/CVV expansion, and explicit fact provenance.
 - Merchant / analyst demo: Connect one merchant PSP account, ingest a real eligible payment event, reconcile its external identity and lifecycle, and trace every displayed fact to PSP, merchant, analyst, THAAP, or simulator origin.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-021: Hosted Merchant Risk Control Plane
 
@@ -336,13 +337,13 @@ Phase 6 implementation status: COMPLETE
 - Trigger: Start after Phase 9 proves hosted identity, platform RBAC, SLO telemetry, backup/restore, release rollback, retention/deletion, and incident readiness.
 - Done evidence: A two-tenant hosted pilot proves least privilege, connection verification, configuration approval, support/audit access, SLO and incident communication, retention/deletion, offboarding, tenant non-disclosure, and no THAAP custody or settlement claim.
 - Merchant / analyst demo: A merchant risk leader onboards, connects its PSP, invites an analyst, configures a bounded policy, inspects health/audit evidence, opens support, and safely disconnects or offboards.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-022: Safe Shadow, Advisory, And Enforcement Progression
 
 - Status: PLANNED_OWNER_ASSIGNED
 - Vision promise: Real traffic begins in shadow mode and can progress to advisory or narrowly enforced influence only through explicit merchant approval, measurable safety gates, bounded scope, safe fallback, kill switch, and rollback.
-- Current evidence: Historical simulation, dual control, canary/rollback concepts, deterministic decisions, model timeout fallback, audit, and Phase 9 deployment hardening provide prerequisites; no production decision influences real merchant traffic.
+- Current evidence: Historical simulation, dual control, canary/rollback concepts, deterministic decisions and audit provide prerequisites; model timeout fallback and production deployment hardening remain owned by Phases 7 and 9, and no production decision influences real merchant traffic.
 - Remaining gap: Deployment-mode state, eligible traffic and exclusion contract, merchant approval, mode-specific APIs, counterfactual reconciliation, traffic/segment caps, latency/error budgets, automatic fallback, kill switch, rollback rehearsal, and immutable mode-at-decision evidence are not implemented.
 - Owner phase: Phase 10
 - Owner slice: Shadow Baseline And Decision Reconciliation; Advisory And Controlled Enforcement Progression
@@ -350,13 +351,13 @@ Phase 6 implementation status: COMPLETE
 - Trigger: Enter SHADOW only after VP-020 ingestion reconciliation passes; consider ADVISORY or ENFORCED only after the approved observation window, safety budget, outcome baseline, and rollback rehearsal pass.
 - Done evidence: Forced failures and a controlled pilot prove default SHADOW, complete eligible/excluded coverage, mode-bound decisions, merchant dual approval, caps, safe fallback, kill switch, rollback, unchanged PSP authority when not enforced, and no cross-mode historical rewrite.
 - Merchant / analyst demo: Observe the same eligible cohort in SHADOW, approve a bounded ADVISORY or ENFORCED slice, trigger dependency failure and kill switch, and prove the merchant returns safely to the prior mode with full audit.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## VP-023: Measured Merchant Outcomes And Feedback Flywheel
 
 - Status: PLANNED_OWNER_ASSIGNED
 - Vision promise: THAAP proves customer value with denominator-correct fraud, approval-quality, workload, and latency evidence, then feeds governed real outcomes back into rules, models, and privacy-safe intelligence without overstating causality.
-- Current evidence: Immutable decisions, reviews, labels, disputes, simulations, analytics/dataset plans, model-governance ownership, and synthetic outcome reports provide the lineage prerequisites; no real merchant baseline or product-impact evidence exists.
+- Current evidence: Immutable decisions, reviews, labels, disputes, simulations, implemented Phase 5 analytics/datasets, Phase 6 descriptive insights, model-governance ownership, and synthetic outcome reports provide the lineage prerequisites; no real merchant baseline or product-impact evidence exists.
 - Remaining gap: Pilot hypothesis, baseline window, eligibility denominator, fraud-loss/rate definition, false-positive proxy, approval rate, review cost, label delay, confidence, seasonality, segment impact, support burden, experimental design, merchant acceptance, and real-outcome feedback governance are not frozen or implemented.
 - Owner phase: Phase 10
 - Owner slice: Pilot Outcome Measurement And Causal Honesty; Merchant Feedback And Intelligence Flywheel; Real-Merchant Pilot Closure
@@ -364,7 +365,7 @@ Phase 6 implementation status: COMPLETE
 - Trigger: Freeze before pilot data collection; publish impact only after source reconciliation, outcome-maturity, coverage, baseline-comparability, and privacy gates pass.
 - Done evidence: A design-partner report exposes definitions, denominators, windows, coverage, unresolved and delayed labels, exclusions, confidence, segment impact, operational cost, and causal limitations; accepted outcomes feed sealed datasets and governed rule/model evaluation with no leakage or historical rewrite.
 - Merchant / analyst demo: Trace one real cohort from PSP events through THAAP decisions, analyst actions and mature outcomes into a reproducible impact report and governed improvement candidate, including an honest negative or inconclusive result.
-- Last reviewed: 2026-07-27
+- Last reviewed: 2026-10-06
 
 ## Phase Rebaseline Summary
 

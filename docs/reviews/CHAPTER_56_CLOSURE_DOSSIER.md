@@ -183,9 +183,9 @@ authorization family, and requires product evidence plus process correction.
 The detailed and master plans, the matrix, the learning trail, and this dossier
 agree that Chapter 56 is implemented and proven, with all twelve rows holding on
 executed evidence and the matrix `VERIFIED`. Chapter 56 claims no Chapter 57–59
-capability: the developer contract, the SDK, and integrated phase closure remain
-open with their own dossiers. No
-completion marker is set anywhere.
+capability: the developer contract, the SDK, and integrated phase closure are
+proven by their own dossiers. The phase completion marker is maintained in the
+phase source-of-truth documents.
 
 ## Merge recommendation
 
@@ -194,5 +194,5 @@ tenant-leading query-support indexes whose reachability is measured on real
 PostgreSQL, the public demo reconciles published numbers against authoritative
 rows and exercises a weaker role, and source reconciliation is complete.
 
-Phase 6 as a whole remains open: Chapters 57 and 58 are implemented and under
-proof, and Chapter 59 integrated closure has not started.
+Phase 6 integrated closure is complete in the Chapter 59 dossier. This dossier
+certifies only Chapter 56's insight and denominator boundaries.

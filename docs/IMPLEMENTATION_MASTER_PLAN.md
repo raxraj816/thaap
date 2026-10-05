@@ -3570,8 +3570,8 @@ Vision owners: `VP-004`, `VP-005`, and `VP-016`.
 Detailed source of truth:
 [`PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
 
-Current state: **FOUNDER CONFIRMED 2026-08-02; IMPLEMENTATION AUTHORIZED, NOT
-STARTED.** Phase
+Current state: **FOUNDER CONFIRMED 2026-08-02; IMPLEMENTATION COMPLETE AND
+PROVEN.** Phase
 5 / Chapter 52 is complete and merged, so the entry gate is satisfied. The
 detailed plan proposes one coherent promise freeze across source-reconciled
 payment investigation, complete deterministic decision explanation, canonical
@@ -3785,15 +3785,14 @@ Vision owners: `VP-002`, `VP-007`, and `VP-008`.
 Entry gate: Phase 5 must provide a point-in-time dataset manifest and Phase 6
 must expose model explanation/failure states before active model influence.
 
-Inherited debt: `TD-0007` and `TD-0008` are `OPEN` and owned by the first Phase 7
-chapter. Phase 5 froze per-concern proof suites for observability, privacy,
-restart, deployment, authorization and forced-ordering concurrency, then
-implemented one contract class plus a `*PostgreSqlTests` subclass per domain; the
-seventeen rows under `TD-0007` and the six Chapter 52 cross-cutting rows under
-`TD-0008` name suites that were never written. Projection rebuild and offline
-replay are the two Phase 5 outputs Phase 7 consumes as trusted model inputs, and
-both carry unproven restart, lease-fencing and observability rows, so the debt is
-paid before that dependency is taken rather than after.
+Inherited proof debt: `TD-0007` and `TD-0008` are `RESOLVED`, as recorded in
+`docs/TECHNICAL_DEBT_REGISTER.md`. The seventeen per-concern rows and six
+Chapter 52 cross-cutting rows now name implemented suites, including real
+process-restart, lease-fencing, privacy, observability and producer-version proof.
+`scripts/phase-closure-check.py --phase-5` exits 0. Phase 7 inherits those proofs
+for projection rebuild and offline replay; it does not reopen resolved debt or
+mistake the replay substrate for trained-model governance. The 2026-10-06
+evidence-and-ownership review reconciles this entry under `ER-0108`.
 
 Named owner slices:
 
