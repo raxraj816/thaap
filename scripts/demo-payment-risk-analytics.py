@@ -43,7 +43,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Payment-risk reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -60,7 +60,7 @@ def broker_command(action: str) -> None:
     if action not in {"start", "stop"}:
         raise DemoFailure("Broker control action is not allowlisted")
     try:
-        subprocess.run(["docker", action, "thaap-kafka"], check=True,
+        subprocess.run(["docker", action, os.environ.get("THAAP_KAFKA_CONTAINER", "thaap-local-kafka-1")], check=True,
                        capture_output=True, text=True, timeout=30)
     except (FileNotFoundError, subprocess.CalledProcessError,
             subprocess.TimeoutExpired) as error:

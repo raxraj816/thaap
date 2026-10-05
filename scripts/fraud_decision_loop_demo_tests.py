@@ -17,6 +17,28 @@ SPEC.loader.exec_module(DEMO)
 
 class FraudDecisionLoopDemoTests(unittest.TestCase):
 
+    @mock.patch.object(DEMO, "request_json")
+    def test_every_feature_omission_and_unexpected_feature_is_rejected(self, request):
+        detail = {"decision": {"action": "ALLOW", "rulesetVersion": "rules_v1"},
+                  "ruleExecutionResults": [{"ruleCode": str(i), "matched": False} for i in range(3)],
+                  "featureSnapshot": {"features": dict.fromkeys(DEMO.BASE_FEATURE_CODES)}}
+        request.return_value = b"", detail
+        DEMO.assert_decision(None, "unused", {}, {"fraudDecisionId": "fixture"}, "ALLOW", [])
+        for key in DEMO.BASE_FEATURE_CODES:
+            with self.subTest(feature=key):
+                detail["featureSnapshot"]["features"] = dict.fromkeys(DEMO.BASE_FEATURE_CODES - {key})
+                with self.assertRaises(DEMO.DemoFailure):
+                    DEMO.assert_decision(None, "unused", {}, {"fraudDecisionId": "fixture"}, "ALLOW", [])
+        detail["featureSnapshot"]["features"] = dict.fromkeys(DEMO.BASE_FEATURE_CODES | {"unsafe.extra"})
+        with self.assertRaises(DEMO.DemoFailure):
+            DEMO.assert_decision(None, "unused", {}, {"fraudDecisionId": "fixture"}, "ALLOW", [])
+
+    def test_repeated_decline_setup_uses_its_own_customer_without_disabling_velocity(self):
+        source = SCRIPT_PATH.read_text()
+        self.assertIn('{"customerId": review_customer["id"], "cardNumber": "4999990000000003"}', source)
+        self.assertIn('headers, review_customer["id"], 99_999', source)
+        self.assertNotIn("THAAP_VELOCITY_ENABLED", source)
+
     def test_only_loopback_http_origins_are_accepted(self):
         self.assertEqual(DEMO.require_loopback("http://localhost:8080/"), "http://localhost:8080")
         for origin in (

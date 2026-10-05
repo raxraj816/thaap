@@ -49,8 +49,8 @@ class VelocityFraudListDemoTests(unittest.TestCase):
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         DEMO.redis_container("pause")
         DEMO.redis_container("unpause")
-        self.assertEqual(run.call_args_list[0].args[0], ["docker", "pause", "thaap-redis"])
-        self.assertEqual(run.call_args_list[1].args[0], ["docker", "unpause", "thaap-redis"])
+        self.assertEqual(run.call_args_list[0].args[0], ["docker", "pause", "thaap-local-redis-1"])
+        self.assertEqual(run.call_args_list[1].args[0], ["docker", "unpause", "thaap-local-redis-1"])
         with self.assertRaises(DEMO.DemoFailure):
             DEMO.redis_container("stop")
 

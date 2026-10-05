@@ -62,7 +62,13 @@ jobs:
           fi
           echo "Tag $GITHUB_REF_NAME matches the declared project version"
 
+      - name: Set up ARM64 build emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Prove the images can state what they are
+        # ECS uses ARM64. GitHub's runner is amd64, so configure emulation explicitly.
         # Builds both images with the release coordinates and asserts labels, build-info, dual
         # tagging and the changelog entry. --allow-dirty is not passed: a release must be built
         # from exactly the committed tree.
@@ -80,7 +86,10 @@ jobs:
           ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
           RELEASE_ROLE_ARN: ${{ vars.AWS_RELEASE_ROLE_ARN }}
         run: |
-          if [[ -n "$ECR_REGISTRY" && -n "$RELEASE_ROLE_ARN" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish }}" != "true" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Images proven, publishing explicitly disabled by the operator." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -n "$ECR_REGISTRY" && -n "$RELEASE_ROLE_ARN" ]]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"

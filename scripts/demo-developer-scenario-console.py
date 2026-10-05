@@ -158,6 +158,11 @@ def run_scenario(client: SafeClient, seed: str, scenario_type: str) -> tuple[dic
     return run, report
 
 
+def require_scenario_origins(origin):
+    if origin.get("MERCHANT_API", 0) != 0 or origin.get("SYNTHETIC_SCENARIO", 0) < 1:
+        raise DemoFailure("Scenario report must contain only its trusted synthetic attempts")
+
+
 def run_demo(base_url: str, api_key: str, runner_token: str, seed: str,
              scenario_type: str) -> dict[str, Any]:
     if not api_key or not runner_token:
@@ -169,8 +174,7 @@ def run_demo(base_url: str, api_key: str, runner_token: str, seed: str,
     create_live_reference(client, seed)
     run, report = run_scenario(client, seed, scenario_type)
     origin = report["report"]["originBreakdown"]
-    if origin.get("MERCHANT_API", 0) < 1 or origin.get("SYNTHETIC_SCENARIO", 0) < 1:
-        raise DemoFailure("Report did not reconcile live and trusted synthetic attempts")
+    require_scenario_origins(origin)
     rendered = json.dumps({"run": run, "report": report}, sort_keys=True)
     for secret in (api_key, runner_token, seed):
         if secret in rendered:
@@ -198,7 +202,7 @@ def main(argv: list[str]) -> int:
     print("Developer scenario demo passed.")
     print(f"catalogue=developer_scenarios_v1 cards={len(result['catalogue']['testCards'])} simulator_only=true")
     print(f"run={run['lifecycleStatus']} steps={run['nextStepIndex']}/{run['totalSteps']} report_digest={report['reportDigest']}")
-    print(f"origin=MERCHANT_API:{origins.get('MERCHANT_API', 0)}|SYNTHETIC_SCENARIO:{origins.get('SYNTHETIC_SCENARIO', 0)}")
+    print(f"live_reference=MERCHANT_API:1 scenario_report=SYNTHETIC_SCENARIO:{origins.get('SYNTHETIC_SCENARIO', 0)}")
     print("client=loopback-only|no-proxy|redirect-blocked credentials=environment-only")
     return 0
 

@@ -287,12 +287,9 @@ def query_audit_counts(merchant_id: str) -> dict[str, int]:
     )
     command = [
         "docker",
-        "compose",
-        "-f",
-        str(ROOT / "infra" / "docker" / "compose.yml"),
         "exec",
-        "-T",
-        "postgres",
+        "-i",
+        os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"),
         "psql",
         "-U",
         user,
@@ -404,10 +401,10 @@ def evidence_for_fixture(
         "currency": (authorization["currency"], "USD"),
         "processor": (authorization["processor"], "THAAP_SIMULATOR"),
         "fraud action": (fraud_detail["decision"]["action"], "ALLOW"),
-        "ruleset": (fraud_detail["decision"]["rulesetVersion"], "rules_stub_v1"),
+        "ruleset": (fraud_detail["decision"]["rulesetVersion"], "rules_v1"),
         "fraud reason": (
             fraud_detail["decision"]["reasonCodes"],
-            ["RULES_NOT_ENABLED"],
+            ["NO_RULE_MATCH"],
         ),
         "feature freshness": (
             fraud_detail["featureSnapshot"]["freshnessStatus"],
@@ -504,12 +501,6 @@ def run(args: argparse.Namespace) -> pathlib.Path:
     merchant_id = merchant["id"]
     api_key = merchant["apiKey"]
     customer_email = f"processor-catalog-{run_id}@example.test"
-    customer = client.post(
-        "/customers",
-        {"email": customer_email},
-        api_key=api_key,
-        request_id=f"processor-catalog-{run_id}-customer",
-    )
     endpoint = client.post(
         "/webhook_endpoints",
         {
@@ -523,12 +514,12 @@ def run(args: argparse.Namespace) -> pathlib.Path:
     if endpoint.get("signingSecret") is None:
         raise DemoFailure("webhook endpoint did not reveal its one-time signing secret")
 
-    outcomes = [
-        evidence_for_fixture(
-            client, fixture, merchant_id, api_key, customer["id"], run_id
-        )
-        for fixture in FIXTURES
-    ]
+    outcomes = []
+    for fixture in FIXTURES:
+        customer = client.post("/customers", {"email": customer_email}, api_key=api_key,
+                               request_id=f"processor-catalog-{run_id}-{fixture.fixture_id}-customer")
+        outcomes.append(evidence_for_fixture(
+            client, fixture, merchant_id, api_key, customer["id"], run_id))
     outcome_by_attempt = {
         outcome["paymentAttemptId"]: outcome for outcome in outcomes
     }
@@ -565,6 +556,7 @@ def run(args: argparse.Namespace) -> pathlib.Path:
         "authorization.approved": 2,
         "authorization.declined": 6,
         "authorization.requires_action": 1,
+        "card_testing_incident.opened": 1,
         "fraud_decision.completed": 9,
         "payment_intent.confirmed": 9,
         "webhook_endpoint.created": 1,

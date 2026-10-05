@@ -3,7 +3,6 @@ name: thaap-local
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: thaap-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${THAAP_POSTGRES_DB:-thaap_payments}
@@ -26,7 +25,6 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    container_name: thaap-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -41,8 +39,8 @@ services:
       start_period: 5s
 
   kafka:
-    image: apache/kafka:3.9.1
-    container_name: thaap-kafka
+    image: apache/kafka:3.9.1@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
+    mem_limit: 1024m
     restart: unless-stopped
     ports:
       # The host reaches Kafka on its usual port; the container network does not use this mapping
@@ -50,6 +48,8 @@ services:
       - "${THAAP_KAFKA_PORT:-9092}:29092"
     environment:
       KAFKA_NODE_ID: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
       KAFKA_PROCESS_ROLES: broker,controller
       # Two client listeners, because a Kafka client does not talk to the address it was given —
       # it asks for metadata and then connects to whatever the broker advertises. A single
@@ -94,7 +94,6 @@ services:
         THAAP_BUILD_COMMIT: ${THAAP_BUILD_COMMIT:-unknown}
         THAAP_BUILD_VERSION: ${THAAP_BUILD_VERSION:-unknown}
     image: thaap/payments-api:local
-    container_name: thaap-payments-api
     restart: unless-stopped
     ports:
       - "${THAAP_PAYMENTS_API_PORT:-8080}:8080"
@@ -143,7 +142,6 @@ services:
         THAAP_BUILD_COMMIT: ${THAAP_BUILD_COMMIT:-unknown}
         THAAP_BUILD_VERSION: ${THAAP_BUILD_VERSION:-unknown}
     image: thaap/analyst-dashboard-ui:local
-    container_name: thaap-analyst-dashboard-ui
     restart: unless-stopped
     ports:
       - "${THAAP_ANALYST_UI_PORT:-8081}:8081"

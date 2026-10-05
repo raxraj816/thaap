@@ -34,3 +34,19 @@ __pycache__/
 # The project rules in .claude/settings.json and .claude/hooks/ are versioned so every clone gets
 # them. Per-developer permission grants are not.
 .claude/settings.local.json
+
+# Terraform working state.
+#
+# `.terraform/` is vendored provider binaries and `*.tfstate` is the record of what exists in a
+# real account — the second is the more important exclusion, since a state file carries resource
+# identifiers, endpoints and generated passwords in plaintext. Remote state in S3 is where it
+# belongs; a copy in git is a credential leak with version history.
+#
+# `.terraform.lock.hcl` is deliberately NOT ignored. It pins provider versions by checksum, which
+# is the same reproducibility argument that made every base image digest-pinned and every npm
+# dependency exact.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

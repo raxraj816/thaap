@@ -28,8 +28,10 @@ server:
   #     is still computed, still recorded in the snapshot, and now means nothing
   #
   # SECURITY DEPENDENCY, and it is not optional: `framework` trusts X-Forwarded-For from whoever
-  # sent it. That is safe only because the task security group admits traffic from the ALB alone
-  # (Phase 6.5 Section 5). If the tasks ever become reachable directly, a caller can choose its
+  # sent it. The task security group admits the ALB alone AND the ALB requires the CloudFront
+  # origin secret AND the viewer-request function strips forged Forwarded/X-Forwarded metadata
+  # and rebuilds the client IP from CloudFront's viewer socket. A security group alone cannot
+  # sanitize a forged header sent through a legitimate proxy. If any boundary is removed, a caller can choose its
   # own client IP and defeat both controls above. Chapter 63 owns that security group, and this
   # setting is one of the things that makes it load-bearing rather than merely tidy.
   forward-headers-strategy: framework

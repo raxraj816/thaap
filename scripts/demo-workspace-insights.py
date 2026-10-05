@@ -49,7 +49,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Insight reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -112,6 +112,30 @@ def confirmed_payment(opener, base_url, merchant_headers, prefix, customer_id, m
     return intent["id"]
 
 
+def wait_decision_outcomes(opener, base_url, headers, minimum_rows=0):
+    deadline = time.monotonic() + 60
+    observed = None
+    while time.monotonic() < deadline:
+        _, outcomes = request_json(opener, base_url, "GET",
+                                   "/risk/workspace/insights/decision-outcomes", headers=headers)
+        observed = (outcomes.get("freshness") or {}).get("state")
+        if observed in ("FRESH", "STALE") and sum(
+                row["count"] for row in outcomes["decisionDistribution"]) >= minimum_rows:
+            return outcomes
+        time.sleep(0.5)
+    raise DemoFailure(f"Insight projection coverage did not become complete: {observed}")
+
+
+def drill_filter(drill):
+    policy = drill["trafficOriginPolicy"]
+    origins = {"ALL": [], "LIVE_ONLY": ["MERCHANT_API"],
+               "SYNTHETIC_ONLY": ["SYNTHETIC_SCENARIO"]}
+    if policy not in origins:
+        raise DemoFailure("Unknown insight origin policy")
+    return {"fraudActions": drill["fraudActions"], "createdFrom": drill["createdFrom"],
+            "createdTo": drill["createdTo"], "trafficOrigins": origins[policy]}
+
+
 def run() -> None:
     base_url = require_loopback(os.environ.get("THAAP_BASE_URL", "http://localhost:8080"))
     admin_token = os.environ.get("THAAP_ADMIN_BOOTSTRAP_TOKEN")
@@ -170,9 +194,7 @@ def run() -> None:
         raise DemoFailure("conflict attempts were reported as a number the source cannot support")
 
     # --- What outcomes are known, from the active projection ---------------------------------
-    _, decisions = request_json(opener, base_url, "GET",
-                                "/risk/workspace/insights/decision-outcomes",
-                                headers=manager_headers)
+    decisions = wait_decision_outcomes(opener, base_url, manager_headers)
     if "sourceAsOf" in decisions:
         raise DemoFailure("decision outcomes claimed a source as-of it does not have")
     if decisions["claimBoundary"] != "DESCRIPTIVE_NOT_CAUSAL":
@@ -203,14 +225,14 @@ def run() -> None:
             if prohibited in json.dumps(drill):
                 raise DemoFailure(f"drill-through descriptor carried {prohibited}")
         _, page = post(opener, base_url, "/risk/workspace/payments/search?limit=50",
-                       {"filter": {"fraudActions": drill["fraudActions"]}}, manager_headers)
+                       {"filter": drill_filter(drill)}, manager_headers)
         if len(page["data"]) != segment["count"]:
             raise DemoFailure(
                 f"drill-through for {segment['code']} returned {len(page['data'])} rows "
                 f"but the card claimed {segment['count']}")
         drilled += 1
-    if drilled == 0:
-        raise DemoFailure("no segment offered a drill-through, so the journey was not shown")
+    if drilled == 0 and decisions["decisionDistribution"]:
+        raise DemoFailure("no segment offered a drill-through for a nonempty distribution")
 
     # --- Role boundaries --------------------------------------------------------------------
     _, viewer_reviews = request_json(opener, base_url, "GET",
@@ -229,6 +251,9 @@ def run() -> None:
                              "distribution": decisions["decisionDistribution"],
                              "currencies": currencies},
         "drillThroughSegmentsReconciled": drilled,
+        "drillThroughProof": "EXECUTED" if drilled else "EMPTY_COMPLETED_UTC_DAY_WINDOW",
+        "proofBoundary": "New fixtures belong to today's incomplete UTC day and are excluded "
+                         "from completed-day insights; no positive segment replay is claimed.",
     }, indent=2, default=str))
 
 

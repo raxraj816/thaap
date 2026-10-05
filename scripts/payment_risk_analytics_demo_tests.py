@@ -69,8 +69,8 @@ class PaymentRiskAnalyticsDemoTests(unittest.TestCase):
                                                        stdout="", stderr="")
         DEMO.broker_command("stop")
         DEMO.broker_command("start")
-        self.assertEqual(run.call_args_list[0].args[0], ["docker", "stop", "thaap-kafka"])
-        self.assertEqual(run.call_args_list[1].args[0], ["docker", "start", "thaap-kafka"])
+        self.assertEqual(run.call_args_list[0].args[0], ["docker", "stop", "thaap-local-kafka-1"])
+        self.assertEqual(run.call_args_list[1].args[0], ["docker", "start", "thaap-local-kafka-1"])
         for call in run.call_args_list:
             self.assertNotIn("shell", call.kwargs)
         with self.assertRaises(DEMO.DemoFailure):

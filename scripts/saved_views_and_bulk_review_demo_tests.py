@@ -26,6 +26,29 @@ SOURCE = SCRIPT_PATH.read_text(encoding="utf-8")
 
 class SavedViewsAndBulkReviewDemoTests(unittest.TestCase):
 
+    def test_absent_aggregate_route_accepts_only_the_exact_dynamic_identity_rejection(self):
+        DEMO.require_absent_aggregate_rejection({"status": 400, "error": "bad_request", "message": "Invalid actionId parameter"})
+        for status in (404, 405):
+            DEMO.require_absent_aggregate_rejection({"status": status})
+        for response in ({"status": 400}, {"status": 400, "error": "different", "message": "Invalid actionId parameter"},
+                         {"status": 400, "error": "bad_request", "message": "Missing aggregate filter"}):
+            with self.assertRaises(DEMO.DemoFailure):
+                DEMO.require_absent_aggregate_rejection(response)
+
+    @mock.patch.object(DEMO, "request_json")
+    def test_case_selection_uses_authoritative_list_identity_and_version(self, request):
+        case = "11111111-1111-1111-1111-111111111111"
+        request.return_value = b"", {"reviewAndLabels": {"reviews": [{"id": case, "assignmentVersion": 7}]}}
+        self.assertEqual(DEMO.review_case_for(None, "unused", {}, "fixture"), (case, 7))
+        for invalid in (None, {}, [], [{"id": case}], [{"id": "bad", "assignmentVersion": 0}],
+                        [{"id": case, "assignmentVersion": True}], [{"id": case, "assignmentVersion": -1}],
+                        [{"id": case, "assignmentVersion": "0"}],
+                        [{"id": case, "assignmentVersion": 0}] * 2):
+            with self.subTest(reviews=invalid):
+                request.return_value = b"", {"reviewAndLabels": {"reviews": invalid}}
+                with self.assertRaises(DEMO.DemoFailure):
+                    DEMO.review_case_for(None, "unused", {}, "fixture")
+
     def test_only_loopback_http_origins_are_accepted(self):
         self.assertEqual(DEMO.require_loopback("http://localhost:8080/"), "http://localhost:8080")
         self.assertEqual(DEMO.require_loopback("http://127.0.0.1:8080"), "http://127.0.0.1:8080")

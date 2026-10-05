@@ -279,6 +279,21 @@ chapter-level claim and must contain:
 The dossier does not replace the matrix. The matrix is claim-to-proof
 traceability; the dossier is the integrated release argument.
 
+## Current Readiness Registration
+
+`docs/reviews/CURRENT_READINESS_SCOPE.json` registers the learning day, current matrix
+and current closure dossier. Every readiness invocation—including CI and pre-push with
+no selectors—resolves and validates that pair. Explicit selectors must match it; use
+standalone chapter/phase checkers to inspect historical proof rather than selecting old
+proof as current readiness. Missing, duplicate-key, noncanonical, symlinked or mismatched
+registrations fail closed. The ordinary gate may no longer skip closure as "trivial".
+
+A recovery coordinate such as 60R may close a separately frozen local repair while its
+parent deployment phase stays open. Its own README/master-plan status must agree, every
+local row must PASS, and its dossier must recommend MERGE for that scope. Renaming is not
+proof: all integrated deployment promises remain in their original matrix, and no local
+recovery claim may say that an unapplied AWS topology or Chapter 66 is complete.
+
 ## Reviewer Handoff
 
 The final handoff names:

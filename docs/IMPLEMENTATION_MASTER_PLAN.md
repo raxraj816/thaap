@@ -2,6 +2,28 @@
 
 Date: 2026-05-29
 
+October 6 release audit: Phase 6 remains complete. The in-progress Phase 6.5 deployment
+interlude is tracked by `docs/PHASE_6_5_DETAILED_IMPLEMENTATION_PLAN.md`; authored Terraform
+is not an applied deployment. `ER-0109`–`ER-0117` track repaired local release/demo boundaries
+in `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md` and its closure
+dossier. Chapter 63 live AWS proof and Chapters 64–66 hosted/operations/integrated proof
+remain open; `ER-0106` remains in progress. This audit introduces no accepted deferred debt
+and does not authorize Git publication, paid infrastructure, or roadmap renumbering.
+
+## Local Release Recovery Slice
+
+1. Chapter 60R: Local Release Boundary Repair.
+
+   Status: complete. ER-0109–ER-0117 local repairs retain their exact product proof;
+   ER-0118 adds current-scope readiness enforcement and corrects the former Chapter 66
+   coordinate. Matrix: `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md`.
+   Dossier: `docs/reviews/CHAPTER_60R_CLOSURE_DOSSIER.md`.
+   This recovery slice may close only its local/configuration promises. Phase 6.5 Chapter
+   63 remains AUTHORED OPEN; Chapters 64–66 and ER-0106 remain open for actual AWS
+   deployment, exposure, hosted journeys and operations proof. No new debt accepted.
+   Owner direction on 2026-10-06 defers deployment until launch readiness and explicit
+   authorization. This is a launch sequencing decision, not accepted implementation debt.
+
 This is the single source of truth for implementation. The files under `docs/references/` remain useful references, but when implementation decisions differ, this master plan wins.
 
 ## 1. Product Mission

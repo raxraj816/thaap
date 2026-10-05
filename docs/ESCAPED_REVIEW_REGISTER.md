@@ -1843,3 +1843,173 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Review both directions of capability truth: implemented prerequisites must not remain marked unbuilt, and future capabilities must not be listed as implemented evidence. Record entry-level dispositions before advancing review dates; read canonical debt state rather than copying historical deferral prose. Structural passes do not substitute for this semantic review.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-10-06
+
+## ER-0109
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60–63; Phase 6.5 local release/topology boundaries
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Chapter 60–62 local closure and Chapter 63 format/validate-only review.
+- Invariant: Release proof must distinguish real API responses, persistent broker state, isolated proof resources and deployable Terraform evaluation from artifacts that merely parse or start.
+- Finding: Compose hardcoded container names despite claiming project isolation; the broker mounted a volume without selecting it as its log directory; prefix smoke accepted SPA HTML success; CloudFront globally rewrote API 403/404 to the shell; the WAF terminating allow preceded its rate block; viewer forwarding headers were trusted without sanitization; ACM DNS resources used unknown computed names and duplicate regional keys; secret population instructions preceded creation; workflow publish opt-out and ECS/image architecture were inconsistent.
+- Why prior review missed it: Tests compared prefix strings and image metadata but did not execute hostile routing responses, container replacement, parallel project ownership, Terraform computed-value planning or ordered terminating-rule evaluation.
+- Resolution evidence: Real fresh Docker stack applied V1–V91 and proved 20 JSON-error roots; real broker container replacement preserved records/offsets; real nginx socket proof preserved credentials/query while removing forged headers. Fifteen Terraform mock tests cover computed/duplicate certificate records, staging, WAF/cache/topology and invalid-input partitions; four Node edge tests and release-boundary tests pass. The seven-journey CI entry point ran locally with exit 0. Live AWS exposure/operations remain separate under ER-0106; no mocked test is presented as deployed proof.
+- Process correction: Evaluate executable topology with plan tests, test response body/content-type rather than status alone, remove and replace durable containers, and require trusted-hop header sanitization plus terminating-rule-order assertions. Never label mocked cloud tests deployed proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0110
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 30; feature-lineage demo retained through later feature catalogue extensions
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Feature-lineage demo unit safety checks and Phase 6 integrated review.
+- Invariant: Executable feature-lineage proof must reconcile the current typed fixture exactly, including policy/context and velocity features, without accepting missing, extra, mistyped or future-observed data.
+- Finding: The live feature-lineage demo expected seven features after legitimate context, merchant risk-tier and velocity extensions added five more to this fixture; its two safety tests never evaluated the catalogue assertion. The boundary-family pass reproduced the same obsolete seven-feature assertion and 42-row reconciliation in the fraud-decision loop (six decisions now produce 72 rows).
+- Why prior review missed it: Script existence and transport/reconciliation hygiene were tested, but the demo was not rerun against the completed feature catalogue and exact assertion partitions were absent.
+- Resolution evidence: Repaired live feature demo reconciles all 12 typed/value/time-qualified rows; live fraud loop proves six decisions and 72 feature rows. Tests reject every missing feature, extras, wrong type/value and late observation, and compare fixture type keys with the production catalogue. Both journeys ran in the real fresh-stack CI entry point, exit 0.
+- Process correction: Re-run old demos when their product contract dependencies expand; exact feature assertions must have missing/extra/type/value/point-in-time negative tests, not only subprocess safety tests.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0111
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 29; fraud-decision demo retained after velocity controls shipped
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Fraud-decision demo safety tests and integrated Phase 6 review.
+- Invariant: Each intended demo decision cohort must be isolated from unrelated prior fixture traffic while all production fraud controls remain enabled.
+- Finding: ALLOW, step-up and BLOCK fixtures used the same customer as the later repeated-decline setup. The prior three attempts correctly triggered customer velocity REVIEW on the first decline, so the obsolete fixture could never reach its intended repeated-attempt sequence.
+- Why prior review missed it: The original fixture predated velocity controls; unit tests exercised subprocess hygiene rather than the interaction between new controls and retained demo traffic.
+- Resolution evidence: Isolated review customer/card cohort retains every production velocity control; the live fraud loop now proves ALLOW, BLOCK, REQUIRE_3DS and REVIEW, with three authorization records, one cancellation, six decisions and 72 features. Fixture-isolation regression and real fresh-stack CI entry point pass, exit 0.
+- Process correction: Enumerate fixture/control interactions when adding a new control. Isolate cohorts by product identities and verify intended rule reasons, never disable the new control to restore an old demo.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0112
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 40; governed-control activation demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Governed-controls demo safety tests and integrated phase review.
+- Invariant: Activation proof must meet real default population and label-coverage policy, not a relaxed test profile.
+- Finding: The demo created one unlabelled cohort member and attempted activation although the real application requires 100 eligible members and 50 percent label coverage; the server correctly rejected it with 409.
+- Why prior review missed it: A one-row simulation demonstrates the simulation engine but not its production activation gate; subprocess safety tests never executed activation against default configuration.
+- Resolution evidence: Live default-runtime public workflow created 100 payments and 96 actual FRAUD labels, met unchanged population 100/coverage 50 percent gates, activated/retired/rolled back the rule, and proved a safety exception cannot suppress protected merchant velocity. Real fresh-stack CI entry point passes. Retry-After malformed/unbounded/unicode partitions and same-body/idempotency replay tests pass; only 429 is retried with a bounded deadline.
+- Process correction: Distinguish execution proof from promotion-policy proof; exercise production thresholds with real workflow labels and assert that protected fraud controls survive an exception.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0113
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 55; saved-view and bulk-assignment demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Saved-view/bulk demo safety tests and integrated Phase 6 review.
+- Invariant: Bulk assignment must select the authoritative case ID and optimistic assignment version from the published investigation response, never invent a default version.
+- Finding: The live demo read reviewAndLabels.review.reviewCaseId although the product publishes reviewAndLabels.reviews as a list of ReviewView objects; its fixture opened review correctly but the script rejected the actual envelope. Its negative aggregate-route probe also misclassified the dynamic actionId UUID route's correct 400 type rejection as an exposed aggregate endpoint; that branch must validate the exact rejection descriptor/message rather than accept arbitrary 400.
+- Why prior review missed it: Safety and script-content assertions never tested the consumed response shape against a real investigation response.
+- Resolution evidence: Actual review-list ID/version selection is tested for missing, malformed and ambiguous cases without defaulting. Live bulk proof reconciles PARTIAL with SUCCEEDED/STALE/NOT_FOUND, rejects prohibited aggregate endpoints by exact UUID-parameter error, and verifies prohibited state unchanged. Fresh-stack CI entry point passes, exit 0.
+- Process correction: Contract-consumer demos need response-shape and identity/version partition tests plus a live default-runtime run, not only scope/content scans.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0114
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 58; workspace insight demo
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Insight demo safety tests and integrated review.
+- Invariant: Projection consumers wait for published coverage and replay the complete segment filter, not only its action.
+- Finding: The real demo queried newly created payments then required a positive insight segment, but the API deliberately excludes today's incomplete UTC day. Published coverage became FRESH and the correct distribution remained empty. The first timing hypothesis was disproved by that observation. It also omitted aligned time range and origin policy when replaying a nonempty segment.
+- Why prior review missed it: Warm-runtime assertions and source scans never forced catching-up coverage or checked descriptor replay fields.
+- Resolution evidence: Demo now waits for qualified coverage, replays action/range/origin, and explicitly reports EMPTY_COMPLETED_UTC_DAY_WINDOW with no positive historical drill-through claim. Partial/unavailable/empty/complete coverage, bounded timeout and all origin-filter partitions pass. Real fresh-stack CI entry point verifies today's honest empty window, exit 0; existing backend historical tests remain distinct evidence. No timestamps or insight policy were weakened.
+- Process correction: Test partial, unavailable, empty and complete coverage, bounded timeout, and the exact replay filter; run the journey against a real default runtime in CI.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0115
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 20; processor outcome catalogue demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Processor catalogue script tests and integrated review.
+- Invariant: Processor fixtures retain current ruleset lineage and cannot borrow another demo project's database or customer velocity history.
+- Finding: The real default runtime returned rules_v1, but the retained demo required rules_stub_v1; nine processor fixtures share a customer despite the later velocity controls, and database reconciliation selects the default compose project instead of the chosen proof container.
+- Why prior review missed it: The retained earlier-chapter fixture was not run end to end after deterministic rules and project-isolated packaging replaced its assumptions.
+- Resolution evidence: Live nine-fixture catalogue passes current rules_v1/NO_RULE_MATCH, isolates each customer, reconciles the explicitly selected PostgreSQL container and exact current audit including the card-testing incident. Source/argv regression tests pass; fresh-stack CI entry point executes the real demo with exit 0.
+- Process correction: Run current-default processor fixtures, assert isolated identities, and honor the explicit PostgreSQL proof container.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0116
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 38; developer scenario console demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Developer console safety tests and integrated review.
+- Invariant: A scenario-run report counts only its own trusted synthetic attempts; unrelated live references must not enter it.
+- Finding: The live demo demanded at least one MERCHANT_API attempt in the scenario-specific report although its source query correctly restricts counts to the scenario's completed confirmation steps.
+- Why prior review missed it: Transport safety tests never ran the real report assertion.
+- Resolution evidence: Live reference separately proves MERCHANT_API; real scenario completes 4/4 steps and its report contains one SYNTHETIC_SCENARIO attempt with no unrelated live attempt, exit 0. Table-driven tests reject empty, missing-synthetic and live-contaminated origin maps; source report query remains unchanged.
+- Process correction: Prove live origin from the live response and synthetic origin from the scenario report; test contamination and missing-origin partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0117
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 63; broker task memory boundary
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Terraform format/validate and unconstrained local startup proof.
+- Invariant: Broker heap leaves native-memory headroom within its default task budget.
+- Finding: The pinned Kafka image actually starts with -Xmx1G -Xms1G while the authored ECS task budget is only 1024 MiB; metaspace, thread stacks and native buffers cannot fit outside that heap.
+- Why prior review missed it: The local broker had no container memory limit, and provider validation cannot inspect image JVM defaults.
+- Resolution evidence: Compose and ECS explicitly set -Xms512m -Xmx512m; compose enforces 1073741824-byte memory ceiling. Real broker replacement under that ceiling verifies actual JVM flags, retains both records and committed offsets 1→2, exit 0. Sixteen Terraform tests pass, including configured heap headroom and rejection of a 512 MiB task. Real AWS sizing/recovery remains unproven.
+- Process correction: Align heap and task memory explicitly and execute broker replacement with the real authored memory ceiling, not an unconstrained laptop container.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0118
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Local release audit readiness and automated pre-push/CI readiness.
+- Invariant: Readiness validates the current implementation slice and cannot confuse local repair completion with integrated AWS closure or skip the current dossier.
+- Finding: The local-only repair dossier used Chapter 66, so the named gate demanded unrelated cloud completion; ordinary automated invocations omitted selectors and skipped dossier validation altogether.
+- Why prior review missed it: Explicit-selector tests certified one invocation, not the actual no-selector hook/CI path, and a local maintenance scope was assigned a deployment-closure coordinate.
+- Resolution evidence: Recovery coordinate 60R retains the original frozen local promises while Chapters 63–66 stay open. Strict versioned manifest resolution runs for every readiness call; nine resolver tests reject malformed/duplicate/missing/date/type/path/symlink/stale/mixed partitions. Shell tests prove current-pair invocation and fail-closed child-result propagation, plus inherited Phase 6 failure propagation. Real no-selector readiness rejected the current PENDING row, non-merge dossier and this unresolved P1 before closure; stale explicit selectors also exit 1. After closure, full named readiness (1457 backend and 295 Python tests) and ordinary no-selector readiness both exited 0, validating the current pair and inherited Phase 6 proof. The existing chapter-completion validator is unchanged.
+- Process correction: Register the exact current scope, resolve it on every normal gate run, reject stale/malformed selectors with executable negative partitions, and use a separate recovery coordinate without promoting parent-phase status.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06

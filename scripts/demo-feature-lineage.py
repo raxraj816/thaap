@@ -12,16 +12,22 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from demo_feature_contract import BASE_FEATURE_CODES
 
 
 EXPECTED_FEATURES = {
     "card.country": ("STRING", "US"),
     "card.funding": ("STRING", "CREDIT"),
+    "merchant.risk_tier": ("STRING", "STANDARD"),
     "payment.amount_minor": ("LONG", "4200"),
     "payment.attempt_number": ("LONG", "1"),
     "payment.capture_method": ("STRING", "MANUAL"),
     "payment.currency": ("STRING", "USD"),
+    "risk.context_present": ("BOOLEAN", "false"),
     "traffic.origin": ("STRING", "MERCHANT_API"),
+    "velocity.card_attempts_10m": ("LONG", "0"),
+    "velocity.customer_attempts_1h": ("LONG", "0"),
+    "velocity.merchant_attempts_1m": ("LONG", "0"),
 }
 FORBIDDEN_TEXT = (
     "card_bin", "card_last4", "fingerprint", "payment_intent_id",
@@ -32,6 +38,20 @@ FORBIDDEN_TEXT = (
 
 class DemoFailure(RuntimeError):
     pass
+
+
+def require_feature_catalogue(features: dict) -> None:
+    if set(EXPECTED_FEATURES) != BASE_FEATURE_CODES:
+        raise DemoFailure("typed fixture expectations disagree with the governed no-context feature contract")
+    if list(features) != sorted(EXPECTED_FEATURES):
+        raise DemoFailure("snapshot does not contain the exact lexical current fixture catalogue")
+
+
+def require_durable_lineage(rows: list[tuple[str, str, str, str]]) -> None:
+    actual = {code: (value_type, value) for code, value_type, value, point_in_time in rows}
+    if len(rows) != len(EXPECTED_FEATURES) or actual != EXPECTED_FEATURES \
+            or any(point_in_time != "true" for *_, point_in_time in rows):
+        raise DemoFailure("durable typed lineage did not reconcile with the exact fixture")
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -85,7 +105,7 @@ def postgres_rows(payment_attempt_id: uuid.UUID) -> list[tuple[str, str, str, st
         ORDER BY fv.feature_code
     """
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-F", "|", "-U", user, "-d", database, "-c", query,
     ]
     try:
@@ -146,17 +166,14 @@ def run() -> None:
         raise DemoFailure("current decision behavior must preserve the Feature lineage typed lineage boundary")
     if len(detail["ruleExecutionResults"]) != 3:
         raise DemoFailure("current rules_v1 decision must preserve three complete rule results")
-    if list(snapshot["features"].keys()) != sorted(EXPECTED_FEATURES):
-        raise DemoFailure("snapshot does not contain the exact lexical V1 feature catalogue")
+    require_feature_catalogue(snapshot["features"])
     public_text = json.dumps(detail, separators=(",", ":"), sort_keys=True).lower()
     if any(forbidden in public_text for forbidden in FORBIDDEN_TEXT):
         raise DemoFailure("decision detail contains a prohibited feature surface")
 
     attempt_id = uuid.UUID(attempt["id"])
     rows = postgres_rows(attempt_id)
-    actual = {code: (value_type, value) for code, value_type, value, point_in_time in rows}
-    if actual != EXPECTED_FEATURES or any(point_in_time != "true" for *_, point_in_time in rows):
-        raise DemoFailure(f"durable typed lineage did not reconcile: {actual}")
+    require_durable_lineage(rows)
     if attempt["status"] != "AUTHORIZED" or not attempt.get("processorAuthorizationId"):
         raise DemoFailure("ALLOW processor behavior changed")
 
@@ -165,7 +182,7 @@ def run() -> None:
     print(f"payment_intent={intent['id']}")
     print(f"payment_attempt={attempt['id']} status={attempt['status']}")
     print(f"fraud_decision={attempt['fraudDecisionId']} action={decision['action']}")
-    print("typed_features=7 point_in_time=true replay=exact prohibited_surfaces=absent")
+    print(f"typed_features={len(EXPECTED_FEATURES)} point_in_time=true replay=exact prohibited_surfaces=absent")
 
 
 if __name__ == "__main__":

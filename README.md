@@ -258,6 +258,11 @@ Chapter 60 is complete.
 Chapter 61 is complete.
 Chapter 62 is complete.
 
+Chapter 60R is complete. Its independent local repair matrix/dossier covers
+local build, routing, broker durability and contract-consuming demos plus current-scope
+readiness enforcement. This is not Chapter 66 or a deployed AWS completion claim.
+Deployment is deferred by the owner until THAAP is ready to launch and separately authorized.
+
 Phase 6.5 implementation status: CHAPTERS 60–62 COMPLETE. THAAP now builds as
 digest-pinned container images, starts end to end under `docker compose up`,
 states which commit it is running at `/actuator/info`, and refuses to start a

@@ -20,6 +20,41 @@ SOURCE = SCRIPT_PATH.read_text(encoding="utf-8")
 
 class WorkspaceInsightsDemoTests(unittest.TestCase):
 
+    def test_projection_wait_rejects_incomplete_and_empty_coverage(self):
+        def response(state, count):
+            return (b"", {"freshness": {"state": state},
+                          "decisionDistribution": [{"count": count}]})
+        with mock.patch.object(DEMO, "request_json", side_effect=[
+                response("PARTIAL", 4), response("UNAVAILABLE", 4),
+                response("FRESH", 0), response("FRESH", 4)]) as request, \
+                mock.patch.object(DEMO.time, "sleep"):
+            result = DEMO.wait_decision_outcomes(None, "http://localhost", {}, minimum_rows=4)
+        self.assertEqual(request.call_count, 4)
+        self.assertEqual(result["freshness"]["state"], "FRESH")
+
+    def test_completed_day_window_may_be_fresh_and_empty(self):
+        with mock.patch.object(DEMO, "request_json", return_value=(b"", {
+                "freshness": {"state": "FRESH"}, "decisionDistribution": []})):
+            self.assertEqual(DEMO.wait_decision_outcomes(None, "http://localhost", {})[
+                "decisionDistribution"], [])
+
+    def test_projection_wait_has_a_bounded_deadline(self):
+        with mock.patch.object(DEMO.time, "monotonic", side_effect=[0, 61]):
+            with self.assertRaisesRegex(DEMO.DemoFailure, "coverage"):
+                DEMO.wait_decision_outcomes(None, "http://localhost", {})
+
+    def test_replay_preserves_range_action_and_origin_policy(self):
+        for policy, origins in [("ALL", []), ("LIVE_ONLY", ["MERCHANT_API"]),
+                                ("SYNTHETIC_ONLY", ["SYNTHETIC_SCENARIO"])]:
+            descriptor = {"fraudActions": ["BLOCK"], "createdFrom": "2026-10-06T00:00:00Z",
+                          "createdTo": "2026-10-07T00:00:00Z", "trafficOriginPolicy": policy}
+            self.assertEqual(DEMO.drill_filter(descriptor), {
+                "fraudActions": ["BLOCK"], "createdFrom": descriptor["createdFrom"],
+                "createdTo": descriptor["createdTo"], "trafficOrigins": origins})
+        descriptor["trafficOriginPolicy"] = "INVALID"
+        with self.assertRaises(DEMO.DemoFailure):
+            DEMO.drill_filter(descriptor)
+
     def test_only_loopback_http_origins_are_accepted(self):
         self.assertEqual(DEMO.require_loopback("http://localhost:8080/"), "http://localhost:8080")
         for origin in ("https://localhost:8080", "http://example.com:8080",

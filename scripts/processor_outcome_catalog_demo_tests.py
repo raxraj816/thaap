@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import subprocess
 import stat
 import sys
 import tempfile
@@ -24,6 +25,21 @@ SPEC.loader.exec_module(processor_catalog_demo)
 
 
 class ProcessorOutcomeCatalogDemoTests(unittest.TestCase):
+    def test_current_ruleset_and_isolated_customer_fixtures_are_required(self):
+        source = SCRIPT_PATH.read_text()
+        self.assertIn('"rules_v1"', source)
+        self.assertIn('["NO_RULE_MATCH"]', source)
+        self.assertNotIn('"rules_stub_v1"', source)
+        self.assertIn('for fixture in FIXTURES:\n        customer = client.post', source)
+
+    def test_selected_database_container_is_used_for_read_only_reconciliation(self):
+        with mock.patch.dict(os.environ, {"THAAP_POSTGRES_CONTAINER": "isolated-postgres"}), \
+                mock.patch.object(processor_catalog_demo.subprocess, "run", return_value=
+                    subprocess.CompletedProcess([], 0, "", "")) as run:
+            processor_catalog_demo.query_audit_counts("00000000-0000-0000-0000-000000000001")
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], ["docker", "exec", "-i", "isolated-postgres"])
+        self.assertNotIn("compose", command)
     def test_catalog_covers_every_documented_partition_once(self) -> None:
         fixture_ids = [fixture.fixture_id for fixture in processor_catalog_demo.FIXTURES]
 

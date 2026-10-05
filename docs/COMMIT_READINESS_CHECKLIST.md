@@ -1,5 +1,10 @@
 # Commit Readiness Checklist
 
+The common readiness gate now always validates the current matrix/dossier registered in
+`docs/reviews/CURRENT_READINESS_SCOPE.json`; missing selectors do not mean trivial work.
+Explicit selectors must match this current registration. A local recovery slice does not
+close its parent phase: retain all unexecuted cloud promises and the owner's launch gate.
+
 Use this before saying a change is ready to commit.
 
 ## Required Checks

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
-import { paymentsApiProxy } from "../vite.config";
+import { paymentsApiProxy, operationalApiProxy, boundedApiProxy } from "../vite.config";
 
 // The workspace reaches the API through three different routers depending on where it runs:
 // the Vite dev proxy locally, nginx inside the compose and container deployments, and CloudFront
@@ -17,13 +17,23 @@ function nginxProxyPrefixes(): string[] {
   // jsdom, where import.meta.url is an http URL and fileURLToPath rejects it.
   const conf = readFileSync(resolve(process.cwd(), "nginx.conf"), "utf8");
 
-  return [...conf.matchAll(/^\s*location\s+(\/\S*)\s*\{[^}]*proxy_pass/gm)]
+  return [...conf.matchAll(/^\s*location\s+~\s+\^(\/[a-z0-9_]+)\(\?:\/\|\$\)\s*\{[^}]*proxy_pass/gm)]
     .map((match) => match[1])
     .sort();
 }
 
 test("nginx proxies exactly the prefixes the dev proxy does, and no others", () => {
-  expect(nginxProxyPrefixes()).toEqual(Object.keys(paymentsApiProxy).sort());
+  expect(nginxProxyPrefixes()).toEqual(Object.keys({ ...paymentsApiProxy, ...operationalApiProxy }).sort());
+});
+
+test("all API matches have exact path-segment boundaries, not lookalike prefix matches", () => {
+  for (const prefix of Object.keys({ ...paymentsApiProxy, ...operationalApiProxy })) {
+    const pattern = new RegExp(`^${prefix}(?:/|$)`);
+    expect(boundedApiProxy[`^${prefix}(?:/|$)`]).toBe("http://127.0.0.1:8080");
+    expect(pattern.test(prefix)).toBe(true);
+    expect(pattern.test(`${prefix}/nested`)).toBe(true);
+    expect(pattern.test(`${prefix}_lookalike`)).toBe(false);
+  }
 });
 
 test("every proxied prefix is absolute, so a relative match cannot capture the SPA fallback", () => {

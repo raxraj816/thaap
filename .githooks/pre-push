@@ -10,9 +10,8 @@
 # It calls the same script a developer runs by hand rather than re-listing the gates, because a
 # second list would drift from the first and the drifted copy is always the one nobody reads.
 #
-# Install with scripts/install-git-hooks.sh. Bypass with `git push --no-verify` only when you
-# have already run the gate another way — CI will run it regardless, so a bypass buys time, not
-# permission.
+# Install with scripts/install-git-hooks.sh. Never bypass this hook. The common gate resolves
+# the registered current matrix/dossier itself; CI repeats the same scope with tests.
 
 set -euo pipefail
 

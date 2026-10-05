@@ -77,6 +77,26 @@ def register(status: str = "RESOLVED", severity: str = "P1") -> str:
 
 class ChapterClosureCheckTests(unittest.TestCase):
 
+    def test_completed_recovery_slice_does_not_require_or_certify_parent_completion(self):
+        recovery_dossier = dossier().replace("Chapter 19", "Chapter 60R").replace(
+            "- Chapter number: 19", "- Chapter number: 60")
+        recovery_matrix = matrix().replace("Chapter 19", "Chapter 60R")
+        errors = checker.validate_closure(pathlib.Path("dossier.md"), recovery_dossier,
+            pathlib.Path("matrix.md").resolve(), recovery_matrix, register(),
+            "Chapter 60R is complete. Chapter 66 remains in progress.",
+            "1. Chapter 60R: Local repair.\n\n   Status: complete.\n\n"
+            "2. Chapter 66: Integrated cloud.\n\n   Status: in progress.")
+        self.assertEqual([], errors)
+        # Renaming an incomplete cloud chapter does not manufacture evidence.
+        errors = checker.validate_closure(pathlib.Path("dossier.md"),
+            recovery_dossier.replace("Chapter 60R", "Chapter 66").replace("number: 60", "number: 66"),
+            pathlib.Path("matrix.md").resolve(), recovery_matrix.replace("Chapter 60R", "Chapter 66"),
+            register(), "Chapter 60R is complete. Chapter 66 remains in progress.",
+            "1. Chapter 60R: Local repair.\n   Status: complete.\n"
+            "2. Chapter 66: Integrated cloud.\n   Status: in progress.")
+        self.assertTrue(any("README.md does not mark Chapter 66 complete" in error for error in errors))
+        self.assertTrue(any("master plan does not mark Chapter 66 complete" in error for error in errors))
+
     def validate(self, dossier_text: str, register_text: str | None = None,
                  matrix_text: str | None = None):
         return checker.validate_closure(

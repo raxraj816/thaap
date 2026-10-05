@@ -41,7 +41,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Governed-controls reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -59,18 +59,28 @@ def request_json(opener, base_url, method, path, body=None, headers=None, expect
         request_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(base_url + path, data=payload,
                                      headers=request_headers, method=method)
-    try:
-        with opener.open(request, timeout=12) as response:
-            raw = response.read()
-            if response.status not in expected:
-                raise DemoFailure(f"unexpected HTTP {response.status} for {path}")
-            return raw, json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as error:
-        raw = error.read()
-        if error.code in expected:
-            return raw, json.loads(raw) if raw else {}
-        detail = raw.decode("utf-8", "replace")
-        raise DemoFailure(f"HTTP {error.code} for {path}: {detail}") from error
+    deadline = time.monotonic() + 600
+    while True:
+        try:
+            with opener.open(request, timeout=12) as response:
+                raw = response.read()
+                if response.status not in expected:
+                    raise DemoFailure(f"unexpected HTTP {response.status} for {path}")
+                return raw, json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            error.close()
+            if error.code in expected:
+                return raw, json.loads(raw) if raw else {}
+            retry_after = error.headers.get("Retry-After", "") if error.headers else ""
+            if error.code == 429 and len(retry_after) <= 2 and retry_after.isascii() and retry_after.isdecimal():
+                delay = max(1, int(retry_after))
+                if delay <= 60 and time.monotonic() + delay < deadline:
+                    # Reuse the exact request bytes and idempotency identity; never bypass limits.
+                    time.sleep(delay)
+                    continue
+            detail = raw.decode("utf-8", "replace")
+            raise DemoFailure(f"HTTP {error.code} for {path}: {detail}") from error
 
 
 def post(opener, base_url, path, body, headers, key=None, expected=(200, 201)):
@@ -132,7 +142,7 @@ def create_simulation(opener, base_url, headers, prefix, candidate_type, candida
     if replay_raw != first_raw:
         raise DemoFailure("control simulation creation replay was not byte-exact")
     report = wait_for_simulation(opener, base_url, headers, run["id"])
-    if report["report"]["population"] != {"eligible": 1, "excluded": 0, "processed": 1}:
+    if report["report"]["population"] != {"eligible": 100, "excluded": 0, "processed": 100}:
         raise DemoFailure(f"control simulation population did not reconcile: {report}")
     return run["id"]
 
@@ -171,6 +181,42 @@ def run() -> None:
                               merchant_headers, prefix + "-baseline-intent")
     post(opener, base_url, f"/payment_intents/{baseline_intent['id']}/confirm",
          {"paymentMethodId": method["id"]}, merchant_headers, prefix + "-baseline-confirm")
+
+    # The default promotion policy requires 100 eligible decisions and 50% labels. Build
+    # those facts through the real public review workflow, never by changing the gate or SQL.
+    # A separate repeated-decline cohort leaves the baseline subject's identity isolated.
+    _, cohort_customer = post(opener, base_url, "/customers",
+                              {"email": f"{prefix}-cohort@example.test"}, merchant_headers)
+    _, cohort_method = post(opener, base_url, "/payment_methods",
+                            {"customerId": cohort_customer["id"], "cardNumber": "4999990000000003"},
+                            merchant_headers, prefix + "-cohort-method")
+    labelled = 0
+    for index in range(99):
+        fixture_key = f"{prefix}-cohort-{index}"
+        _, fixture = post(opener, base_url, "/payment_intents",
+                          {"customerId": cohort_customer["id"], "amount": 1200,
+                           "currency": "USD", "captureMethod": "MANUAL"},
+                          merchant_headers, fixture_key + "-intent")
+        _, attempt = post(opener, base_url, f"/payment_intents/{fixture['id']}/confirm",
+                          {"paymentMethodId": cohort_method["id"]}, merchant_headers,
+                          fixture_key + "-confirm")
+        if attempt["status"] == "IN_REVIEW":
+            _, reviews = request_json(opener, base_url, "GET", "/risk/reviews?limit=100", headers=creator_headers)
+            matches = [case for case in reviews if case["paymentIntentId"] == fixture["id"]]
+            if len(matches) != 1:
+                raise DemoFailure("population fixture did not create one authoritative review case")
+            _, resolution = post(opener, base_url, f"/risk/reviews/{matches[0]['id']}/resolve",
+                                 {"outcome": "CANCEL_AND_REPORT_FRAUD", "classification": "CONFIRMED_FRAUD",
+                                  "fraudType": "CARD_TESTING", "reasonCode": "CARD_TESTING_CONFIRMED",
+                                  "evidenceOccurredAt": utc(datetime.datetime.now(datetime.timezone.utc))},
+                                 creator_headers, fixture_key + "-resolve", expected=(200,))
+            if resolution["label"]["labelValue"] != "FRAUD":
+                raise DemoFailure("population fixture did not produce a durable fraud label")
+            labelled += 1
+        elif attempt["status"] != "DECLINED":
+            raise DemoFailure("cohort fixture unexpectedly authorized or lost its risk control")
+    if labelled < 50:
+        raise DemoFailure("activation fixture did not meet default label coverage")
     cohort_end = datetime.datetime.now(datetime.timezone.utc)
 
     rule_body = {
@@ -241,8 +287,8 @@ def run() -> None:
     _, excepted = post(opener, base_url, f"/payment_intents/{excepted_intent['id']}/confirm",
                        {"paymentMethodId": method["id"]}, merchant_headers,
                        prefix + "-excepted-confirm")
-    if excepted["status"] == "BLOCKED":
-        raise DemoFailure("active exact-subject safety exception did not suppress its source rule")
+    if excepted["status"] != "IN_REVIEW":
+        raise DemoFailure("the source-rule exception must retain independent velocity REVIEW after the cohort burst")
 
     transition(opener, base_url, "rules", rule["id"], "retire", approver_headers,
                prefix + "-rule-retire")
@@ -270,14 +316,19 @@ def run() -> None:
               AND lifecycle_status = 'ACTIVE') || '|' ||
           (SELECT COUNT(*) FROM authorizations auth
             JOIN payment_attempts attempt ON attempt.id = auth.payment_attempt_id
-            WHERE attempt.merchant_id = '{merchant_id}'::uuid);
+            WHERE attempt.merchant_id = '{merchant_id}'::uuid AND auth.status = 'APPROVED') || '|' ||
+          (SELECT COUNT(*) FROM authorizations auth
+            JOIN payment_attempts attempt ON attempt.id = auth.payment_attempt_id
+            WHERE attempt.merchant_id = '{merchant_id}'::uuid AND auth.status = 'DECLINED') || '|' ||
+          (SELECT COUNT(*) FROM fraud_labels WHERE merchant_id = '{merchant_id}'::uuid);
     """)
-    if reconciliation != "6|4|1|1|1|2":
+    if reconciliation != f"6|4|1|1|1|1|{99 - labelled}|{labelled}":
         raise DemoFailure(f"governed-controls durable reconciliation failed: {reconciliation}")
 
     print("Governed controls demo passed.")
     print("rule=canonical dual_control=proved simulation_gate=exact activation=BLOCK")
     print("exception=purpose_hmac exact_subject=proved match_evidence=retained")
+    print(f"population=100 labelled={labelled} default_gate=unchanged protected_velocity=REVIEW approved_authorizations=1")
     print("rollback=append_only public_replays=byte_exact readiness=UP")
 
 

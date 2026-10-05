@@ -73,6 +73,7 @@ for target in "$API_IMAGE:apps/payments-api" "$UI_IMAGE:apps/analyst-dashboard-u
     image="${target%%:*}"
     context="${target#*:}"
     docker build \
+        --platform linux/arm64 \
         --build-arg "THAAP_BUILD_COMMIT=$COMMIT" \
         --build-arg "THAAP_BUILD_VERSION=$VERSION" \
         --tag "$image:$VERSION" \
@@ -85,6 +86,12 @@ done
 # ---------------------------------------------------------------------------------------------
 
 for image in "$API_IMAGE" "$UI_IMAGE"; do
+    architecture="$(docker image inspect --format '{{.Architecture}}' "$image:$VERSION")"
+    if [[ "$architecture" != "arm64" ]]; then
+        fail "$image architecture '$architecture' cannot run on the ARM64 ECS task"
+    else
+        pass "$image architecture agrees with the ARM64 deployment"
+    fi
     labelled_version="$(docker image inspect --format \
         '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image:$VERSION")"
     labelled_revision="$(docker image inspect --format \

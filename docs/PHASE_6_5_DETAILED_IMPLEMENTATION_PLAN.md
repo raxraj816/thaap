@@ -245,7 +245,7 @@ Route53
   -> CloudFront
        [WAF WebACL: default BLOCK, operator IP set — Section 5.1]
        -> S3 origin            (default behavior: the SPA)
-       -> ALB origin           (seven API path patterns, Section 9)
+       -> ALB origin           (sixteen public and four operational roots, Section 9)
             [accepts only the CloudFront-injected shared secret header]
             -> ECS service: payments-api  (2 tasks, 1 vCPU / 2 GB)
                  -> RDS PostgreSQL 16
@@ -362,19 +362,27 @@ overlap behaviour.
 ## 9. Routing Contract
 
 `apps/analyst-dashboard-ui/vite.config.ts` exports `paymentsApiProxy`, and
-`vite-config.test.ts` already asserts against it. Seven prefixes route to the
-API:
+`vite-config.test.ts` already asserts against it. The October 6 hostile audit
+corrected the original seven-root list: it omitted nine already-published API
+families. All sixteen public contract roots route to the API:
 
 ```text
 /risk  /developer  /customers  /payment_methods
 /payment_intents  /webhook_endpoints  /webhook_deliveries
+/chargebacks /fraud /ledger /payment_attempts /post_authorization_signals
+/refunds /reviews /rules /simulator
 ```
 
 Production CloudFront behaviors must be generated from, or checked against,
 that same list. A prefix added to the dev proxy and forgotten in CloudFront is a
 feature that works locally and 404s in production — the precise class of drift
 this repository's gates exist to prevent. Chapter 63 adds a check that fails
-when the two diverge.
+when the routers diverge or jointly omit a published root. Four operator roots
+(`/actuator`, `/admin`, `/internal`, `/v3`) use the same protected origin but are
+not workspace navigation. Each root has exact and subtree boundaries; lookalike
+names remain SPA paths. Deep-link shell fallback is request-side only, never a
+distribution-wide 403/404 rewrite. The October repair matrix was frozen/reopened
+before its changes; the integrated live-AWS matrix remains PENDING.
 
 ## 10. Release And Versioning Contract
 
@@ -600,7 +608,68 @@ Phase 7, which change payment truth and revert to per-chapter treatment.
   the stack, which makes "somebody copied the quickstart" the single most likely
   route to a deployed system holding a known key.
 
-### Chapter 63 — AWS Infrastructure As Code
+### Chapter 63 — AWS Infrastructure As Code — AUTHORED 2026-08-09, OPEN
+
+**Open, and it must stay open until `terraform apply` has run.** The topology is
+written, formatted, initialised and validated against the real AWS provider
+schema on both roots, and both structural gates pass and have been proven against
+deliberately broken input. None of that is the chapter's claim. The claim is that
+a rebuild from an empty account produces a working stack, and that requires an
+account. `C63-SEC-001`, `C63-OPS-001` and `C63-API-001` remain `PENDING`.
+
+- **Authored:** `infra/terraform/` — VPC with public and private subnets, ALB,
+  ECS Fargate cluster with the `payments-api` and Kafka services, RDS PostgreSQL
+  16, ElastiCache Redis, EFS for the broker, S3 and CloudFront for the workspace,
+  ECR, Secrets Manager, Route53, ACM in both required regions, CloudWatch log
+  groups and seven alarms, and an AWS Budget. Plus `infra/terraform/bootstrap/`,
+  a separate root with local state that creates the S3 state bucket and DynamoDB
+  lock table the main root then uses — the chicken-and-egg is solved in code
+  rather than by hand, because a console-created bucket would make the one
+  resource everything depends on the one resource Terraform does not own.
+- **Exposure, per Section 5.1:** all three layers exist in code — the WAF WebACL
+  with default `BLOCK` and an operator IP set, the CloudFront-injected shared
+  secret header with an ALB listener that fixed-responds `403` to anything
+  lacking it, and security groups that reference other security groups rather
+  than CIDRs. `operator_allowlist_cidrs` rejects both an empty list and
+  `0.0.0.0/0` at plan time, because a WebACL that admits everybody while the plan
+  calls the deployment invite-only is worse than none at all.
+- **Secrets:** Terraform creates the eight Secrets Manager entries and never
+  their values. A `secret_version` carrying real key material would write it into
+  the state file, which is the same mistake as letting one reach an image layer.
+- **Gates:** `scripts/terraform-region-parameterisation-check.py` and
+  `scripts/routing-contract-check.py`, both wired into
+  `scripts/commit-readiness-check.sh`, plus a `Terraform validate` CI job that
+  runs `fmt`, `init` and `validate` on both roots at the same pinned version
+  `scripts/terraform.sh` uses.
+- **October 6 repair audit:** `ER-0109` reopens release-boundary proof for routing,
+  forwarding identity, terminating WAF rule order, computed certificate DNS keys,
+  broker persistence, project isolation, first-apply secret ordering and release
+  image/publish controls. Local mocked plans and real Docker evidence are recorded
+  separately from live AWS proof. Foundation applies start zero API tasks; after
+  entries are populated and ARM64 images published, the operator activates two.
+  `ER-0110` and `ER-0111` also repair retained demos whose feature expectations and
+  shared fixture traffic no longer matched the shipped fraud controls.
+  `ER-0112`–`ER-0116` repair real activation evidence, bulk response consumption,
+  completed-day insight claims, processor catalogue lineage and scenario-report scope.
+  `ER-0117` bounds Kafka's observed 1 GiB default heap to 512 MiB, rejects tasks
+  smaller than 1 GiB and proves replacement under the actual Docker memory ceiling.
+  Local recovery uses `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md` and
+  `docs/reviews/CHAPTER_60R_CLOSURE_DOSSIER.md`, not integrated Chapter 66.
+  These repairs do not close the integrated AWS phase or its exposure finding `ER-0106`.
+  Owner direction on 2026-10-06: deployment will wait until THAAP is ready to launch and
+  the owner authorizes it. Chapters 63–66 retain their account/domain/exposure/operations
+  prerequisites; no apply, resource creation or hosted completion is part of local recovery.
+- **Retains:** `infra/kubernetes/`, its README rewritten to name ECS Fargate as
+  the current target, EKS as the scale-trigger path, and the three parts of the
+  topology that would need equivalents rather than copies if that trigger fires.
+- **Still to run, and the reason the chapter is open:** `terraform apply` from an
+  empty account; the clean second `plan`; the second-region `plan`; and the
+  exposure proof from an address genuinely outside the allowlist.
+
+#### Chapter 63 frozen scope, for reference
+
+The scope this chapter was frozen against, unchanged since it was written, so the
+status above can be read against the promise rather than against itself.
 
 - **Delivers:** `infra/terraform/` covering the Section 6 topology, remote state
   with locking, the Section 9 routing-drift check, and the Section 5.1 exposure
@@ -691,7 +760,7 @@ CI Docker check already exists to prevent.
    Chapter 64.
 6. Every `scripts/demo-*.py` passes against the deployed URL, with the count of
    demos executed asserted rather than described.
-7. The workspace loads over CloudFront and reaches all seven API prefixes, with
+7. The workspace loads over CloudFront and reaches all sixteen public and four operational API roots, with
    each response proven to come from the API rather than from the SPA fallback.
 8. Two tasks start simultaneously; Flyway migrates exactly once.
 9. A task is killed mid-work; lease fencing recovers it without duplicate

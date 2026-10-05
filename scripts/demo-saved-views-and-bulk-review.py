@@ -49,7 +49,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Bulk review reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -130,10 +130,19 @@ def review_case_for(opener, base_url, manager_headers, payment_intent_id):
     _, detail = request_json(opener, base_url, "GET",
                              f"/risk/workspace/payments/{payment_intent_id}",
                              headers=manager_headers)
-    review = detail.get("reviewAndLabels", {}).get("review")
-    if not review or not review.get("reviewCaseId"):
+    reviews = detail.get("reviewAndLabels", {}).get("reviews", [])
+    if not isinstance(reviews, list) or len(reviews) != 1 or not isinstance(reviews[0], dict):
         raise DemoFailure(f"payment {payment_intent_id} opened no review case")
-    return review["reviewCaseId"], review.get("assignmentVersion", 0)
+    review = reviews[0]
+    case_id = review.get("id")
+    version = review.get("assignmentVersion")
+    try:
+        uuid.UUID(case_id)
+    except (ValueError, TypeError, AttributeError) as error:
+        raise DemoFailure("investigation returned an invalid review identity") from error
+    if type(version) is not int or version < 0:
+        raise DemoFailure("investigation returned no authoritative assignment version")
+    return case_id, version
 
 
 def poll_bulk(opener, base_url, manager_headers, action_id, terminal, attempts=60):
@@ -145,6 +154,14 @@ def poll_bulk(opener, base_url, manager_headers, action_id, terminal, attempts=6
             return run
         time.sleep(0.25)
     raise DemoFailure(f"bulk action {action_id} never reached {terminal}")
+
+
+def require_absent_aggregate_rejection(response):
+    # /{actionId} can match a non-UUID segment before binding rejects it. That is not an
+    # aggregate endpoint. Any other 400 could hide a real aggregate route with missing inputs.
+    if response.get("status") == 400 and (response.get("error") != "bad_request"
+            or response.get("message") != "Invalid actionId parameter"):
+        raise DemoFailure("bulk aggregate probe did not reject an invalid action identity")
 
 
 def run() -> None:
@@ -273,8 +290,9 @@ def run() -> None:
     for insight_route in ("/risk/workspace/review-bulk-actions/insights",
                           "/risk/workspace/review-bulk-actions/summary"):
         try:
-            request_json(opener, base_url, "GET", insight_route,
-                         headers=manager_headers, expected=(404, 405))
+            _, rejection = request_json(opener, base_url, "GET", insight_route,
+                                        headers=manager_headers, expected=(400, 404, 405))
+            require_absent_aggregate_rejection(rejection)
         except DemoFailure as error:
             raise DemoFailure(f"bulk surface exposed an aggregate route: {error}") from error
 

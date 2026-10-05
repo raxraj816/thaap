@@ -18,6 +18,45 @@ SPEC.loader.exec_module(DEMO)
 
 class FeatureLineageDemoTests(unittest.TestCase):
 
+    def test_no_context_contract_matches_production_always_present_and_velocity_types(self):
+        catalogue = SCRIPT_PATH.parents[1] / "apps/payments-api/src/main/java/com/thaap/payments/fraud/FeatureCatalogue.java"
+        import re
+        types = dict(re.findall(r'types.put\("([^"]+)", FeatureValueType.([A-Z]+)\)', catalogue.read_text()))
+        expected_codes = {code for code in types if not code.startswith(("risk.", "velocity."))}
+        expected_codes.add("risk.context_present")
+        expected_codes.update({"velocity.card_attempts_10m", "velocity.customer_attempts_1h", "velocity.merchant_attempts_1m"})
+        self.assertEqual(DEMO.BASE_FEATURE_CODES, expected_codes)
+        for code, (kind, _) in DEMO.EXPECTED_FEATURES.items():
+            self.assertEqual(types[code], kind)
+
+    def test_current_catalogue_is_exact_and_lexical_not_a_subset(self):
+        valid = dict.fromkeys(sorted(DEMO.EXPECTED_FEATURES))
+        DEMO.require_feature_catalogue(valid)
+        for key in valid:
+            with self.subTest(missing=key):
+                with self.assertRaises(DEMO.DemoFailure):
+                    DEMO.require_feature_catalogue({k: None for k in valid if k != key})
+        for invalid in (dict.fromkeys(reversed(valid)), {**valid, "unsafe.extra": None}):
+            with self.assertRaises(DEMO.DemoFailure):
+                DEMO.require_feature_catalogue(invalid)
+
+    def test_every_typed_value_and_observation_time_is_reconciled_without_duplicate_rows(self):
+        valid = [(key, value_type, value, "true")
+                 for key, (value_type, value) in sorted(DEMO.EXPECTED_FEATURES.items())]
+        DEMO.require_durable_lineage(valid)
+        for index, row in enumerate(valid):
+            for column, wrong in ((0, "unknown.feature"), (1, "WRONG_TYPE"),
+                                  (2, "wrong_value"), (3, "false")):
+                changed = list(row)
+                changed[column] = wrong
+                invalid = valid[:index] + [tuple(changed)] + valid[index + 1:]
+                with self.subTest(feature=row[0], column=column):
+                    with self.assertRaises(DEMO.DemoFailure):
+                        DEMO.require_durable_lineage(invalid)
+        for invalid in (valid[:-1], valid + [valid[0]]):
+            with self.assertRaises(DEMO.DemoFailure):
+                DEMO.require_durable_lineage(invalid)
+
     def test_only_loopback_http_origins_are_accepted(self):
         self.assertEqual(DEMO.require_loopback("http://localhost:8080/"), "http://localhost:8080")
         for origin in (
