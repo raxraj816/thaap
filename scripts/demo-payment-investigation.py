@@ -40,7 +40,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Payment investigation reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -91,6 +91,32 @@ def wait_readiness(opener, base_url):
     raise DemoFailure("Payment investigation API readiness did not become UP")
 
 
+def wait_projection_current(opener, base_url, headers, search_body, minimum_rows):
+    """Block until the payment risk projection has applied this merchant's events.
+
+    Readiness says the consumer is running. It does not say the events this demo just published
+    have been applied, and the search reads the projection rather than the source. Asserting
+    immediately after publishing races the consumer: the projection reports `PARTIAL` with an
+    applied count of zero and the search correctly returns nothing, which reads as a broken
+    product and is really a demo that did not wait.
+
+    The race is won on a warm JVM and lost reliably on a cold container start, which is why this
+    surfaced only once the API was containerised. Freshness is published precisely so a caller
+    can wait for it, so the demo waits on the contract rather than on a sleep.
+    """
+    deadline = time.monotonic() + 60
+    observed = None
+    while time.monotonic() < deadline:
+        _, page = post(opener, base_url, "/risk/workspace/payments/search?limit=2",
+                       search_body, headers)
+        observed = page.get("freshness") or {}
+        if observed.get("state") != "PARTIAL" and len(page["data"]) >= minimum_rows:
+            return page
+        time.sleep(0.5)
+    raise DemoFailure(
+        f"Payment investigation projection did not become current: {observed}")
+
+
 def source_fingerprint(merchant_id: uuid.UUID) -> str:
     """Digest of every row the investigation read touches, so a read that writes is detectable."""
     return postgres_scalar(f"""
@@ -106,7 +132,7 @@ def source_fingerprint(merchant_id: uuid.UUID) -> str:
           (SELECT COUNT(*) FROM idempotency_records) || '|' ||
           (SELECT COALESCE(MAX(stream_version), 0) FROM domain_events
             WHERE merchant_id = '{merchant_id}'::uuid) || '|' ||
-          (SELECT COALESCE(MD5(STRING_AGG(id::text || status || amount_minor::text,
+          (SELECT COALESCE(MD5(STRING_AGG(id::text || status || amount::text,
                                           ',' ORDER BY id)), 'empty')
              FROM payment_intents WHERE merchant_id = '{merchant_id}'::uuid);
     """)
@@ -160,8 +186,7 @@ def run() -> None:
 
     search_body = {"filter": {"fraudActions": ["BLOCK", "REVIEW", "ALLOW"]},
                    "sort": "CREATED_AT_DESC"}
-    _, page = post(opener, base_url, "/risk/workspace/payments/search?limit=2",
-                   search_body, manager_headers)
+    page = wait_projection_current(opener, base_url, manager_headers, search_body, 2)
     if len(page["data"]) != 2 or not page["nextCursor"]:
         raise DemoFailure("bounded investigation search did not page")
     _, second = post(opener, base_url,
@@ -216,7 +241,7 @@ def run() -> None:
     _, webhooks = request_json(opener, base_url, "GET",
                                f"/risk/workspace/payments/{reviewed}/webhook-activity",
                                headers=manager_headers)
-    if webhooks["evidenceAuthority"] != "WEBHOOK_TRANSPORT_EVIDENCE":
+    if webhooks["authority"] != "WEBHOOK_TRANSPORT_EVIDENCE":
         raise DemoFailure("webhook activity was presented as money or fraud truth")
 
     _, other = post(opener, base_url, "/admin/merchants",

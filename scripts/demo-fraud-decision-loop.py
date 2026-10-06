@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from demo_feature_contract import BASE_FEATURE_CODES
 
 
 class DemoFailure(RuntimeError):
@@ -56,7 +57,7 @@ def request_json(opener: urllib.request.OpenerDirector, base_url: str, method: s
 def postgres_scalar(query: str) -> str:
     user = os.environ.get("THAAP_POSTGRES_USER", "thaap")
     database = os.environ.get("THAAP_POSTGRES_DB", "thaap_payments")
-    command = ["docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+    command = ["docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
                "-U", user, "-d", database, "-c", query]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
@@ -96,8 +97,8 @@ def assert_decision(opener, base_url, headers, attempt, action, matched_codes):
     actual_matches = [result["ruleCode"] for result in results if result["matched"]]
     if actual_matches != matched_codes:
         raise DemoFailure(f"unexpected matched rules for {action}: {actual_matches}")
-    if len(detail["featureSnapshot"]["features"]) != 7:
-        raise DemoFailure("decision does not contain seven governed features")
+    if set(detail["featureSnapshot"]["features"]) != BASE_FEATURE_CODES:
+        raise DemoFailure("decision does not contain the exact current no-context governed feature set")
 
 
 def run() -> None:
@@ -118,8 +119,12 @@ def run() -> None:
     _, approved_method = request_json(opener, base_url, "POST", "/payment_methods",
                                       {"customerId": customer["id"], "cardNumber": "4242424242424242"},
                                       {**headers, "Idempotency-Key": f"phase3-{run_id}-approved-method"})
+    # This cohort needs two genuine declines before the repeated-attempt rule wins. Sharing
+    # the prior customer's three attempts would correctly trigger velocity REVIEW too early.
+    _, review_customer = request_json(opener, base_url, "POST", "/customers",
+                                      {"email": f"fraud-review-{run_id}@example.test"}, headers)
     _, decline_method = request_json(opener, base_url, "POST", "/payment_methods",
-                                     {"customerId": customer["id"], "cardNumber": "4999990000000003"},
+                                     {"customerId": review_customer["id"], "cardNumber": "4999990000000003"},
                                      {**headers, "Idempotency-Key": f"phase3-{run_id}-decline-method"})
 
     allow_intent = create_intent(opener, base_url, headers, customer["id"], 4_200,
@@ -148,7 +153,7 @@ def run() -> None:
     assert_decision(opener, base_url, headers, block, "BLOCK",
                     ["BLOCK_USD_EXTREME_AMOUNT_V1", "REQUEST_3DS_USD_ELEVATED_AMOUNT_V1"])
 
-    review_intent = create_intent(opener, base_url, headers, customer["id"], 99_999,
+    review_intent = create_intent(opener, base_url, headers, review_customer["id"], 99_999,
                                   f"phase3-{run_id}-review-intent")
     for number in (1, 2):
         declined = confirm(opener, base_url, headers, review_intent["id"], decline_method["id"],
@@ -182,13 +187,13 @@ def run() -> None:
           (SELECT COUNT(*) FROM manual_review_cases WHERE merchant_id = '{merchant_id}'::uuid
              AND status = 'CANCELED');
     """)
-    if summary != "6|42|18|3|1":
+    if summary != f"6|{6 * len(BASE_FEATURE_CODES)}|18|3|1":
         raise DemoFailure(f"durable Phase 3 reconciliation failed: {summary}")
 
     print("Phase 3 fraud-decision MVP demo passed.")
     print(f"merchant={merchant['id']}")
     print("actions=ALLOW,REQUEST_3DS,BLOCK,REVIEW")
-    print("decisions=6 features=42 rule_results=18 authorizations=3 canceled_reviews=1")
+    print(f"decisions=6 features={6 * len(BASE_FEATURE_CODES)} rule_results=18 authorizations=3 canceled_reviews=1")
     print("replay=exact non_allow_processor_calls=zero decision_lineage=complete")
 
 

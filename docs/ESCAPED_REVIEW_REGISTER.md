@@ -1741,3 +1741,309 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: The randomized-order CI job introduced under `ER-0101` is what found this, on its first run, which is the argument for keeping it blocking rather than advisory. Its replay contract was also corrected once measured rather than assumed: surefire shuffles the class list the directory scanner produced, and that input order is filesystem order, so one seed yields different permutations on ext4 and APFS. Replaying the CI seed on macOS produced a completely different ordering and a different failure. The workflow therefore states that a seed replays on a runner of the same platform, and gained a `workflow_dispatch` seed input so a failing ordering can be replayed in CI where it is reproducible. The generalisation: a claim about reproducibility is a claim like any other and must be executed before it is written down.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-08-08
+
+## ER-0103
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 53; `scripts/demo-payment-investigation.py`, found by running it against the containerised stack built in Chapter 60
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-08-08
+- Escaped gate: None. `scripts/invariant-proof-check.py` was extended under `ER-0099` to confirm that every artifact named in a `Proof` field exists, and this script does exist. Nothing anywhere checks that a demo script named as a product promise's evidence actually completes, and the `ER-0096` correction — that a script named as proof needs a recorded execution — was recorded as a rule without a mechanism to enforce it.
+- Invariant: `VP-004` and the Chapter 53 closure name `scripts/demo-payment-investigation.py` as the merchant/analyst demo that opens a risky attempt and explains every decision input, the winning control, the controls that did not win, the later analyst action, the label, and the money effect from one route. A demo cited as the evidence for a promise must run to completion.
+- Finding: The script could never have completed, and stopped at its first assertion for three independent reasons. First, its source-reconciliation query selected `payment_intents.amount_minor`; that column has been `amount` since `V1` and was never renamed, so the query failed with `column "amount_minor" does not exist` on any database. Second, once that was corrected it asserted that a bounded search pages, immediately after publishing the events it searches for — but the search reads the Kafka-fed payment risk projection, and the assertion raced the consumer. The projection honestly reported `state: PARTIAL` with `appliedEventCount: 0` of 13 eligible and the search correctly returned nothing; the merchant's checkpoint was applied seven seconds after the search cutoff. Third, once that was corrected it read `webhooks["evidenceAuthority"]` from a response whose field is `authority`. Each defect hid the next, which is the signature of a script that has never been executed end to end rather than one that regressed. The product was correct throughout: every failure was the demo misreading a system that was behaving as designed.
+- Why prior review missed it: The three defects are individually the kind a careful reader skims past — a plausible column name, an assertion that looks synchronous, a field name that reads correctly in English. What allowed all three to survive is structural: a demo script is reviewed as documentation and cited as evidence, and those two readings never met. `ER-0096` identified exactly this and its correction was verified by executing the scripts named in *that* chapter's matrix, which did not include this one. A rule that depends on someone remembering to apply it is a rule that holds only where it was first applied.
+- Resolution evidence: The query selects `amount`; the field read is `authority`; and a new `wait_projection_current` helper polls the published freshness contract until the projection reports a state other than `PARTIAL` and the expected rows are present, bounded at sixty seconds, mirroring the existing `wait_readiness` rather than sleeping. The script now completes three consecutive times against the containerised stack, reporting `explainedAction: BLOCK`, `winningControl: BLOCK_USD_EXTREME_AMOUNT_V1`, `retainedLosingControls: 6`, `timelineCeiling: 7`, `relatedScope: SAME_MERCHANT_SERVER_DERIVED` and `sourceFingerprintStable: true`. This is the first recorded end-to-end execution of the `VP-004` demo.
+- Process correction: A demo named as a product promise's evidence must be executed by a gate, not by intention. Chapter 64 owns running every `scripts/demo-*.py` against the deployed instance, and Chapter 66 wires that into `scripts/commit-readiness-check.sh` so a demo that stops asserting is a red build rather than a document nobody ran. The narrower lesson is that `ER-0096`'s correction was scoped to one chapter's scripts when its reasoning applied to all of them.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-08
+
+## ER-0104
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 51; `PaymentRiskProjectionHealthIndicator`, found by leaving the containerised stack idle during Chapter 60
+- Category: IMPLEMENTATION_DEFECT
+- Frozen promise affected: YES
+- Date found: 2026-08-08
+- Escaped gate: `PaymentRiskProjectionHealthIndicatorTests` asserted the age partitions exactly and correctly, and never asked whether age was the right question. Every other proof of this indicator ran inside a suite that had just produced events, which is the one condition under which the defect is invisible.
+- Invariant: Readiness reports whether this instance can serve traffic. An instance that is caught up and merely quiet is serving correctly, and a readiness signal wired to a load balancer must not remove it from rotation.
+- Finding: `readinessState` graded every tenant checkpoint by the wall-clock age of `last_processed_at` alone — `FRESH` within sixty seconds, `LAGGING` within five minutes, `STALE` beyond — and a single `STALE` checkpoint took the whole application `DOWN`. Because a checkpoint only advances when that merchant's events are applied, any merchant who stopped transacting for five minutes marked the entire instance unhealthy. Observed directly: with zero consumer lag on all six partitions, all 52 publications `ACKNOWLEDGED`, no quarantine and nothing pending, readiness returned `DOWN` with `consumerState: STALE` at checkpoint ages of 6 and 8 minutes. The consequence is worst exactly where it matters: with the ALB health check bound to `/actuator/health/readiness` as Phase 6.5 plans, every task leaves rotation roughly five minutes after traffic goes quiet, so a private demo — idle nearly all the time — would be permanently unavailable. It also degrades as the platform grows, since one idle merchant among many is sufficient, and eight tenant projections already existed on a stack a few minutes old.
+- Why prior review missed it: The indicator was proven under load and reviewed as a lag detector, where staleness and brokenness are indistinguishable. Nothing in the repository exercised the state the system spends most of its life in — correct, caught up, and idle — because every test that touches the projection creates events first, and no deployment had ever existed for an operator to observe going quiet. This is a defect that only contact with a running environment can surface, which is the argument for Phase 6.5 preceding rather than following further product work.
+- Resolution evidence: Pending work is now the gate and age only grades work that is waiting. The checkpoint query computes `pending_stream_count` per tenant by comparing `event_stream_heads.current_version` against `projection_stream_positions.last_stream_version` for the active generation — both already maintained, so no broker call is added to a health path — and a checkpoint with nothing pending is skipped regardless of age. A wedged consumer still trips the indicator, because its backlog does not drain. `pendingStreamCount` is published in the health details so an operator can distinguish a backlog from a broken query without database access. Five new tests in `PaymentRiskProjectionHealthIndicatorTests` pin the distinction: a tenant idle for thirty days is `FRESH`, a tenant with unapplied streams and a six-minute-old checkpoint is `STALE`, an idle tenant cannot mask a genuinely lagging one, a missing checkpoint is `UNAVAILABLE` only when work is waiting, and open quarantine still degrades to `PARTIAL` when every tenant is caught up. The two original age-partition tests are unchanged and still pass. Proven against the running stack: the same database whose checkpoints were `DOWN` at 8 minutes reports `UP` at 14 minutes.
+- Process correction: A readiness indicator must be proven in the idle state, not only under load, because idle is the state a deployment spends most of its life in and the only state in which a false negative is permanent. The wider correction is that health semantics cannot be certified by a suite that always arrives having just produced work; Chapter 64 adds an idle readiness observation to the deployment smoke proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-08
+
+## ER-0105
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 62; `docs/PHASE_6_5_DETAILED_IMPLEMENTATION_PLAN.md` Section 13.1 and `scripts/invariant-proof-check.py`, found by reviewing the phase plan after Chapters 61 and 62 had shipped against it
+- Category: WEAK_PROOF
+- Frozen promise affected: NO
+- Date found: 2026-08-08
+- Escaped gate: The Phase 6.5 plan review that approved Section 13.1's compression of seven per-chapter matrices into one, and every readiness run since, which validated the matrices that existed and had no way to notice the matrix that could not exist.
+- Invariant: An invariant-proof matrix is drafted from frozen promises and failure sequences before implementation, and its provenance says so honestly. A matrix reconstructed from the code that happens to exist may not be presented as pre-implementation work.
+- Finding: Two defects, one enabling the other. Section 13.1 said Phase 6.5 uses one integrated matrix delivered at Chapter 66, and never said when that matrix is drafted; read literally it required a matrix authored after Chapters 63-65 to carry `Matrix provenance: PRE_IMPLEMENTATION`, since the only other accepted value is allowlisted to the Chapter 19 legacy recovery. Underneath it, `scripts/invariant-proof-check.py` could not represent a pre-implementation matrix at all: entry statuses were limited to `PASS` and `PARTIAL`, `Review status` had to be `VERIFIED`, the three review verdicts and the escaped-review assessment had to be final, and every artifact named in a `Proof` field had to already exist. `docs/INVARIANT_PROOF_REVIEW_PROCESS.md` meanwhile instructed authors to start a matrix at `Scope status: DRAFT` and `Review status: IN_PROGRESS` — a state its own checker rejected. The practical consequence is that pre-implementation matrices lived in uncommitted working trees and were committed only once closed, so nothing durable distinguished a matrix written first from one written afterwards. Chapters 61 and 62 then shipped with no matrix at all, correctly following 13.1 as written. No product invariant is involved; the damage is to the proof system's ability to tell the truth about its own sequence.
+- Why prior review missed it: The gap is invisible from either side alone. Every committed matrix passes, because every committed matrix was committed after closure — so the checker has never been asked the question it cannot answer. And the plan's compression decision was reviewed as a documentation-volume tradeoff, which it also was; the missing word was "when", and an omission is far harder to see in review than a wrong statement. The header of the same plan still read `Frozen proof artifacts: Chapter 60-66 PRE_IMPLEMENTATION matrices`, contradicting 13.1 directly, and survived because a metadata block is read once at the top and never again.
+- Resolution evidence: The checker gained a frozen-but-unproven state. `PENDING` is a legal entry status, the three review verdicts and the escaped-review assessment may be `PENDING`, and `Scope status: DRAFT` is accepted only while `Review status: IN_PROGRESS`. A `PENDING` row may name proof that does not exist yet, because naming the proof before building it is the point of drafting; the `ER-0099` obligation that a row must name an existing artifact applies from the moment the row closes. `Promise freeze` and `Failure inventory` remain mandatory in every state, since they are inputs to drafting rather than outputs of implementation. The state cannot leak into a completion claim: a matrix holding a `PENDING` row may not claim `Review status: VERIFIED`, `--reject-partial` rejects `PENDING` at phase closure alongside `PARTIAL`, and `scripts/chapter-closure-check.py` now refuses any dossier whose matrix is still `IN_PROGRESS` or still holds an unproven row. Eight new cases in `invariant_proof_check_tests.py` and two in `chapter_closure_check_tests.py` pin both directions, and the repository Python suite passes at 252, up from 243 by exactly those ten plus the readiness-gate registration of a new check. `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md` was then drafted and committed on 2026-08-08 with all ten rows `PENDING`, before any Terraform, deployment, seed or runbook existed, and verified rejected by `--reject-partial`. Section 13.1 now states when the phase matrix is drafted, the contradicting header line is corrected, and both the plan and the phase matrix record that Chapters 61 and 62 have no pre-implementation matrix rather than absorbing them silently at closure.
+- Process correction: A process rule and the gate that enforces it must be able to express the same states, and the way to find out is to try to execute the rule rather than to read it. `docs/INVARIANT_PROOF_REVIEW_PROCESS.md` told authors to create a matrix in a state its own checker refused, for as long as both documents have existed, and nobody noticed because everybody worked around it identically. The narrower correction is that a compression decision must say when as well as what: Section 13.1 removed six documents and did not say when the surviving one gets written, and an unstated schedule defaults to the most convenient moment, which here was the one that made the provenance false.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-08
+
+## ER-0106
+
+- Status: IN_PROGRESS
+- Severity: P1
+- Chapter: 63; `docs/PHASE_6_5_DETAILED_IMPLEMENTATION_PLAN.md` Sections 4.2, 5 and 13, found by reviewing the phase plan before Chapter 63 started
+- Category: MISSING_PROMISE
+- Frozen promise affected: YES
+- Date found: 2026-08-08
+- Escaped gate: The Phase 6.5 plan review, which accepted "private / invite-only" as an exposure decision and did not ask what enforces it.
+- Invariant: A deployment described as private must be private by mechanism. An unauthenticated request from outside the operator allowlist is refused before it reaches any THAAP surface, and no origin hostname is a way around that.
+- Finding: The plan called exposure "private / invite-only" in Section 5 and "a deliberate control, not an unfinished feature" in Section 13, and named no mechanism anywhere. The only control described was authentication — a human pasting an operator key into a browser field — which is a different property. The topology is Route53 to CloudFront to ALB, which is a public URL, and the implicit control was that the hostname would not be published. That control does not exist: ACM issues publicly-trusted certificates, publicly-trusted certificates are submitted to Certificate Transparency logs, and opting out of CT logging makes the certificate untrusted in Chrome and Safari, so the hostname is public within minutes of issuance and CT streams are routinely scanned. Section 4.2 compounded it by listing WAF as a "Phase 6.5 follow-on" whose unblock condition was "before the URL is published" — but the URL is published the moment CloudFront exists. A second path was missed entirely: the WebACL attaches to CloudFront, so an ALB reachable by its own `*.elb.amazonaws.com` name bypasses the edge control completely, which also defeats the `server.forward-headers-strategy: framework` setting Chapter 62 shipped, since a caller reaching the ALB directly chooses its own `X-Forwarded-For` and with it the per-IP rate limit and the per-IP fraud velocity signal.
+- Why prior review missed it: "Private" was written as a product decision and read as one, and product decisions in this plan are argued rather than mechanised — the surrounding rows in the same table are genuine tradeoffs with named triggers, which is the company the claim was keeping. The review also had no running system to test the claim against, and the failure is invisible on paper: a topology diagram showing Route53, CloudFront and an ALB looks identical whether or not a WebACL is attached, because the absent control is absent from the drawing too.
+- Resolution evidence: **Partial, and deliberately left open.** The documentation half is corrected and the control itself is unbuilt, so this entry stays `IN_PROGRESS` — closing it would assert the property the finding is about. The invariant it names becomes true when `C63-SEC-001` closes, and that row is `PENDING` in `docs/reviews/PHASE_6_5_INVARIANT_PROOF_MATRIX.md`, which `--reject-partial` refuses at phase closure, so Phase 6.5 cannot close while this is outstanding. What is corrected today: a new Section 5.1 states the mechanism in three layers and states plainly that until all three exist the deployment is not private and no document may describe it as such. Chapter 63's scope now delivers them: a WAF WebACL on the CloudFront distribution with default `BLOCK` and an operator IP set; an ALB that accepts only requests carrying a CloudFront-injected shared secret header held in Secrets Manager, so the origin is not reachable by its own name; and task security groups admitting the ALB security group by reference rather than by CIDR, which matters because there is no NAT Gateway and tasks run in public subnets. The Section 6 topology diagram now draws both controls inline, because a diagram that omits them is a diagram of a public system. Section 4.2 no longer defers the WAF, Section 13's honest-limits list is corrected, the Section 7 cost model carries the WAF at about seven dollars a month alongside two other categories it had omitted, and Section 17 decision 5 is amended from a policy to a mechanism with its cost stated. `C63-SEC-001` in the pre-implementation phase matrix owns the proof and requires it to be executed from an address genuinely outside the allowlist rather than from a shell inside the VPC, with the ALB-bypass case asserted separately.
+- Process correction: A security posture stated as an adjective is not a control. Any claim of the form "the deployment is private/internal/restricted" must name the enforcing mechanism, the boundary it sits at, and the test that fails when it is removed — and must be written in the topology, not beside it. The specific generalisation is that hostname secrecy is never a control, because certificate issuance publishes it: any future phase that reaches for an unpublished URL as protection is repeating this finding. The wider one is that the review that finds this class of defect is the one that asks "what breaks if an attacker knows everything the design document says", which is now part of the hostile pass for any chapter that changes network exposure.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-08-08
+
+## ER-0107
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 59; integrated Phase 6 completion governance
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Phase 6 aggregate closure and Chapter 59 commit readiness.
+- Invariant: A Phase 6 completion claim must reconcile all source-of-truth documents and inherited closure dossiers, and an aggregate closure failure must stop Chapter 59 readiness.
+- Finding: The master plan retained an implementation-not-started claim split across Markdown lines, while the Chapter 55 and 56 dossier summaries still described Phase 6 as open. The aggregate checker matched literal spaces and did not scan inherited dossier prose. Chapter 59 readiness also did not invoke the Phase 6 aggregate check at all.
+- Why prior review missed it: Completion markers and structural matrix validation were mistaken for semantic reconciliation; the negative fixtures did not cover line wrapping or contradictory inherited summaries, and readiness lacked an invocation assertion for Phase 6.
+- Resolution evidence: The plan and inherited summaries now agree with completed Chapters 53–59. `scripts/phase-closure-check.py` normalizes whitespace before stale-claim matching and scans all inherited Phase 6 dossiers. `scripts/phase_closure_check_tests.py` exercises space, LF, CRLF, paragraph and tab boundaries, contradictory inherited dossier text, a valid repository and SDK digest drift. `scripts/commit_readiness_check_tests.py` asserts the exact `--phase-6` invocation for Chapter 59 and propagation of a nonzero aggregate exit. The focused 19-test run exited 0 on 2026-10-06; the real `scripts/phase-closure-check.py --phase-6` run exited 0. No runtime payment, fraud, tenant or migration behavior was changed.
+- Process correction: Test representation boundaries in governance documents, not just happy-path status markers. For each integrated phase, test both invocation of its aggregate checker and failure propagation through readiness. Historical phase evidence remains dated rather than presented as a fresh runtime run.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0108
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 59; source-of-truth reconciliation across Phase 5 prerequisites and Phase 7 entry
+- Category: DOCUMENTATION_OVERCLAIM
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Vision coverage and integrated source-of-truth review.
+- Invariant: Vision prerequisites and debt ownership must distinguish implemented product truth, resolved proof debt and unimplemented model/hosted capabilities.
+- Finding: VP-022 listed model timeout fallback as existing evidence even though the investigation explanation publishes `NOT_CONFIGURED` and VP-002 correctly assigns serving fallback to Phase 7. VP-008 called the offline dataset builder unimplemented after Chapter 51 closed it. The Phase 7 master-plan entry still called `TD-0007` and `TD-0008` open although the canonical register records their resolution. Several prerequisite descriptions also retained planning-only language after Phases 5–6 completed.
+- Why prior review missed it: Future-owner rows were retained unchanged at phase closure without reconciling their prerequisite sentences against delivered capabilities; the structural checker verifies fields and ownership, not whether prose describes the current implementation.
+- Resolution evidence: `docs/reviews/VISION_COVERAGE_REVIEW_2026-10-06.md` records all 23 dispositions, artifact inventory, current gaps and review limits. Chapter 51's dossier and `OfflineReplayDatasetService` establish the built replay substrate; `PaymentInvestigationService` explicitly emits `NOT_CONFIGURED`; the canonical debt register and current Phase 5 aggregate check establish resolved proof debt. Coverage now reflects these boundaries, and the Phase 7 entry agrees with the register. Aggregate Phases 4.5, 5 and 6 and `scripts/vision-coverage-check.py` each exited 0. Existing statuses and future owners remain unchanged; no trained model, hosted production or real PSP capability is invented.
+- Process correction: Review both directions of capability truth: implemented prerequisites must not remain marked unbuilt, and future capabilities must not be listed as implemented evidence. Record entry-level dispositions before advancing review dates; read canonical debt state rather than copying historical deferral prose. Structural passes do not substitute for this semantic review.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0109
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60–63; Phase 6.5 local release/topology boundaries
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Chapter 60–62 local closure and Chapter 63 format/validate-only review.
+- Invariant: Release proof must distinguish real API responses, persistent broker state, isolated proof resources and deployable Terraform evaluation from artifacts that merely parse or start.
+- Finding: Compose hardcoded container names despite claiming project isolation; the broker mounted a volume without selecting it as its log directory; prefix smoke accepted SPA HTML success; CloudFront globally rewrote API 403/404 to the shell; the WAF terminating allow preceded its rate block; viewer forwarding headers were trusted without sanitization; ACM DNS resources used unknown computed names and duplicate regional keys; secret population instructions preceded creation; workflow publish opt-out and ECS/image architecture were inconsistent.
+- Why prior review missed it: Tests compared prefix strings and image metadata but did not execute hostile routing responses, container replacement, parallel project ownership, Terraform computed-value planning or ordered terminating-rule evaluation.
+- Resolution evidence: Real fresh Docker stack applied V1–V91 and proved 20 JSON-error roots; real broker container replacement preserved records/offsets; real nginx socket proof preserved credentials/query while removing forged headers. Fifteen Terraform mock tests cover computed/duplicate certificate records, staging, WAF/cache/topology and invalid-input partitions; four Node edge tests and release-boundary tests pass. The seven-journey CI entry point ran locally with exit 0. Live AWS exposure/operations remain separate under ER-0106; no mocked test is presented as deployed proof.
+- Process correction: Evaluate executable topology with plan tests, test response body/content-type rather than status alone, remove and replace durable containers, and require trusted-hop header sanitization plus terminating-rule-order assertions. Never label mocked cloud tests deployed proof.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0110
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 30; feature-lineage demo retained through later feature catalogue extensions
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Feature-lineage demo unit safety checks and Phase 6 integrated review.
+- Invariant: Executable feature-lineage proof must reconcile the current typed fixture exactly, including policy/context and velocity features, without accepting missing, extra, mistyped or future-observed data.
+- Finding: The live feature-lineage demo expected seven features after legitimate context, merchant risk-tier and velocity extensions added five more to this fixture; its two safety tests never evaluated the catalogue assertion. The boundary-family pass reproduced the same obsolete seven-feature assertion and 42-row reconciliation in the fraud-decision loop (six decisions now produce 72 rows).
+- Why prior review missed it: Script existence and transport/reconciliation hygiene were tested, but the demo was not rerun against the completed feature catalogue and exact assertion partitions were absent.
+- Resolution evidence: Repaired live feature demo reconciles all 12 typed/value/time-qualified rows; live fraud loop proves six decisions and 72 feature rows. Tests reject every missing feature, extras, wrong type/value and late observation, and compare fixture type keys with the production catalogue. Both journeys ran in the real fresh-stack CI entry point, exit 0.
+- Process correction: Re-run old demos when their product contract dependencies expand; exact feature assertions must have missing/extra/type/value/point-in-time negative tests, not only subprocess safety tests.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0111
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 29; fraud-decision demo retained after velocity controls shipped
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Fraud-decision demo safety tests and integrated Phase 6 review.
+- Invariant: Each intended demo decision cohort must be isolated from unrelated prior fixture traffic while all production fraud controls remain enabled.
+- Finding: ALLOW, step-up and BLOCK fixtures used the same customer as the later repeated-decline setup. The prior three attempts correctly triggered customer velocity REVIEW on the first decline, so the obsolete fixture could never reach its intended repeated-attempt sequence.
+- Why prior review missed it: The original fixture predated velocity controls; unit tests exercised subprocess hygiene rather than the interaction between new controls and retained demo traffic.
+- Resolution evidence: Isolated review customer/card cohort retains every production velocity control; the live fraud loop now proves ALLOW, BLOCK, REQUIRE_3DS and REVIEW, with three authorization records, one cancellation, six decisions and 72 features. Fixture-isolation regression and real fresh-stack CI entry point pass, exit 0.
+- Process correction: Enumerate fixture/control interactions when adding a new control. Isolate cohorts by product identities and verify intended rule reasons, never disable the new control to restore an old demo.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0112
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 40; governed-control activation demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Governed-controls demo safety tests and integrated phase review.
+- Invariant: Activation proof must meet real default population and label-coverage policy, not a relaxed test profile.
+- Finding: The demo created one unlabelled cohort member and attempted activation although the real application requires 100 eligible members and 50 percent label coverage; the server correctly rejected it with 409.
+- Why prior review missed it: A one-row simulation demonstrates the simulation engine but not its production activation gate; subprocess safety tests never executed activation against default configuration.
+- Resolution evidence: Live default-runtime public workflow created 100 payments and 96 actual FRAUD labels, met unchanged population 100/coverage 50 percent gates, activated/retired/rolled back the rule, and proved a safety exception cannot suppress protected merchant velocity. Real fresh-stack CI entry point passes. Retry-After malformed/unbounded/unicode partitions and same-body/idempotency replay tests pass; only 429 is retried with a bounded deadline.
+- Process correction: Distinguish execution proof from promotion-policy proof; exercise production thresholds with real workflow labels and assert that protected fraud controls survive an exception.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0113
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 55; saved-view and bulk-assignment demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Saved-view/bulk demo safety tests and integrated Phase 6 review.
+- Invariant: Bulk assignment must select the authoritative case ID and optimistic assignment version from the published investigation response, never invent a default version.
+- Finding: The live demo read reviewAndLabels.review.reviewCaseId although the product publishes reviewAndLabels.reviews as a list of ReviewView objects; its fixture opened review correctly but the script rejected the actual envelope. Its negative aggregate-route probe also misclassified the dynamic actionId UUID route's correct 400 type rejection as an exposed aggregate endpoint; that branch must validate the exact rejection descriptor/message rather than accept arbitrary 400.
+- Why prior review missed it: Safety and script-content assertions never tested the consumed response shape against a real investigation response.
+- Resolution evidence: Actual review-list ID/version selection is tested for missing, malformed and ambiguous cases without defaulting. Live bulk proof reconciles PARTIAL with SUCCEEDED/STALE/NOT_FOUND, rejects prohibited aggregate endpoints by exact UUID-parameter error, and verifies prohibited state unchanged. Fresh-stack CI entry point passes, exit 0.
+- Process correction: Contract-consumer demos need response-shape and identity/version partition tests plus a live default-runtime run, not only scope/content scans.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0114
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 58; workspace insight demo
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Insight demo safety tests and integrated review.
+- Invariant: Projection consumers wait for published coverage and replay the complete segment filter, not only its action.
+- Finding: The real demo queried newly created payments then required a positive insight segment, but the API deliberately excludes today's incomplete UTC day. Published coverage became FRESH and the correct distribution remained empty. The first timing hypothesis was disproved by that observation. It also omitted aligned time range and origin policy when replaying a nonempty segment.
+- Why prior review missed it: Warm-runtime assertions and source scans never forced catching-up coverage or checked descriptor replay fields.
+- Resolution evidence: Demo now waits for qualified coverage, replays action/range/origin, and explicitly reports EMPTY_COMPLETED_UTC_DAY_WINDOW with no positive historical drill-through claim. Partial/unavailable/empty/complete coverage, bounded timeout and all origin-filter partitions pass. Real fresh-stack CI entry point verifies today's honest empty window, exit 0; existing backend historical tests remain distinct evidence. No timestamps or insight policy were weakened.
+- Process correction: Test partial, unavailable, empty and complete coverage, bounded timeout, and the exact replay filter; run the journey against a real default runtime in CI.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0115
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 20; processor outcome catalogue demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Processor catalogue script tests and integrated review.
+- Invariant: Processor fixtures retain current ruleset lineage and cannot borrow another demo project's database or customer velocity history.
+- Finding: The real default runtime returned rules_v1, but the retained demo required rules_stub_v1; nine processor fixtures share a customer despite the later velocity controls, and database reconciliation selects the default compose project instead of the chosen proof container.
+- Why prior review missed it: The retained earlier-chapter fixture was not run end to end after deterministic rules and project-isolated packaging replaced its assumptions.
+- Resolution evidence: Live nine-fixture catalogue passes current rules_v1/NO_RULE_MATCH, isolates each customer, reconciles the explicitly selected PostgreSQL container and exact current audit including the card-testing incident. Source/argv regression tests pass; fresh-stack CI entry point executes the real demo with exit 0.
+- Process correction: Run current-default processor fixtures, assert isolated identities, and honor the explicit PostgreSQL proof container.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0116
+
+- Status: RESOLVED
+- Severity: P2
+- Chapter: 38; developer scenario console demo
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Developer console safety tests and integrated review.
+- Invariant: A scenario-run report counts only its own trusted synthetic attempts; unrelated live references must not enter it.
+- Finding: The live demo demanded at least one MERCHANT_API attempt in the scenario-specific report although its source query correctly restricts counts to the scenario's completed confirmation steps.
+- Why prior review missed it: Transport safety tests never ran the real report assertion.
+- Resolution evidence: Live reference separately proves MERCHANT_API; real scenario completes 4/4 steps and its report contains one SYNTHETIC_SCENARIO attempt with no unrelated live attempt, exit 0. Table-driven tests reject empty, missing-synthetic and live-contaminated origin maps; source report query remains unchanged.
+- Process correction: Prove live origin from the live response and synthetic origin from the scenario report; test contamination and missing-origin partitions.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0117
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 63; broker task memory boundary
+- Category: MISSING_FAILURE_SEQUENCE
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Terraform format/validate and unconstrained local startup proof.
+- Invariant: Broker heap leaves native-memory headroom within its default task budget.
+- Finding: The pinned Kafka image actually starts with -Xmx1G -Xms1G while the authored ECS task budget is only 1024 MiB; metaspace, thread stacks and native buffers cannot fit outside that heap.
+- Why prior review missed it: The local broker had no container memory limit, and provider validation cannot inspect image JVM defaults.
+- Resolution evidence: Compose and ECS explicitly set -Xms512m -Xmx512m; compose enforces 1073741824-byte memory ceiling. Real broker replacement under that ceiling verifies actual JVM flags, retains both records and committed offsets 1→2, exit 0. Sixteen Terraform tests pass, including configured heap headroom and rejection of a 512 MiB task. Real AWS sizing/recovery remains unproven.
+- Process correction: Align heap and task memory explicitly and execute broker replacement with the real authored memory ceiling, not an unconstrained laptop container.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0118
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Local release audit readiness and automated pre-push/CI readiness.
+- Invariant: Readiness validates the current implementation slice and cannot confuse local repair completion with integrated AWS closure or skip the current dossier.
+- Finding: The local-only repair dossier used Chapter 66, so the named gate demanded unrelated cloud completion; ordinary automated invocations omitted selectors and skipped dossier validation altogether.
+- Why prior review missed it: Explicit-selector tests certified one invocation, not the actual no-selector hook/CI path, and a local maintenance scope was assigned a deployment-closure coordinate.
+- Resolution evidence: Recovery coordinate 60R retains the original frozen local promises while Chapters 63–66 stay open. Strict versioned manifest resolution runs for every readiness call; nine resolver tests reject malformed/duplicate/missing/date/type/path/symlink/stale/mixed partitions. Shell tests prove current-pair invocation and fail-closed child-result propagation, plus inherited Phase 6 failure propagation. Real no-selector readiness rejected the current PENDING row, non-merge dossier and this unresolved P1 before closure; stale explicit selectors also exit 1. After closure, full named readiness (1457 backend and 295 Python tests) and ordinary no-selector readiness both exited 0, validating the current pair and inherited Phase 6 proof. The existing chapter-completion validator is unchanged.
+- Process correction: Register the exact current scope, resolve it on every normal gate run, reject stale/malformed selectors with executable negative partitions, and use a separate recovery coordinate without promoting parent-phase status.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0119
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: PR #38 commit-readiness job 111979507685, run 37374489672.
+- Invariant: Governance dates use one explicit India-calendar review boundary on local and UTC CI hosts without weakening future-date or 35-day staleness refusal.
+- Finding: At 2026-10-05T21:13Z the UTC runner rejected all 23 October 6 vision review dates as future, while the founder's India calendar was already October 6. Debt validation uses the same host-local default and belongs to the reopened family.
+- Why prior review missed it: Local tests supplied explicit dates or ran on the India-time laptop; no forced midnight/host-timezone partition exercised actual default CLI validation.
+- Resolution evidence: Both vision and debt default CLI/validation paths use scripts/review_calendar.py with an aware UTC instant and explicit UTC+05:30 India calendar. Six calendar, ten vision and eight debt tests pass on Python 3.12/Linux/TZ=UTC, exit 0, including real CLI subprocesses at the exact failed timestamp; future-date and 35/36-day staleness partitions remain enforced. Host TZ, month/year/leap rollover, equivalent instant representations and historical replay are covered. No dates were backdated and payment UTC semantics are unchanged.
+- Process correction: Test default clock policy across UTC and India date boundaries, including both governance checkers, future/stale refusal and historical replay; never backdate evidence to satisfy a runner.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06
+
+## ER-0120
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Push run 37376437496/job 111986472807; PR merge run and both randomized runs passed.
+- Invariant: Assignment contention preserves one mutation/version/event and role-specific non-disclosure in both commit orders.
+- Finding: The racing analyst item expected STALE when the single-case writer won, contradicting the existing deterministic analyst NOT_FOUND security proof. The test observed only one waiter and left the losing ordering to scheduler chance.
+- Why prior review missed it: The race usually took the bulk-wins branch locally; existing role-specific losing proofs were not reconciled with the racing assertion.
+- Resolution evidence: ReviewBulkActionConcurrencyPostgreSqlTests forces four analyst/manager × bulk-first/single-first lock orders, observes both contenders waiting on PostgreSQL, and asserts the exact winner, one assignment event/version, paired API/item outcomes and role-specific failure code. Ten focused tests pass (exit 0). Restoring the former universal STALE assertion deterministically reproduces exactly the analyst/single-first failure among four cases (exit 1); the correction is restored before full readiness. Production permissions and nondisclosure are unchanged.
+- Process correction: Force both lock orders, observe both waiters, and assert role-specific paired API/item outcomes and durable postconditions instead of certifying the branch that happened to win.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06

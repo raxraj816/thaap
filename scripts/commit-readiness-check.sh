@@ -63,6 +63,17 @@ missing=0
 echo "Commit readiness check for ${date_arg}"
 echo
 
+# A normal CI/pre-push run must check the current dossier, not silently classify
+# non-trivial work as trivial because no selector was supplied. Explicit selectors
+# are assertions against this same registration, never a way to select stale proof.
+echo "Resolving the registered current readiness scope..."
+resolved_scope="$(scripts/readiness-scope-check.py "$date_arg" "$invariant_matrix" "$closure_dossier")"
+if ! IFS=$'\t' read -r invariant_matrix closure_dossier <<< "$resolved_scope" \
+    || [[ -z "$invariant_matrix" || -z "$closure_dossier" ]]; then
+  echo "FAIL: scope resolver did not supply both review artifacts" >&2
+  exit 1
+fi
+
 required_files=(
   "README.md"
   "apps/payments-api/README.md"
@@ -73,6 +84,7 @@ required_files=(
   "docs/ESCAPED_REVIEW_REGISTER.md"
   "docs/INVARIANT_PROOF_REVIEW_PROCESS.md"
   "docs/TECHNICAL_DEBT_REGISTER.md"
+  "docs/reviews/CURRENT_READINESS_SCOPE.json"
 )
 
 for file in "${required_files[@]}"; do
@@ -112,6 +124,18 @@ echo "Checking durable executable artifact naming..."
 scripts/executable-artifact-naming-check.py
 
 echo
+echo "Checking the runtime configuration reference against what the application reads..."
+scripts/runtime-configuration-reference-check.py
+
+echo
+echo "Checking every deployment region derives from a variable..."
+scripts/terraform-region-parameterisation-check.py
+
+echo
+echo "Checking the API routing contract across every router that carries it..."
+scripts/routing-contract-check.py
+
+echo
 echo "Checking typed public API error boundaries..."
 scripts/public-api-error-contract-check.py
 
@@ -133,31 +157,12 @@ scripts/python-sdk-package-check.py
 
 echo
 echo "Checking chapter invariant-to-proof traceability..."
-if [[ -n "$invariant_matrix" ]]; then
-  scripts/invariant-proof-check.py "$invariant_matrix"
-elif [[ "$deep_dive_required" == true ]]; then
-  echo "MISSING --invariant-matrix=PATH for non-trivial implementation work"
-  missing=1
-  scripts/invariant-proof-check.py
-else
-  scripts/invariant-proof-check.py
-fi
+scripts/invariant-proof-check.py
+scripts/invariant-proof-check.py "$invariant_matrix"
 
 echo
 echo "Checking integrated chapter closure evidence..."
-if [[ -n "$invariant_matrix" && -n "$closure_dossier" ]]; then
-  scripts/chapter-closure-check.py "$invariant_matrix" "$closure_dossier"
-elif [[ "$deep_dive_required" == true ]]; then
-  if [[ -z "$invariant_matrix" ]]; then
-    echo "MISSING --invariant-matrix=PATH for chapter closure"
-  fi
-  if [[ -z "$closure_dossier" ]]; then
-    echo "MISSING --closure-dossier=PATH for non-trivial implementation work"
-  fi
-  missing=1
-else
-  echo "SKIP closure dossier for trivial work; provide both chapter artifacts to validate closure."
-fi
+scripts/chapter-closure-check.py "$invariant_matrix" "$closure_dossier"
 
 if [[ "$invariant_matrix" == *"CHAPTER_43_INVARIANT_PROOF_MATRIX.md" \
    || "$invariant_matrix" == *"CHAPTER_43R_INVARIANT_PROOF_MATRIX.md" ]]; then
@@ -170,6 +175,13 @@ if [[ "$invariant_matrix" == *"CHAPTER_52_INVARIANT_PROOF_MATRIX.md" ]]; then
   echo
   echo "Checking every inherited Phase 5 chapter closure..."
   scripts/phase-closure-check.py --phase-5
+fi
+
+if [[ "$invariant_matrix" == *"CHAPTER_59_INVARIANT_PROOF_MATRIX.md" \
+   || "$invariant_matrix" == *"CHAPTER_60R_INVARIANT_PROOF_MATRIX.md" ]]; then
+  echo
+  echo "Checking every inherited Phase 6 chapter closure..."
+  scripts/phase-closure-check.py --phase-6
 fi
 
 if [[ "$invariant_matrix" == *"CHAPTER_21_INVARIANT_PROOF_MATRIX.md" ]]; then

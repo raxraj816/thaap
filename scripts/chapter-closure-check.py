@@ -12,6 +12,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIELD_LINE = re.compile(r"^- ([A-Za-z ]+):\s*(.+)$", re.MULTILINE)
 HEADING = re.compile(r"^## (.+)$", re.MULTILINE)
 ER_HEADING = re.compile(r"^## (ER-\d{4})$", re.MULTILINE)
+# Mirrors ENTRY_HEADING in invariant-proof-check.py: an invariant ID such as C63-SEC-001.
+MATRIX_ENTRY_HEADING = re.compile(
+    r"^## ([A-Z][A-Z0-9]*(?:-[A-Z0-9]+){2,})$", re.MULTILINE)
 REQUIRED_METADATA = {
     "Chapter",
     "Chapter number",
@@ -47,6 +50,22 @@ PLACEHOLDER = re.compile(r"\b(TBD|TODO|FIXME|PLACEHOLDER)\b", re.IGNORECASE)
 
 def fields(text: str) -> dict[str, str]:
     return {name: value.strip() for name, value in FIELD_LINE.findall(text)}
+
+
+def matrix_entries(text: str) -> list[tuple[str, dict[str, str]]]:
+    """Every invariant row in a matrix, by ID.
+
+    Deliberately a local reader rather than an import of `invariant-proof-check.py`: that
+    file's name is not a valid module identifier, and a closure gate that could fail to
+    load its own dependency would report a missing tool as a passing chapter — the exact
+    failure `AGENTS.md` records.
+    """
+    matches = list(MATRIX_ENTRY_HEADING.finditer(text))
+    entries: list[tuple[str, dict[str, str]]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        entries.append((match.group(1), fields(text[match.end():end])))
+    return entries
 
 
 def escaped_entries(text: str) -> list[tuple[str, dict[str, str]]]:
@@ -114,6 +133,23 @@ def validate_closure(
             f"{dossier_path}: Escaped review assessment must be COMPLETE")
     if metadata.get("Merge recommendation") != "MERGE":
         errors.append(f"{dossier_path}: Merge recommendation must be MERGE")
+
+    # The matrix gained a frozen-but-unproven state under `ER-0105` so that a
+    # pre-implementation matrix could be committed and reviewed rather than living in an
+    # uncommitted working tree. That state must never reach a closure claim: a dossier
+    # recommending merge against a matrix still under review, or holding a row nothing has
+    # proven, is a completion claim resting on an intention.
+    if matrix_metadata.get("Review status") != "VERIFIED":
+        errors.append(
+            f"{matrix_path}: Review status must be VERIFIED to close a chapter, not "
+            f"{matrix_metadata.get('Review status')}")
+    pending_rows = sorted(
+        entry_id
+        for entry_id, entry in matrix_entries(matrix_text)
+        if entry.get("Status") == "PENDING")
+    if pending_rows:
+        errors.append(
+            f"{matrix_path}: cannot close with unproven invariants: {', '.join(pending_rows)}")
 
     declared_matrix = metadata.get("Invariant matrix")
     if declared_matrix and resolve_repo_path(declared_matrix) != matrix_path.resolve():

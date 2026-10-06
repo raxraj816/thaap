@@ -30,6 +30,24 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/master' }}
 
 jobs:
+  release-journeys:
+    name: Default-runtime release journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prove fresh migration, routed API and current-default analyst/risk journeys
+        env:
+          THAAP_STACK_CHECK_JOURNEYS: "true"
+        run: bash scripts/compose-stack-check.sh
+      - name: Prove broker container replacement preserves records and offsets
+        run: bash scripts/broker-persistence-check.sh
+      - name: Prove real nginx strips forged forwarding metadata
+        run: bash scripts/proxy-header-check.sh
+
   commit-readiness:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -88,6 +106,49 @@ jobs:
           path: apps/payments-api/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
+
+  terraform:
+    # The readiness gate checks that every region derives from a variable and that the routing
+    # contract agrees across all four routers. Neither of those asks whether the configuration is
+    # syntactically valid or matches the provider schema, and a topology that does not parse is
+    # not a topology. `validate` needs no credentials, so it belongs here rather than waiting for
+    # an account to exist -- which is the whole reason Chapter 63 can be written before the
+    # account does.
+    #
+    # Mocked plan tests exercise evaluation and configured boundaries without an account.
+    # They cannot certify a real AWS plan, deployment, exposure or alarm notification.
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          # Pinned to the same version scripts/terraform.sh runs in its container, so a developer
+          # and CI cannot disagree about whether the configuration is valid.
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform -chdir=infra/terraform fmt -check -recursive -diff
+
+      - name: Validate the topology
+        run: |
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
+          terraform -chdir=infra/terraform test -no-color
+
+      - name: Prove edge request routing and forwarding-header partitions
+        run: node --test scripts/edge-request.test.mjs
+
+      - name: Validate the state backend bootstrap
+        run: |
+          terraform -chdir=infra/terraform/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/terraform/bootstrap validate
 
   randomized-order:
     # The suite now runs in a pinned alphabetical order everywhere, which is what makes a local

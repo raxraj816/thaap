@@ -1,0 +1,19 @@
+# See apps/payments-api/.dockerignore — same reasoning, same security intent.
+
+node_modules/
+dist/
+
+.env
+.env.*
+*.pem
+*.key
+
+.git/
+.gitignore
+.idea/
+.vscode/
+
+**/__pycache__/
+.DS_Store
+*.swp
+*~

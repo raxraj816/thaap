@@ -60,9 +60,23 @@ public class PaymentRiskProjectionHealthIndicator implements HealthIndicator {
                     WHERE consumer_name = 'payment-risk-projection-v1'
                       AND lifecycle_status = 'HELD'
                     """, Integer.class);
+            // `pending_stream_count` is what separates a broken consumer from a quiet one. It
+            // counts this merchant's streams whose head version the active generation has not
+            // applied, by comparing `event_stream_heads` against `projection_stream_positions` —
+            // both already maintained, so no broker call is needed on a health path.
             List<TenantProjectionCheckpoint> checkpoints = jdbcTemplate.query("""
                     SELECT event_merchant.merchant_id, definition.projection_name,
-                           MAX(checkpoint.last_processed_at)
+                           MAX(checkpoint.last_processed_at),
+                           (SELECT COUNT(*)
+                              FROM event_stream_heads head
+                              LEFT JOIN projection_stream_positions position
+                                ON position.merchant_id = head.merchant_id
+                               AND position.stream_type = head.stream_type
+                               AND position.stream_id = head.stream_id
+                               AND position.projection_generation_id = generation.id
+                             WHERE head.merchant_id = event_merchant.merchant_id
+                               AND head.current_version
+                                   > COALESCE(position.last_stream_version, 0))
                     FROM (SELECT DISTINCT merchant_id FROM domain_events) event_merchant
                     CROSS JOIN projection_definitions definition
                     JOIN projection_generations generation
@@ -77,11 +91,13 @@ public class PaymentRiskProjectionHealthIndicator implements HealthIndicator {
                       AND definition.lifecycle_status = 'ENABLED'
                       AND generation.lifecycle_status = 'ACTIVE'
                       AND generation.handler_version = 'v1'
-                    GROUP BY event_merchant.merchant_id, definition.projection_name
+                    GROUP BY event_merchant.merchant_id, definition.projection_name,
+                             generation.id
                     """, (resultSet, rowNumber) -> new TenantProjectionCheckpoint(
                             resultSet.getObject(1, java.util.UUID.class),
                             resultSet.getString(2),
-                            JdbcTime.instant(resultSet, 3)));
+                            JdbcTime.instant(resultSet, 3),
+                            resultSet.getLong(4)));
             ConsumerReadinessState readiness = readinessState(checkpoints,
                     openQuarantine == null ? 0 : openQuarantine);
             Map<String, Object> details = new LinkedHashMap<>();
@@ -89,6 +105,10 @@ public class PaymentRiskProjectionHealthIndicator implements HealthIndicator {
             details.put("openQuarantineCount", openQuarantine == null ? 0 : openQuarantine);
             details.put("heldEventCount", held == null ? 0 : held);
             details.put("tenantProjectionCount", checkpoints.size());
+            // Published so an operator reading a DOWN can tell a backlog from a broken query
+            // without database access, and so a quiet system is visibly quiet rather than silent.
+            details.put("pendingStreamCount", checkpoints.stream()
+                    .mapToLong(TenantProjectionCheckpoint::pendingStreamCount).sum());
             details.put("consumerState", readiness.name());
             if (active == null || active != 2) {
                 details.put("consumerState", ConsumerReadinessState.INCOMPATIBLE.name());
@@ -105,13 +125,28 @@ public class PaymentRiskProjectionHealthIndicator implements HealthIndicator {
         }
     }
 
-    private ConsumerReadinessState readinessState(
+    ConsumerReadinessState readinessState(
             List<TenantProjectionCheckpoint> checkpoints, int openQuarantine) {
         if (checkpoints.isEmpty()) {
             return ConsumerReadinessState.EMPTY;
         }
         boolean lagging = false;
         for (TenantProjectionCheckpoint checkpoint : checkpoints) {
+            // A tenant that has nothing left to apply is caught up, however long ago that
+            // happened. Judging readiness on elapsed time alone conflates "this merchant has not
+            // transacted recently" with "the consumer is broken", and the first is the normal
+            // state of almost every merchant almost all of the time.
+            //
+            // That conflation is not theoretical: with readiness wired to a load balancer, every
+            // instance leaves rotation roughly five minutes after traffic goes quiet, and the
+            // quieter the deployment the more permanent the outage. It also worsens as tenants
+            // accumulate, because one idle merchant is enough to fail the whole application.
+            //
+            // Pending work is therefore the gate, and age only grades work that is actually
+            // waiting. A wedged consumer still trips this, because its backlog does not drain.
+            if (checkpoint.pendingStreamCount() == 0) {
+                continue;
+            }
             if (checkpoint.lastProcessedAt() == null) {
                 return ConsumerReadinessState.UNAVAILABLE;
             }
@@ -157,7 +192,7 @@ public class PaymentRiskProjectionHealthIndicator implements HealthIndicator {
         INCOMPATIBLE
     }
 
-    private record TenantProjectionCheckpoint(java.util.UUID merchantId,
-            String projectionName, Instant lastProcessedAt) {
+    record TenantProjectionCheckpoint(java.util.UUID merchantId,
+            String projectionName, Instant lastProcessedAt, long pendingStreamCount) {
     }
 }

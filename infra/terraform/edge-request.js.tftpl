@@ -1,0 +1,28 @@
+// CloudFront Functions viewer-request handler. Host is read-only; retain it so the forwarded
+// workspace hostname matches the ALB certificate. Credential, body and query bytes are untouched.
+function handler(event) {
+    var request = event.request;
+    var headers = request.headers;
+    delete headers.forwarded;
+    Object.keys(headers).forEach(function (name) {
+        // X-Forwarded-Proto is disallowed in this event and is set by the HTTPS ALB hop.
+        if (name.indexOf('x-forwarded-') === 0 && name !== 'x-forwarded-proto') {
+            delete headers[name];
+        }
+    });
+    // CloudFront and the ALB append addresses. The first address must come from the socket,
+    // never from a viewer-supplied list. Repeated copies of the real viewer IP are harmless.
+    headers['x-forwarded-for'] = {value: event.viewer.ip};
+
+    var prefixes = ${jsonencode(prefixes)};
+    var isApi = prefixes.some(function (prefix) {
+        return request.uri === prefix || request.uri.indexOf(prefix + '/') === 0;
+    });
+    // Rewrite only navigations before S3 lookup. Distribution-wide 403/404 rewrites would
+    // falsify authorization errors, API not-found responses and missing asset responses.
+    var isAsset = request.uri.indexOf('/assets/') === 0 || /\.[^/]+$/.test(request.uri);
+    if (!isApi && !isAsset && (request.method === 'GET' || request.method === 'HEAD')) {
+        request.uri = '/index.html';
+    }
+    return request;
+}

@@ -13,7 +13,7 @@
 
     <groupId>com.thaap</groupId>
     <artifactId>payments-api</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>payments-api</name>
     <description>Primary THAAP payment processing and fraud simulation API.</description>
 
@@ -35,6 +35,24 @@
             by default, deliberately shuffled where a shuffle is the point.
         -->
         <surefire.runOrder>alphabetical</surefire.runOrder>
+
+        <!--
+            The commit this artifact was built from, written into build-info.properties and
+            served at /actuator/info as build.commit.
+
+            It is a property rather than something the build discovers, because the build cannot
+            discover it: `.dockerignore` excludes `.git/` from the image context on purpose, so
+            a git-reading plugin would report nothing in precisely the build that matters. The
+            commit therefore arrives the same way every other deployment input arrives — passed
+            in, by the Dockerfile's THAAP_BUILD_COMMIT argument or by -Dthaap.build.commit.
+
+            The default is `unknown` and is truthful rather than convenient. A developer's `mvn
+            package` genuinely does not know its commit, and an instance that says `unknown` is
+            reporting that honestly. `scripts/release-identity-check.sh` is what makes a
+            *released* image unable to say it: it builds with the real SHA and fails if the
+            running instance reports anything else.
+        -->
+        <thaap.build.commit>unknown</thaap.build.commit>
     </properties>
 
     <dependencies>
@@ -158,6 +176,34 @@
                 <configuration>
                     <jvmArguments>--enable-native-access=ALL-UNNAMED</jvmArguments>
                 </configuration>
+                <executions>
+                    <!--
+                        Writes META-INF/build-info.properties into the artifact, which Spring
+                        Boot's BuildInfoContributor then serves at /actuator/info. This is what
+                        makes "which commit is running?" answerable over HTTP by someone who has
+                        no shell access to the task — the only way that question gets answered
+                        during an incident.
+
+                        `time` is excluded deliberately. It changes on every build, so leaving it
+                        in means the same commit produces a different artifact each time it is
+                        built, which is the reproducibility promise this phase just spent
+                        Chapter 60 establishing.
+                    -->
+                    <execution>
+                        <id>build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                        <configuration>
+                            <excludeInfoProperties>
+                                <property>time</property>
+                            </excludeInfoProperties>
+                            <additionalProperties>
+                                <commit>${thaap.build.commit}</commit>
+                            </additionalProperties>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

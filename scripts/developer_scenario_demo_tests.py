@@ -23,6 +23,12 @@ SPEC.loader.exec_module(DEMO)
 
 
 class DeveloperScenarioDemoSafetyTests(unittest.TestCase):
+    def test_scenario_report_excludes_unrelated_live_attempts(self):
+        DEMO.require_scenario_origins({"SYNTHETIC_SCENARIO": 1})
+        for origin in ({}, {"MERCHANT_API": 1}, {"SYNTHETIC_SCENARIO": 0},
+                       {"MERCHANT_API": 1, "SYNTHETIC_SCENARIO": 1}):
+            with self.subTest(origin=origin), self.assertRaises(DEMO.DemoFailure):
+                DEMO.require_scenario_origins(origin)
 
     def test_only_explicit_loopback_http_origins_are_accepted(self):
         self.assertEqual("http://127.0.0.1:8080", DEMO.require_loopback("http://127.0.0.1:8080"))

@@ -48,12 +48,18 @@ def dossier(status: str = "READY_TO_MERGE", recommendation: str = "MERGE") -> st
 """
 
 
-def matrix() -> str:
-    return """# Chapter 19 Matrix
+def matrix(review_status: str = "VERIFIED", row_status: str = "PASS") -> str:
+    return f"""# Chapter 19 Matrix
 
 - Chapter: Chapter 19
 - Matrix provenance: RETROACTIVE_RECOVERY
+- Review status: {review_status}
 - Boundary family review: PASS
+
+## C19-SEC-001
+
+- Lens: SECURITY_PRIVACY
+- Status: {row_status}
 """
 
 
@@ -71,12 +77,33 @@ def register(status: str = "RESOLVED", severity: str = "P1") -> str:
 
 class ChapterClosureCheckTests(unittest.TestCase):
 
-    def validate(self, dossier_text: str, register_text: str | None = None):
+    def test_completed_recovery_slice_does_not_require_or_certify_parent_completion(self):
+        recovery_dossier = dossier().replace("Chapter 19", "Chapter 60R").replace(
+            "- Chapter number: 19", "- Chapter number: 60")
+        recovery_matrix = matrix().replace("Chapter 19", "Chapter 60R")
+        errors = checker.validate_closure(pathlib.Path("dossier.md"), recovery_dossier,
+            pathlib.Path("matrix.md").resolve(), recovery_matrix, register(),
+            "Chapter 60R is complete. Chapter 66 remains in progress.",
+            "1. Chapter 60R: Local repair.\n\n   Status: complete.\n\n"
+            "2. Chapter 66: Integrated cloud.\n\n   Status: in progress.")
+        self.assertEqual([], errors)
+        # Renaming an incomplete cloud chapter does not manufacture evidence.
+        errors = checker.validate_closure(pathlib.Path("dossier.md"),
+            recovery_dossier.replace("Chapter 60R", "Chapter 66").replace("number: 60", "number: 66"),
+            pathlib.Path("matrix.md").resolve(), recovery_matrix.replace("Chapter 60R", "Chapter 66"),
+            register(), "Chapter 60R is complete. Chapter 66 remains in progress.",
+            "1. Chapter 60R: Local repair.\n   Status: complete.\n"
+            "2. Chapter 66: Integrated cloud.\n   Status: in progress.")
+        self.assertTrue(any("README.md does not mark Chapter 66 complete" in error for error in errors))
+        self.assertTrue(any("master plan does not mark Chapter 66 complete" in error for error in errors))
+
+    def validate(self, dossier_text: str, register_text: str | None = None,
+                 matrix_text: str | None = None):
         return checker.validate_closure(
             pathlib.Path("dossier.md"),
             dossier_text,
             pathlib.Path("matrix.md").resolve(),
-            matrix(),
+            matrix_text or matrix(),
             register_text or register(),
             "Chapter 19 is complete.",
             "4. Chapter 19: Name.\n\n   Status: complete.\n\n5. Chapter 20: Next.")
@@ -85,6 +112,23 @@ class ChapterClosureCheckTests(unittest.TestCase):
         errors = self.validate(dossier())
 
         self.assertEqual([], errors)
+
+    def test_a_matrix_still_under_review_cannot_close_a_chapter(self):
+        # `ER-0105` gave the matrix a frozen-but-unproven state so a pre-implementation
+        # matrix could be committed and reviewed. This is the wall that keeps that state
+        # out of a completion claim.
+        errors = self.validate(dossier(), matrix_text=matrix(review_status="IN_PROGRESS"))
+
+        self.assertTrue(any("Review status must be VERIFIED to close a chapter" in error
+                            for error in errors))
+
+    def test_an_unproven_invariant_cannot_close_a_chapter(self):
+        errors = self.validate(
+            dossier(),
+            matrix_text=matrix(review_status="IN_PROGRESS", row_status="PENDING"))
+
+        self.assertTrue(any("cannot close with unproven invariants: C19-SEC-001" in error
+                            for error in errors))
 
     def test_non_merge_dossier_fails(self):
         errors = self.validate(dossier("IN_PROGRESS", "DO_NOT_MERGE"))

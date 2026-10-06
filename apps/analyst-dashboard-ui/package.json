@@ -10,21 +10,22 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.101.4",
-    "@vitejs/plugin-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "typescript": "latest",
-    "vite": "latest"
+    "@tanstack/react-query": "5.101.4",
+    "@vitejs/plugin-react": "6.0.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "7.0.2",
+    "vite": "8.1.5"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "latest",
-    "@testing-library/react": "latest",
-    "@testing-library/user-event": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "axe-core": "latest",
-    "jsdom": "latest",
-    "vitest": "latest"
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "axe-core": "4.12.1",
+    "jsdom": "29.1.1",
+    "vitest": "4.1.10"
   }
 }

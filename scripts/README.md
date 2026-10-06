@@ -258,9 +258,18 @@ two balanced ledger entries, and exact same/distinct-key terminal replay.
 The runner accepts only a loopback API origin, ignores environment proxies,
 and rejects redirects. It creates and confirms a manual-capture payment through
 public APIs, checks exact idempotent replay and the safe lexical decision
-snapshot, then performs a read-only query against the local `thaap-postgres`
-container to reconcile all seven typed values and their point-in-time
+snapshot, then performs a read-only query against the project-scoped PostgreSQL
+container (`THAAP_POSTGRES_CONTAINER`, default `thaap-local-postgres-1`)
+to reconcile all twelve current typed fixture values and their point-in-time
 predicate. It prints only non-secret resource IDs and bounded outcomes.
+
+Release auditing: `THAAP_STACK_CHECK_JOURNEYS=true bash scripts/compose-stack-check.sh`
+creates an isolated fresh stack, proves all 91 SQL/Java migrations, probes sixteen public
+and four operational API roots, then runs seven current-default payment/risk/analyst demos.
+It refuses an occupied project before registering cleanup. CI runs this path plus real
+broker-replacement and nginx forwarding-header proofs. Workspace insights deliberately
+exclude the incomplete UTC day: today's fixtures prove the empty-window boundary, not a
+positive historical segment drill-through. Full hosted AWS journeys remain a separate gate.
 
 Run the Chapter 28 fraud- and processor-source authentication proof with:
 
@@ -269,7 +278,7 @@ export THAAP_ADMIN_BOOTSTRAP_TOKEN=change-me-local-admin-bootstrap-token
 python3 scripts/demo-authentication-challenge.py
 ```
 
-The runner requires the loopback API and local `thaap-postgres`, rejects
+The runner requires the loopback API and selected project-scoped PostgreSQL container, rejects
 redirects and proxy routing, and performs read-only reconciliation. It proves
 zero approved funds before completion, source-bound reveal-once next actions,
 exact replay, one decision/attempt per cohort, automatic capture for the fraud
@@ -298,7 +307,7 @@ python3 scripts/demo-velocity-fraud-lists.py
 ```
 
 The runner accepts only a loopback API origin and requires local
-`thaap-postgres` and `thaap-redis` containers. It proves list BLOCK and
+project-scoped PostgreSQL and Redis containers. It proves list BLOCK and
 append-only deactivation history, fourth-attempt velocity REVIEW, byte-exact
 replay, complete durable lineage, Redis pause→unavailable REVIEW, readiness
 degradation and recovery after unpause, and zero raw card/email canaries across
@@ -313,7 +322,7 @@ python3 scripts/demo-merchant-risk-policy.py
 ```
 
 The runner accepts only a loopback API origin and requires local
-`thaap-postgres`. It proves creator/approver dual control, approval without
+the selected PostgreSQL container. It proves creator/approver dual control, approval without
 decision effect, activation changing only future decisions to REQUEST_3DS,
 REVIEW, and BLOCK, byte-exact replay, fixture-only preview, immutable historical
 lineage, three processor exclusions, and readiness `UP`.
@@ -327,7 +336,7 @@ python3 scripts/demo-chargeback-lifecycle.py
 ```
 
 The runner accepts only a loopback API origin and requires local
-`thaap-postgres`. It proves captured fraud allocation with a balanced dispute
+the selected PostgreSQL container. It proves captured fraud allocation with a balanced dispute
 ledger and immutable label, refund-first zero offset without a second debit or
 false label, byte-exact idempotency replay, independent external-event
 deduplication, explicit simulator source attestation, pre-deadline bounded DRAFT

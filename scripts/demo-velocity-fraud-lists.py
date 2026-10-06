@@ -41,7 +41,7 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Velocity and fraud list reconciliation rejected mutating SQL")
     command = [
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ]
@@ -55,7 +55,7 @@ def postgres_scalar(query: str) -> str:
 def redis_container(action: str) -> None:
     if action not in {"pause", "unpause"}:
         raise DemoFailure("Velocity and fraud list Redis control action is not allowlisted")
-    container = os.environ.get("THAAP_REDIS_CONTAINER", "thaap-redis")
+    container = os.environ.get("THAAP_REDIS_CONTAINER", "thaap-local-redis-1")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", container):
         raise DemoFailure("Velocity and fraud list Redis container name is invalid")
     try:
@@ -66,7 +66,7 @@ def redis_container(action: str) -> None:
 
 
 def redis_surface() -> str:
-    container = os.environ.get("THAAP_REDIS_CONTAINER", "thaap-redis")
+    container = os.environ.get("THAAP_REDIS_CONTAINER", "thaap-local-redis-1")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", container):
         raise DemoFailure("Velocity and fraud list Redis container name is invalid")
     try:

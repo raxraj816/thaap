@@ -191,6 +191,47 @@ Phase 9 deployed-compatibility and Phase 10 PSP-guide owners.
 
 ## Merge recommendation
 
+### 2026-10-06 maintenance evidence
+
+`ER-0107` resolves stale source-of-truth and inherited-dossier prose that escaped
+the original completion review. The aggregate checker now normalizes Markdown
+whitespace and scans all Phase 6 dossiers; Chapter 59 readiness invokes it and
+fails when it fails. The focused 19-test run and real Phase 6 aggregate check each
+exited 0. This note follows the repair and does not claim a new pre-implementation
+freeze. The original backend, UI, SDK and migration counts above are historical
+2026-08-06 evidence, not fresh counts from this maintenance pass. No schema or
+runtime product behavior changed, no new debt was accepted, and the existing
+Phase 6.5 infrastructure working tree was preserved.
+
+This recommendation authorizes no commit, tag, push or branch mutation; those
+remain the repository owner's decision.
+
+The 2026-10-06 full deep-dive readiness attempt exited 1 at vision coverage because
+all 23 product-vision entries are overdue for their 35-day review. The historical
+Phase 6 closure is not a fresh whole-working-tree readiness pass. A substantive
+vision review is required before the maintenance change can claim full readiness;
+dates were not refreshed to bypass that obligation.
+
+That review is now recorded in
+`docs/reviews/VISION_COVERAGE_REVIEW_2026-10-06.md` and `ER-0108`. All 23 entries
+retain their actual capability statuses and future owners; obsolete prerequisite
+and debt claims are corrected. The vision check exited 0 after substantive
+review. The repository Python suite exited 0 with 257 tests; contract/error/SDK
+scope and clean-package checks also exited 0. Final full deep-dive readiness then
+exited 0, including 1457 backend tests with zero failures/errors/skips and 257
+repository Python tests, with this matrix and dossier explicitly named:
+
+`scripts/commit-readiness-check.sh 2026-10-06 --deep-dive-required --invariant-matrix=docs/reviews/CHAPTER_59_INVARIANT_PROOF_MATRIX.md --closure-dossier=docs/reviews/CHAPTER_59_CLOSURE_DOSSIER.md`
+
+Independent UI verification passed 86 tests across 12 files and the production
+build. Vitest's jsdom canvas warning does not constitute real-browser accessibility
+proof; the original browser/demo evidence above remains dated. The temporally
+separate maintenance hostile pass checked representation partitions, inherited
+dossier contradiction, exact contract digest, aggregate failure propagation and
+model/dataset/debt truth. Traceability, hostile-family and Chapter 59 closure
+remain `PASS`; `ER-0107` and `ER-0108` are resolved and no new `TD-NNNN` is accepted.
+This maintenance verdict does not close Phase 6.5 or its `ER-0106`.
+
 `MERGE`. Both public journeys run from published artifacts alone, every matrix row
 holds at its real enforcement boundary, all three escaped findings are resolved
 with process corrections that are enforced by tests rather than by intent, and no

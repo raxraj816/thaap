@@ -24,12 +24,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -81,14 +84,19 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
         otherAnalyst = scenario.operator(merchant, "bulk-concurrency-other", "ANALYST");
     }
 
-    @Test
-    void aBulkSelfAssignAndAConcurrentSingleCaseAssignToOperatorConvergeWithoutDeadlockOrDuplicateEffect()
+    @ParameterizedTest
+    @CsvSource({"true,ANALYST", "false,ANALYST", "true,RISK_MANAGER", "false,RISK_MANAGER"})
+    void aBulkSelfAssignAndAConcurrentSingleCaseAssignToOperatorConvergeWithoutDeadlockOrDuplicateEffect(
+            boolean bulkFirst, String bulkRole)
             throws Exception {
         Payment reviewed = scenario.reviewedPayment(merchant, "bulk-concurrency-race");
         UUID reviewCaseId = reviewed.reviewCaseId();
 
         UUID requestId = UUID.randomUUID();
-        store.insertRequest(requestId, merchant.id(), analyst.id(),
+        Operator bulkActor = bulkRole.equals("RISK_MANAGER")
+                ? scenario.operator(merchant, "bulk-concurrency-manager-contender", "RISK_MANAGER")
+                : analyst;
+        store.insertRequest(requestId, merchant.id(), bulkActor.id(),
                 ReviewBulkActionCode.ASSIGN_TO_SELF, null, sixtyFourChars("race-idem"),
                 sixtyFourChars("race-digest"), 1, DatabaseInstant.now());
         store.insertItem(UUID.randomUUID(), merchant.id(), requestId, reviewCaseId, 0, 1,
@@ -112,18 +120,37 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
                     }));
             assertThat(rowLocked.await(5, TimeUnit.SECONDS)).isTrue();
 
-            Future<?> bulkContender = executor.submit(() -> itemExecutor.execute(item));
-            Future<Integer> singleCaseContender = executor.submit(() -> mockMvc.perform(
+            Callable<Void> bulkAssignment = () -> {
+                itemExecutor.execute(item);
+                return null;
+            };
+            Callable<Integer> singleAssignment = () -> mockMvc.perform(
                     post("/risk/reviews/{id}/assign", reviewCaseId)
                             .header(RISK_OPERATOR_HEADER, manager.credential())
                             .header(IDEMPOTENCY_HEADER, "race-single-case-assign")
                             .contentType(APPLICATION_JSON)
                             .content("{\"operatorId\":\"" + otherAnalyst.id()
                                     + "\",\"expectedAssignmentVersion\":0}"))
-                    .andReturn().getResponse().getStatus());
+                    .andReturn().getResponse().getStatus();
 
-            awaitDatabaseLockWait("manual_review_cases");
-            releaseHolder.countDown();
+            Future<?> bulkContender;
+            Future<Integer> singleCaseContender;
+            try {
+                // Observe the first contender queued before starting the second. Distinct
+                // actor/target rows keep this contention on the review row, not actor locks.
+                if (bulkFirst) {
+                    bulkContender = executor.submit(bulkAssignment);
+                    awaitDatabaseLockWait("manual_review_cases");
+                    singleCaseContender = executor.submit(singleAssignment);
+                } else {
+                    singleCaseContender = executor.submit(singleAssignment);
+                    awaitDatabaseLockWait("manual_review_cases");
+                    bulkContender = executor.submit(bulkAssignment);
+                }
+                awaitDatabaseLockWait("manual_review_cases", 2);
+            } finally {
+                releaseHolder.countDown();
+            }
 
             holder.get(5, TimeUnit.SECONDS);
             bulkContender.get(5, TimeUnit.SECONDS);
@@ -142,23 +169,26 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
                     + "proving the two concurrent writers never both applied their effect")
                     .hasSize(1);
             UUID winner = assignedTo.getFirst();
-            assertThat(winner).isIn(analyst.id(), otherAnalyst.id());
+            assertThat(winner).isEqualTo(bulkFirst ? bulkActor.id() : otherAnalyst.id());
             assertThat(after.getAssignedOperatorId()).isEqualTo(winner);
 
             String bulkItemStatus = jdbcTemplate.queryForObject("""
                     SELECT lifecycle_status FROM review_bulk_action_items
                     WHERE bulk_action_request_id = ?
                     """, String.class, requestId);
-            // Exactly one writer applied its effect and the other was refused. Which one wins is
-            // a scheduling detail; that they cannot both win is the invariant. The loser's
-            // refusal is asserted as a paired outcome so a silent double-apply cannot pass.
-            if (winner.equals(analyst.id())) {
+            // Exact paired results preserve both version fencing and role-specific privacy.
+            if (bulkFirst) {
                 assertThat(bulkItemStatus).isEqualTo("SUCCEEDED");
                 assertThat(singleCaseStatus).isEqualTo(409);
             } else {
-                assertThat(bulkItemStatus).isEqualTo("STALE");
+                assertThat(bulkItemStatus).isEqualTo(bulkRole.equals("RISK_MANAGER") ? "STALE" : "NOT_FOUND");
                 assertThat(singleCaseStatus).isEqualTo(200);
             }
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT failure_code FROM review_bulk_action_items
+                    WHERE bulk_action_request_id = ?
+                    """, String.class, requestId)).isEqualTo(bulkFirst ? null
+                    : bulkRole.equals("RISK_MANAGER") ? "assignment_version_stale" : "review_or_operator_not_found");
         }
     }
 
@@ -466,6 +496,10 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
     }
 
     private void awaitDatabaseLockWait(String relation) throws InterruptedException {
+        awaitDatabaseLockWait(relation, 1);
+    }
+
+    private void awaitDatabaseLockWait(String relation, int minimumWaiters) throws InterruptedException {
         Instant deadline = DatabaseInstant.now().plusSeconds(5);
         while (DatabaseInstant.now().isBefore(deadline)) {
             Integer waiting = jdbcTemplate.queryForObject("""
@@ -473,15 +507,15 @@ class ReviewBulkActionConcurrencyPostgreSqlTests extends ReviewBulkPostgreSqlTes
                     WHERE datname = current_database() AND wait_event_type = 'Lock'
                       AND query ILIKE ?
                     """, Integer.class, "%" + relation + "%");
-            if (waiting != null && waiting > 0) return;
+            if (waiting != null && waiting >= minimumWaiters) return;
             Thread.sleep(25);
         }
-        throw new AssertionError("Expected a PostgreSQL lock wait on " + relation);
+        throw new AssertionError("Expected " + minimumWaiters + " PostgreSQL lock wait(s) on " + relation);
     }
 
     private static void await(CountDownLatch latch) {
         try {
-            if (!latch.await(5, TimeUnit.SECONDS)) {
+            if (!latch.await(15, TimeUnit.SECONDS)) {
                 throw new AssertionError("Timed out waiting for deterministic release");
             }
         } catch (InterruptedException exception) {

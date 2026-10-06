@@ -40,7 +40,7 @@ def postgres_scalar(query: str) -> str:
     for prohibited in (" insert ", " update ", " delete ", " alter ", " drop ", " truncate "):
         if prohibited in f" {normalized} ":
             raise DemoFailure("Dispute reconciliation rejected mutating SQL")
-    command = ["docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+    command = ["docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
                "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
                "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query]
     try:

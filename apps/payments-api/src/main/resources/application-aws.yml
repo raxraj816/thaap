@@ -1,0 +1,63 @@
+# Deployed runtime profile.
+#
+# Activated with SPRING_PROFILES_ACTIVE=aws on the ECS task definition. It is deliberately short.
+# Almost everything a deployment needs to change is already an environment variable in
+# application.yml, and re-stating a value here would create a second place for one setting to
+# live — which is how a configuration file comes to describe a system that no longer exists.
+#
+# What belongs here is only what is true of a *deployed* instance and false of a laptop.
+
+thaap:
+  runtime:
+    # Turns on RuntimeSecretContractGate, which refuses to start when any of the eight
+    # security-relevant secrets is missing, weak, reused, or still set to a value published in
+    # this repository. It runs before the first bean is created, so an instance that must not run
+    # never opens a database connection or takes the Flyway lock.
+    #
+    # This is the whole reason the profile exists. Everything below it is supporting detail.
+    secret-contract-enforced: true
+
+server:
+  # THAAP sits behind an Application Load Balancer, so the socket the application sees belongs to
+  # the load balancer rather than to the caller. Without this, every request appears to originate
+  # from one address, and two things quietly stop working:
+  #
+  #   - per-client-IP rate limits (THAAP_RATE_LIMIT_*_CLIENT_IP) collapse into a single bucket,
+  #     so one abusive caller either throttles everybody or nobody
+  #   - per-IP fraud velocity signals become a constant, which is worse than absent: the feature
+  #     is still computed, still recorded in the snapshot, and now means nothing
+  #
+  # SECURITY DEPENDENCY, and it is not optional: `framework` trusts X-Forwarded-For from whoever
+  # sent it. The task security group admits the ALB alone AND the ALB requires the CloudFront
+  # origin secret AND the viewer-request function strips forged Forwarded/X-Forwarded metadata
+  # and rebuilds the client IP from CloudFront's viewer socket. A security group alone cannot
+  # sanitize a forged header sent through a legitimate proxy. If any boundary is removed, a caller can choose its
+  # own client IP and defeat both controls above. Chapter 63 owns that security group, and this
+  # setting is one of the things that makes it load-bearing rather than merely tidy.
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    # Deployed logs go to stdout and from there to CloudWatch, where volume is a cost and a
+    # signal-to-noise problem rather than a scrollback inconvenience.
+    root: INFO
+    com.thaap.payments: INFO
+
+# Deliberately not set here, with reasons, because the absences are the reviewable part:
+#
+#   spring.datasource.*     already environment-driven in application.yml; the aws profile has
+#                           nothing to add that Secrets Manager injection does not supply
+#   thaap.webhook.execution-enabled
+#                           left at its `false` default. Enabling it makes
+#                           THAAP_WEBHOOK_ALLOWED_HOSTS a live SSRF boundary against the VPC and
+#                           the instance metadata endpoint, and that must be verified against the
+#                           deployed network before it is turned on — not decided by a default in
+#                           a file
+#   management.endpoint.health.show-details
+#                           already `never`. Readiness aggregates sixteen indicators whose names
+#                           describe internal dependencies; the aggregate answer is public, the
+#                           breakdown is not
+#   springdoc.api-docs.enabled
+#                           left enabled. The published contract is a product surface, and the
+#                           deployment is private and invite-only. Opening the URL is a separate
+#                           decision that owns this one

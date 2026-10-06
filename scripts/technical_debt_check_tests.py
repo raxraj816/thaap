@@ -8,6 +8,7 @@ import datetime as dt
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_PATH = pathlib.Path(__file__).with_name("technical-debt-check.py")
@@ -48,6 +49,27 @@ def valid_register_entry(status: str = "OPEN", evidence: str = "Pending") -> str
 
 
 class TechnicalDebtCheckTests(unittest.TestCase):
+
+    def test_default_cli_and_validation_use_india_calendar_at_actual_ci_failure(self):
+        import review_calendar
+        entries, errors = checker.parse_register(valid_register_entry().replace("2026-06-27", "2026-10-06"))
+        self.assertEqual([], errors)
+        with patch.object(review_calendar, "datetime") as clock:
+            clock.now.return_value = dt.datetime(2026, 10, 5, 21, 13, tzinfo=dt.timezone.utc)
+            self.assertEqual(dt.date(2026, 10, 6), checker.parse_args([]).as_of)
+            self.assertEqual([], checker.validate_entries(entries, "TD-0001"))
+            self.assertEqual(REVIEW_DATE, checker.parse_args(["--as-of", "2026-06-27"]).as_of)
+
+    def test_calendar_fix_preserves_future_and_exact_staleness_boundary(self):
+        entries, _ = checker.parse_register(valid_register_entry())
+        for age, expected in ((-1, "in the future"), (0, None), (35, None),
+                              (36, "reviewed within 35 days")):
+            with self.subTest(age=age):
+                errors = checker.validate_entries(entries, "TD-0001", REVIEW_DATE + dt.timedelta(days=age))
+                if expected:
+                    self.assertTrue(any(expected in error for error in errors), errors)
+                else:
+                    self.assertEqual([], errors)
 
     def test_valid_open_debt_passes(self):
         entries, parse_errors = checker.parse_register(valid_register_entry())

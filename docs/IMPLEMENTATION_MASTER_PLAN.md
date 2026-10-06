@@ -2,6 +2,32 @@
 
 Date: 2026-05-29
 
+October 6 release audit: Phase 6 remains complete. The in-progress Phase 6.5 deployment
+interlude is tracked by `docs/PHASE_6_5_DETAILED_IMPLEMENTATION_PLAN.md`; authored Terraform
+is not an applied deployment. `ER-0109`–`ER-0117` track repaired local release/demo boundaries
+in `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md` and its closure
+dossier. Chapter 63 live AWS proof and Chapters 64–66 hosted/operations/integrated proof
+remain open; `ER-0106` remains in progress. This audit introduces no accepted deferred debt
+and does not authorize Git publication, paid infrastructure, or roadmap renumbering.
+
+## Local Release Recovery Slice
+
+1. Chapter 60R: Local Release Boundary Repair.
+
+   Status: complete. ER-0109–ER-0117 local repairs retain their exact product proof;
+   ER-0118 adds current-scope readiness enforcement and corrects the former Chapter 66
+   coordinate. ER-0119 aligns default governance review dates with the India calendar on
+   UTC CI hosts without weakening future-date or stale-review checks.
+   ER-0120 forces both role/order assignment-contention proof partitions while retaining
+   analyst non-disclosure and manager version-conflict behavior.
+   Matrix: `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md`.
+   Dossier: `docs/reviews/CHAPTER_60R_CLOSURE_DOSSIER.md`.
+   This recovery slice may close only its local/configuration promises. Phase 6.5 Chapter
+   63 remains AUTHORED OPEN; Chapters 64–66 and ER-0106 remain open for actual AWS
+   deployment, exposure, hosted journeys and operations proof. No new debt accepted.
+   Owner direction on 2026-10-06 defers deployment until launch readiness and explicit
+   authorization. This is a launch sequencing decision, not accepted implementation debt.
+
 This is the single source of truth for implementation. The files under `docs/references/` remain useful references, but when implementation decisions differ, this master plan wins.
 
 ## 1. Product Mission
@@ -3570,8 +3596,8 @@ Vision owners: `VP-004`, `VP-005`, and `VP-016`.
 Detailed source of truth:
 [`PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md`](PHASE_6_DETAILED_IMPLEMENTATION_PLAN.md).
 
-Current state: **FOUNDER CONFIRMED 2026-08-02; IMPLEMENTATION AUTHORIZED, NOT
-STARTED.** Phase
+Current state: **FOUNDER CONFIRMED 2026-08-02; IMPLEMENTATION COMPLETE AND
+PROVEN.** Phase
 5 / Chapter 52 is complete and merged, so the entry gate is satisfied. The
 detailed plan proposes one coherent promise freeze across source-reconciled
 payment investigation, complete deterministic decision explanation, canonical
@@ -3785,15 +3811,14 @@ Vision owners: `VP-002`, `VP-007`, and `VP-008`.
 Entry gate: Phase 5 must provide a point-in-time dataset manifest and Phase 6
 must expose model explanation/failure states before active model influence.
 
-Inherited debt: `TD-0007` and `TD-0008` are `OPEN` and owned by the first Phase 7
-chapter. Phase 5 froze per-concern proof suites for observability, privacy,
-restart, deployment, authorization and forced-ordering concurrency, then
-implemented one contract class plus a `*PostgreSqlTests` subclass per domain; the
-seventeen rows under `TD-0007` and the six Chapter 52 cross-cutting rows under
-`TD-0008` name suites that were never written. Projection rebuild and offline
-replay are the two Phase 5 outputs Phase 7 consumes as trusted model inputs, and
-both carry unproven restart, lease-fencing and observability rows, so the debt is
-paid before that dependency is taken rather than after.
+Inherited proof debt: `TD-0007` and `TD-0008` are `RESOLVED`, as recorded in
+`docs/TECHNICAL_DEBT_REGISTER.md`. The seventeen per-concern rows and six
+Chapter 52 cross-cutting rows now name implemented suites, including real
+process-restart, lease-fencing, privacy, observability and producer-version proof.
+`scripts/phase-closure-check.py --phase-5` exits 0. Phase 7 inherits those proofs
+for projection rebuild and offline replay; it does not reopen resolved debt or
+mistake the replay substrate for trained-model governance. The 2026-10-06
+evidence-and-ownership review reconciles this entry under `ER-0108`.
 
 Named owner slices:
 

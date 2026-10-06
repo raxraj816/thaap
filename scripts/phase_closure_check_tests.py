@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import pathlib
 import sys
 import tempfile
@@ -191,6 +192,72 @@ if "MALFORMED" in matrix or "PENDING" in matrix or "PENDING" in dossier:
             self.create_validators(root)
             with mock.patch.object(checker, "ROOT", root):
                 errors = checker.validate_phase(("36", "43R"))
+        self.assertEqual([], errors)
+
+    def create_phase_6_repository_evidence(self, root: pathlib.Path):
+        for relative_path in checker.PHASE_6_PRODUCT_ARTIFACTS:
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("product evidence\n", encoding="utf-8")
+        for relative_path in checker.PHASE_6_COMPLETION_SOURCES:
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(checker.PHASE_6_COMPLETION_MARKER + "\n", encoding="utf-8")
+        for relative in (
+                "docs/learning/daily/2026-08-06.md",
+                "docs/learning/daily/2026-08-06-deep-dive.md",
+                "docs/learning/weekly/2026-W32.md"):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(checker.PHASE_6_COMPLETION_MARKER + "\n", encoding="utf-8")
+        contract = root / "openapi/thaap-public-api-2026-08-01.yaml"
+        stamp = root / "clients/python/thaap_sdk/thaap_sdk/generated/CONTRACT_SHA256"
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(hashlib.sha256(contract.read_bytes()).hexdigest() + "\n",
+                         encoding="utf-8")
+
+    def test_phase_6_rejects_stale_claim_across_markdown_line_breaks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.create_phase_6_repository_evidence(root)
+            source = root / "docs/IMPLEMENTATION_MASTER_PLAN.md"
+            for separator in (" ", "\n", "\r\n", "\n\n", "\t"):
+                with self.subTest(separator=repr(separator)):
+                    source.write_text(checker.PHASE_6_COMPLETION_MARKER
+                                      + "\nIMPLEMENTATION AUTHORIZED, NOT"
+                                      + separator + "STARTED.\n", encoding="utf-8")
+                    with mock.patch.object(checker, "ROOT", root):
+                        errors = checker.validate_phase_6_repository()
+                    self.assertTrue(any("stale Phase 6 claim" in error for error in errors))
+
+    def test_phase_6_rejects_contradictory_inherited_dossier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.create_phase_6_repository_evidence(root)
+            dossier = root / "docs/reviews/CHAPTER_55_CLOSURE_DOSSIER.md"
+            dossier.parent.mkdir(parents=True)
+            dossier.write_text("Phase 6 as a whole\nremains open", encoding="utf-8")
+            with mock.patch.object(checker, "ROOT", root):
+                errors = checker.validate_phase_6_repository()
+        self.assertTrue(any(str(dossier) in error and "stale Phase 6 claim" in error
+                            for error in errors))
+
+    def test_phase_6_rejects_sdk_contract_digest_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.create_phase_6_repository_evidence(root)
+            stamp = root / "clients/python/thaap_sdk/thaap_sdk/generated/CONTRACT_SHA256"
+            stamp.write_text("0" * 64 + "\n", encoding="utf-8")
+            with mock.patch.object(checker, "ROOT", root):
+                errors = checker.validate_phase_6_repository()
+        self.assertTrue(any("regenerate the SDK" in error for error in errors))
+
+    def test_phase_6_accepts_reconciled_repository_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.create_phase_6_repository_evidence(root)
+            with mock.patch.object(checker, "ROOT", root):
+                errors = checker.validate_phase_6_repository()
         self.assertEqual([], errors)
 
 

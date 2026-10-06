@@ -189,3 +189,31 @@ processor.
 | Observability and recovery | C59-OBS-001 and C59-RES-001 |
 | Completion governance | C59-OPS-001 |
 | Phase boundary | C59-SCP-001 |
+
+## 2026-10-06 Closure Maintenance — ER-0107
+
+`C59-OPS-001` was reopened for stale completion prose and a missing readiness
+invocation. Its promise remains unchanged: inherited evidence and current status
+must agree. The original `PRE_IMPLEMENTATION` provenance above belongs to the
+2026-08-02 freeze, not to this maintenance note, which was recorded after diagnosis
+and the initial repair. No new runtime promise or migration was introduced.
+
+The representation family now covers space, LF, CRLF, paragraph and tab boundaries;
+the evidence family covers a contradictory inherited dossier, a reconciled
+repository and an SDK digest mismatch. Readiness proof verifies exact Phase 6
+invocation and nonzero failure propagation. See `scripts/phase_closure_check_tests.py`,
+`scripts/commit_readiness_check_tests.py` and `ER-0107`. The focused 19-test run and
+real Phase 6 aggregate closure each exited 0. These are governance proofs, not a
+replacement for the dated PostgreSQL, browser and SDK journey evidence above.
+
+The review boundary was subsequently reopened for `ER-0108`: prerequisite and
+debt prose must describe actual capability, not planning-era state. The dated
+all-entry vision review records semantic dispositions, retains all existing
+statuses/owners and corrects the replay/model/debt contradictions. Vision and
+aggregate Phases 4.5, 5 and 6 exited 0; no new runtime promise was introduced.
+
+Final 2026-10-06 deep-dive readiness exited 0 with this matrix and the Chapter 59
+dossier named explicitly: 1457 backend tests, zero failures/errors/skips, and 257
+repository Python tests. Independent UI tests (86) and production build exited 0.
+Original browser/public-demo evidence remains dated; the maintenance change makes
+no fresh demo claim. `C59-OPS-001` remains `PASS` on the reconciled evidence.

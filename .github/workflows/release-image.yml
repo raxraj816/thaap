@@ -1,0 +1,139 @@
+name: Release image
+
+# Builds the release artifacts, proves they can state what they are, and publishes them under both
+# names a deployment needs: the semantic version humans quote, and the commit SHA a task definition
+# pins.
+#
+# The proof runs before the push, not after. An image that cannot say which commit produced it is
+# not a release candidate, and discovering that from a registry is discovering it too late.
+#
+# On the registry: the ECR repository is created by Terraform in Chapter 63, which needs an AWS
+# account that does not exist yet. Rather than commit a workflow that references a registry nobody
+# can reach — and which would therefore fail on every run until then, training everyone to ignore
+# it — the publish step is conditional on the account being configured, and says plainly in the run
+# summary when it is not. The build-and-prove half runs unconditionally and is the half that gates.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push the built images to ECR. Requires AWS_ECR_REGISTRY and AWS_RELEASE_ROLE_ARN."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  # Required for the OIDC token exchange that gives this workflow short-lived AWS credentials.
+  # There are no long-lived AWS keys in this repository's secrets, and there should not be.
+  id-token: write
+
+jobs:
+  release-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Resolve the release coordinates
+        id: coordinates
+        run: |
+          version="$(bash scripts/project-version.sh)"
+          commit="$(git rev-parse HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version at $commit"
+
+      - name: Confirm the tag and the project version agree
+        # A tag is a claim about what is inside the artifact. `git tag v1.0.1` on a tree whose pom
+        # still says 1.0.0 produces a release whose name and whose contents disagree, and every
+        # later conversation about which one is real is a conversation this check prevents.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          project_version="${{ steps.coordinates.outputs.version }}"
+          if [[ "$tag_version" != "$project_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME claims $tag_version but pom.xml declares $project_version" >&2
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches the declared project version"
+
+      - name: Set up ARM64 build emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Prove the images can state what they are
+        # ECS uses ARM64. GitHub's runner is amd64, so configure emulation explicitly.
+        # Builds both images with the release coordinates and asserts labels, build-info, dual
+        # tagging and the changelog entry. --allow-dirty is not passed: a release must be built
+        # from exactly the committed tree.
+        run: bash scripts/release-identity-check.sh
+
+      - name: Prove the images carry no secret and no toolchain
+        run: |
+          bash scripts/image-content-check.sh \
+            "thaap/payments-api:${{ steps.coordinates.outputs.version }}" \
+            "thaap/analyst-dashboard-ui:${{ steps.coordinates.outputs.version }}"
+
+      - name: Decide whether a registry exists to publish to
+        id: registry
+        env:
+          ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+          RELEASE_ROLE_ARN: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish }}" != "true" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Images proven, publishing explicitly disabled by the operator." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -n "$ECR_REGISTRY" && -n "$RELEASE_ROLE_ARN" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Images built and proven, not published"
+              echo
+              echo "\`AWS_ECR_REGISTRY\` and \`AWS_RELEASE_ROLE_ARN\` are not configured, so there"
+              echo "is no registry to push to. The ECR repository is created by Terraform in"
+              echo "Chapter 63. Every identity and content proof above ran against the real images."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Assume the release role
+        if: steps.registry.outputs.publish == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: steps.registry.outputs.publish == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push each image under its version and its commit
+        if: steps.registry.outputs.publish == 'true'
+        env:
+          ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+          VERSION: ${{ steps.coordinates.outputs.version }}
+          COMMIT: ${{ steps.coordinates.outputs.commit }}
+        run: |
+          set -euo pipefail
+          for image in payments-api analyst-dashboard-ui; do
+            for reference in "$VERSION" "$COMMIT"; do
+              docker tag "thaap/$image:$VERSION" "$ECR_REGISTRY/thaap-$image:$reference"
+              docker push "$ECR_REGISTRY/thaap-$image:$reference"
+            done
+          done
+          {
+            echo "### Published"
+            echo
+            echo "| Image | Version | Commit |"
+            echo "|---|---|---|"
+            echo "| thaap-payments-api | \`$VERSION\` | \`$COMMIT\` |"
+            echo "| thaap-analyst-dashboard-ui | \`$VERSION\` | \`$COMMIT\` |"
+            echo
+            echo "Deployments reference the commit; humans reference the version."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -49,14 +49,14 @@ def postgres_scalar(query: str) -> str:
         if prohibited in f" {normalized} ":
             raise DemoFailure("Card-testing incident and rate limit reconciliation rejected mutating SQL")
     return run_argv([
-        "docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+        "docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
         "-U", os.environ.get("THAAP_POSTGRES_USER", "thaap"),
         "-d", os.environ.get("THAAP_POSTGRES_DB", "thaap_payments"), "-c", query,
     ])
 
 
 def redis_rate_limit_keys() -> list[str]:
-    output = run_argv(["docker", "exec", "thaap-redis", "redis-cli", "--scan",
+    output = run_argv(["docker", "exec", os.environ.get("THAAP_REDIS_CONTAINER", "thaap-local-redis-1"), "redis-cli", "--scan",
                        "--pattern", "thaap:rate-limit:v1:*"])
     keys = [line for line in output.splitlines() if line]
     if any(not re.fullmatch(r"thaap:rate-limit:v1:[0-9a-f]{64}", key) for key in keys):

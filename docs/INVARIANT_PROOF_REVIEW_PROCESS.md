@@ -32,6 +32,28 @@ The correction is a proof system, not another reminder.
 Create `docs/reviews/CHAPTER_N_INVARIANT_PROOF_MATRIX.md` before implementation
 for every non-trivial chapter. Start it with `Scope status: DRAFT` and
 `Review status: IN_PROGRESS`. Record `Matrix provenance: PRE_IMPLEMENTATION`.
+
+**Commit it in that state.** Every row starts at `Status: PENDING`, and the three
+review verdicts and the escaped-review assessment start at `PENDING` too; the
+checker accepts all of them while `Review status: IN_PROGRESS`. `Promise freeze`
+and `Failure inventory` are required from the first commit in every state,
+because they are inputs to drafting rather than outputs of implementation — a
+matrix drafted without them was reconstructed from something, and the only thing
+available to reconstruct from is the code.
+
+A `PENDING` row names the proof it intends to build, so that proof does not have
+to exist yet; the `ER-0099` rule that a row must name an artifact that exists
+applies from the moment the row closes. `PENDING` is rejected at phase closure
+alongside `PARTIAL`, a matrix holding one may not claim `Review status:
+VERIFIED`, and `scripts/chapter-closure-check.py` refuses any dossier whose
+matrix is still `IN_PROGRESS` or still holds an unproven row.
+
+This exists because it did not. Until `ER-0105` the checker had no way to express
+a frozen, unproven matrix: rows had to be `PASS` or `PARTIAL` and every verdict
+had to be `PASS`. A genuinely pre-implementation matrix therefore could not be
+committed, so it lived in an uncommitted working tree where nobody could review
+it and where a matrix written afterwards was indistinguishable from one written
+first — the precise substitution this process forbids.
 Chapter 19 is the one explicitly recorded legacy recovery case and uses
 `RETROACTIVE_RECOVERY`; that label is evidence of the process failure, not an
 exception future chapters may copy. The matrix must cover these lenses:
@@ -256,6 +278,21 @@ chapter-level claim and must contain:
 
 The dossier does not replace the matrix. The matrix is claim-to-proof
 traceability; the dossier is the integrated release argument.
+
+## Current Readiness Registration
+
+`docs/reviews/CURRENT_READINESS_SCOPE.json` registers the learning day, current matrix
+and current closure dossier. Every readiness invocation—including CI and pre-push with
+no selectors—resolves and validates that pair. Explicit selectors must match it; use
+standalone chapter/phase checkers to inspect historical proof rather than selecting old
+proof as current readiness. Missing, duplicate-key, noncanonical, symlinked or mismatched
+registrations fail closed. The ordinary gate may no longer skip closure as "trivial".
+
+A recovery coordinate such as 60R may close a separately frozen local repair while its
+parent deployment phase stays open. Its own README/master-plan status must agree, every
+local row must PASS, and its dossier must recommend MERGE for that scope. Renaming is not
+proof: all integrated deployment promises remain in their original matrix, and no local
+recovery claim may say that an unapplied AWS topology or Chapter 66 is complete.
 
 ## Reviewer Handoff
 

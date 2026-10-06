@@ -85,7 +85,7 @@ def postgres_scalar(query: str) -> str:
             raise DemoFailure("Review and label reconciliation rejected mutating SQL")
     user = os.environ.get("THAAP_POSTGRES_USER", "thaap")
     database = os.environ.get("THAAP_POSTGRES_DB", "thaap_payments")
-    command = ["docker", "exec", "-i", "thaap-postgres", "psql", "-X", "-A", "-t",
+    command = ["docker", "exec", "-i", os.environ.get("THAAP_POSTGRES_CONTAINER", "thaap-local-postgres-1"), "psql", "-X", "-A", "-t",
                "-U", user, "-d", database, "-c", query]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
