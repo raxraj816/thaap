@@ -2030,3 +2030,20 @@ Allowed root-cause categories are `MISSING_PROMISE`,
 - Process correction: Test default clock policy across UTC and India date boundaries, including both governance checkers, future/stale refusal and historical replay; never backdate evidence to satisfy a runner.
 - Primary DRI: Founding Staff Engineer
 - Last reviewed: 2026-10-06
+
+## ER-0120
+
+- Status: RESOLVED
+- Severity: P1
+- Chapter: 60R
+- Category: WEAK_PROOF
+- Frozen promise affected: YES
+- Date found: 2026-10-06
+- Escaped gate: Push run 37376437496/job 111986472807; PR merge run and both randomized runs passed.
+- Invariant: Assignment contention preserves one mutation/version/event and role-specific non-disclosure in both commit orders.
+- Finding: The racing analyst item expected STALE when the single-case writer won, contradicting the existing deterministic analyst NOT_FOUND security proof. The test observed only one waiter and left the losing ordering to scheduler chance.
+- Why prior review missed it: The race usually took the bulk-wins branch locally; existing role-specific losing proofs were not reconciled with the racing assertion.
+- Resolution evidence: ReviewBulkActionConcurrencyPostgreSqlTests forces four analyst/manager × bulk-first/single-first lock orders, observes both contenders waiting on PostgreSQL, and asserts the exact winner, one assignment event/version, paired API/item outcomes and role-specific failure code. Ten focused tests pass (exit 0). Restoring the former universal STALE assertion deterministically reproduces exactly the analyst/single-first failure among four cases (exit 1); the correction is restored before full readiness. Production permissions and nondisclosure are unchanged.
+- Process correction: Force both lock orders, observe both waiters, and assert role-specific paired API/item outcomes and durable postconditions instead of certifying the branch that happened to win.
+- Primary DRI: Founding Staff Engineer
+- Last reviewed: 2026-10-06

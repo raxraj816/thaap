@@ -30,6 +30,11 @@ month/year/leap boundaries, same-day/future/stale partitions, CLI/default-valida
 and explicit historical replay. A timezone repair must not waive future dates or the 35-day
 review limit, and must not change payment/event-time UTC semantics.
 
+Scope reopened before ER-0120 implementation: bulk/single assignment contention must prove
+both commit orders and actor-role partitions on PostgreSQL. Managers lose as STALE; analysts
+lose non-disclosingly as NOT_FOUND. Both contenders must be observed waiting, with exactly
+one version increment/event and no stolen assignment. Do not relax production authorization.
+
 Scope reopened on 2026-10-06 before the ER-0110 repair: exact demo catalogue assertions
 must reflect the current allowlisted typed features, while still rejecting missing/extra features,
 wrong values and post-decision observations. This is a repair of proof, not a feature-schema change.
@@ -72,6 +77,7 @@ under the same Docker memory ceiling. This is not an AWS sizing/HA certification
 - Failure sequence: A packaging repair changes application behavior or skips a production-database proof.
 - Implementation: Limit changes to release/deployment boundaries, configuration and proof artifacts.
 - Proof: Full backend suite against available Docker/PostgreSQL; real container stack and payment-risk demo.
+- Assignment contention repair: ER-0120 forces analyst/manager and bulk-first/single-first partitions, observing one then two PostgreSQL lock waiters. Each exact winner, version 1, single event, paired HTTP/item status and failure code is asserted. Ten focused tests pass; restoring the erroneous universal STALE expectation deterministically fails the analyst/single-first partition (four cases, exactly one failure, exit 1), then the correction is restored before full readiness.
 - Adversarial evidence: Backend 1457/0 failures/0 errors/0 skips; real fresh seven-journey entry point exits 0 with default policy and public mutation/read-only reconciliation.
 - Status: PASS
 

@@ -225,3 +225,25 @@ tests (zero failures/errors/skips) and 305 Python tests. Local log:
 `/tmp/thaap-pr38-full-utc-readiness.log`. Existing no-publication statements above describe
 earlier implementation handoffs; the owner explicitly authorized this PR repair's commit/push.
 The new remote run must independently certify hosted CI; a local exit 0 is not a remote pass.
+
+## Assignment Contention Proof Repair
+
+ER-0120 records the remaining push-only failure in run 37376437496/job 111986472807.
+The matching merge run, both randomized runs, real release journeys and Terraform passed;
+one racing analyst expectation nevertheless contradicted the established privacy contract.
+The correct loser outcome is NOT_FOUND for an analyst and STALE for a manager, not a
+production permission change. Freeze and reopening preceded repair implementation.
+The test now controls both lock arrival orders for both roles, uses disjoint actor rows,
+observes two blocked review-row contenders and asserts exact winner, one event/version,
+paired API/item outcome and failure code. Holder release is in finally; timeout remains bounded.
+Ten focused PostgreSQL tests pass, exit 0. A later negative control restoring universal STALE
+fails exactly the analyst/single-first partition, exit 1, proving the escaped path is forced.
+The correction is restored before full readiness. Traceability and separate hostile review
+reconcile this with Chapter 55's security partitions. No new debt or deployment claim.
+The owner explicitly authorized this correction's commit/push. Full readiness is rerun and
+remote results remain independent; earlier green runs are not proof of this new commit.
+
+Final named UTC readiness with deep-dive enforcement exited 0 after the correction:
+1460 backend tests (zero failures/errors/skips) and 305 Python tests. Reproducible invocation
+is the full named gate above; local log is `/tmp/thaap-assignment-full-readiness.log`.
+The extra three backend cases are the explicit role/order partitions, not skipped tests.

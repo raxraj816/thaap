@@ -18,6 +18,8 @@ and does not authorize Git publication, paid infrastructure, or roadmap renumber
    ER-0118 adds current-scope readiness enforcement and corrects the former Chapter 66
    coordinate. ER-0119 aligns default governance review dates with the India calendar on
    UTC CI hosts without weakening future-date or stale-review checks.
+   ER-0120 forces both role/order assignment-contention proof partitions while retaining
+   analyst non-disclosure and manager version-conflict behavior.
    Matrix: `docs/reviews/CHAPTER_60R_INVARIANT_PROOF_MATRIX.md`.
    Dossier: `docs/reviews/CHAPTER_60R_CLOSURE_DOSSIER.md`.
    This recovery slice may close only its local/configuration promises. Phase 6.5 Chapter
