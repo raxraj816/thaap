@@ -30,6 +30,26 @@ and does not authorize Git publication, paid infrastructure, or roadmap renumber
 
 This is the single source of truth for implementation. The files under `docs/references/` remain useful references, but when implementation decisions differ, this master plan wins.
 
+## Next Local Product Build: Trust And Agent Runtime
+
+Planning update, 7 October 2026: the
+[consolidated product/implementation handoff](research/THAAP_PRODUCT_IMPLEMENTATION_HANDOFF.md)
+records the next local product direction and HD-01–HD-13 design decisions.
+Begin with supplier instruction/evidence truth, complete the supplier flow with
+PostgreSQL, temporal Neo4j, OPA, UI, permits, fake execution and replay, then
+extend the shared core with agent authority. Personal Financial Agent Twins have
+a distinct bounded simulation/fidelity experiment; the agent is per real person,
+not merely a generic role profile.
+
+This is planned new work, not a completed chapter or a change to historical V1
+card-payment promises. At kickoff, assign the next valid implementation
+coordinate, record the scope/identity ADR and exact API/schema contracts, and
+freeze the slice's matrix/failure inventory before code. Preserve accepted
+merchant isolation and card contracts. The handoff resolves research choices;
+the full 38-group/11-scenario coverage map remains mandatory. Existing hosted
+Phase 6.5 work and ER-0106 retain their status; no early live-pilot exemption,
+new accepted debt, Git publication or deployment is authorized by this update.
+
 ## 1. Product Mission
 
 Build THAAP, Threat Hunting & Adaptive Analytics for Payments, as an end-to-end payment processing and fraud detection platform for mastery of:

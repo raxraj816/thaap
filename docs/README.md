@@ -50,6 +50,10 @@ Phase 6 implementation status: COMPLETE
 
 These explain intent and structure. They should support the master plan, not override it:
 
+- [THAAP winning strategy and research synthesis](./research/THAAP_WINNING_STRATEGY.md)
+  — final October 6 recommendation, including proposed roadmap amendments;
+  not a replacement for accepted implementation contracts or completion status.
+- [October research index and preserved sources](./research/README.md)
 - [VISION.md](./VISION.md)
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [GLOSSARY.md](./GLOSSARY.md)
@@ -96,5 +100,7 @@ Use these only for background, deeper reasoning, or source traceability:
 - Put daily implementation learning notes under `learning/daily/`.
 - Put weekly public technical writing under `blog/`.
 - Put research notes under `references/research/`.
+- Keep the founder-supplied October 2026 blueprints and their strategic synthesis
+  under `research/`, with source bytes and rename history preserved in its index.
 - Put PDFs, images, exported link lists, and other source artifacts under `references/source-materials/`.
 - Do not create competing implementation plans outside the master plan.
