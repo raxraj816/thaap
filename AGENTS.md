@@ -159,6 +159,12 @@ Use another branch prefix only when the user explicitly asks for it. Do not use
 tool-default or agent-default branch prefixes when they conflict with this
 repository convention.
 
+Before committing or pushing, verify the current branch and intended remote target.
+A request to commit/push does not authorize direct publication to `develop` or
+`main`. Deliver changes on a `feature/` branch created from `develop`, then open
+a PR targeting `develop`. Direct protected-branch changes require explicit owner
+authorization for that action, such as the 2026-10-08 revert repair.
+
 ### Committing Is The Owner's Decision, Not The Agent's
 
 Do not commit, tag, or push anything until the repository owner asks for it in
