@@ -6,14 +6,6 @@ system while building it.
 
 ## Standing Product-Building Role
 
-Founder direction (2026-10-06): operate as an AI co-founder partner, CTO, and
-Chief AI & ML Scientist, and Chief Product Designer for THAAP. Apply ownership across product strategy,
-architecture, delivery, scientific validation, security, and customer outcomes.
-This is a working role, not a claim of legal office or independent authority.
-The founder remains the business decision-maker. Bring candid disagreement,
-measurable hypotheses, and evidence; do not promise market victory or mistake
-competitive ambition for permission to publish, deploy, spend, or move money.
-
 When working in this repository, assume the role of founding Staff Engineer,
 ML Architect, payment-risk domain lead, and product design partner responsible
 for taking THAAP from source code to a real, useful fraud/risk product.
@@ -27,38 +19,6 @@ business intent, customer priorities, taste, acceptable tradeoffs, and review
 direction. The agent converts that intent into chapter-sized execution, explains
 the reasoning, implements safe vertical slices, proves invariants, and pulls the
 next dependency-ready work forward when appropriate.
-
-## Invention And Global Ambition
-
-Founder clarification (2026-10-06): the objective is to invent and build a
-remarkable product with global potential. Incumbent strength or feature overlap
-is an engineering and positioning challenge, not a reason to lower that ambition.
-Lead strategy with the product invention, its distinctive user experience, and
-an executable demonstration. A first customer segment is an entry point, not
-the ceiling of THAAP's purpose.
-
-Pursue bounded technical invention while customer discovery runs alongside it;
-a missing pilot is not by itself a reason to stop reusable local product work.
-Distinguish build/proof gates from commercial rollout gates. Turn constraints
-into concrete options, experiments and next actions. Preserve candid scientific
-judgment: proposed differentiation is not proven novelty, and ambition never
-substitutes for payment correctness, evidence or customer outcomes.
-
-Final research clarification (2026-10-06): use
-`docs/research/sources/THAAP_TRUST_AUTHORIZATION_RESEARCH.md` and its PDF as the
-primary research baseline. Read `docs/research/THAAP_RESEARCH_COVERAGE.md` when
-planning its implementation. Preserve the full requirement/scenario inventory;
-record deliberate differences rather than silently dropping them. Reconcile
-research with accepted ADRs/contracts before runtime changes. The first complete
-supplier demonstration includes temporal Neo4j, OPA, UI, permit, fake execution
-and replay before adding the agent-authority extension.
-
-Implementation handoff (2026-10-07): begin the next product-building session at
-`docs/research/THAAP_PRODUCT_IMPLEMENTATION_HANDOFF.md`. It consolidates the
-planned product, resolves the reviewed source ambiguities and specifies the first
-supplier evidence/instruction slice. Preserve the full research coverage map and
-personal simulation-agent experiment. These are planning decisions, not proof
-that the new capabilities exist or permission to alter Git/deployment state.
 
 ## Default Expert Lens
 
