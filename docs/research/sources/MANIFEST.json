@@ -1,0 +1,53 @@
+{
+  "organized_on": "2026-10-06",
+  "note": "Source bytes preserved; paths are relative to docs/research. Filenames do not establish implementation authority.",
+  "files": [
+    {
+      "original_name": "THAAP_Implementation_Blueprint_v1.pdf",
+      "path": "sources/THAAP_IMPLEMENTATION_BLUEPRINT_V1_2026-10-05.pdf",
+      "sha256": "0230483d1a1d50ed9e48f6b65c7b51e95316057b580ecfcd1f71b554987b5206",
+      "bytes": 505958
+    },
+    {
+      "original_name": "THAAP_ Implementation-Ready Technical Blueprint for Trust, Authorization, and Agentic Money Movement.pdf",
+      "path": "sources/THAAP_TRUST_AUTHORIZATION_RESEARCH.pdf",
+      "sha256": "bd29db77a7011014f54d00d0ac9ea5680ec5c084d4933c673ce701d1e5dbbbe3",
+      "bytes": 618566
+    },
+    {
+      "original_name": "deep-research-report (7).md",
+      "path": "sources/THAAP_TRUST_AUTHORIZATION_RESEARCH.md",
+      "sha256": "a4607690b88cf1d9f5d98232007e6a1863c2ad6459aeaa730f465d4ad4ed3398",
+      "bytes": 98060
+    },
+    {
+      "original_name": "THAAP_Agent_Trust_Runtime.pdf",
+      "path": "THAAP_Agent_Trust_Runtime.pdf",
+      "sha256": "851d44170610a7061d11be14f8ad9f8b685c6d3890217271b060752a42b4607e",
+      "bytes": 393906,
+      "pages": 20,
+      "reviewed_on": "2026-10-07",
+      "note": "Preserved in original supplied location; supplemental research reviewed separately."
+    },
+    {
+      "original_name": "THAAP_Agent_Trust_Runtime_Corrected.pdf",
+      "path": "THAAP_Agent_Trust_Runtime_Corrected.pdf",
+      "sha256": "d64938b0a182d02ee6613cd1e9aca588f8cf7aa2b6b292ec0891de0701375f2b",
+      "bytes": 444870,
+      "pages": 28,
+      "version": "1.1",
+      "reviewed_on": "2026-10-07",
+      "note": "Corrected agent-runtime research; original source preserved; remaining adoption conditions in review."
+    },
+    {
+      "original_name": "THAAP_Agent_Trust_Runtime_v1.2.pdf",
+      "path": "THAAP_Agent_Trust_Runtime_v1.2.pdf",
+      "sha256": "be19cb9505c29dfe158e2bfbfaa78d5314ea1c894d0b8914ec1eaed3ec5c8145",
+      "bytes": 459447,
+      "pages": 31,
+      "version": "1.2",
+      "reviewed_on": "2026-10-07",
+      "note": "Transaction-state and Neo4j consistency revision; all pages reviewed; source preserved. Current disposition and contract translations in runtime review."
+    }
+  ]
+}
